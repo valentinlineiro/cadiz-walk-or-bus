@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { fileURLToPath } from 'node:url';
 // Cadiz walk-vs-bus: given a bus stop, a route, and how long it takes to
 // walk to the destination, says whether to wait for the bus or walk now.
 // Live arrival data source: Cadiz's own transit panel (77.224.241.76),
@@ -31,8 +32,6 @@ export function parseArrivals(html) {
   }
   return arrivals;
 }
-
-import { fileURLToPath } from 'node:url';
 
 async function main(stop, route, walkMinutes) {
   const url = `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`;

@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from './worker.js';
 
+const originalFetch = globalThis.fetch;
+
+test.afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
 test('GET /api returns parsed arrivals with mocked upstream', async () => {
   const html = `<table><tbody><tr><td>1</td><td>CORTADURA</td><td>3min</td></tr></tbody></table>`;
   globalThis.fetch = async () => ({ ok: true, text: async () => html });
