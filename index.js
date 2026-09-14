@@ -6,14 +6,14 @@
 // arrival board server-side when given the real internal stop/route IDs
 // (not the display line numbers).
 
-function decide(arrivals, walkMinutes) {
+export function decide(arrivals, walkMinutes) {
   if (arrivals.length === 0) return { decision: 'walk', soonest: null };
   const soonest = arrivals.reduce((a, b) => (a.minutes <= b.minutes ? a : b));
   const decision = soonest.minutes < walkMinutes ? 'bus' : 'walk';
   return { decision, soonest };
 }
 
-function parseArrivals(html) {
+export function parseArrivals(html) {
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
   const arrivals = [];
   for (const row of rows) {
@@ -31,6 +31,8 @@ function parseArrivals(html) {
   }
   return arrivals;
 }
+
+import { fileURLToPath } from 'node:url';
 
 async function main(stop, route, walkMinutes) {
   const url = `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`;
@@ -55,9 +57,7 @@ async function main(stop, route, walkMinutes) {
   console.log(`-> ${decision}.`);
 }
 
-module.exports = { parseArrivals, decide };
-
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [, , stop, route, walkMinutesArg] = process.argv;
 
   if (!stop || !route || !walkMinutesArg) {

@@ -1,6 +1,6 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { parseArrivals, decide } = require('./index.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseArrivals, decide } from './index.js';
 
 const FIXTURE_HTML = `
 <table class="tablePanel">
