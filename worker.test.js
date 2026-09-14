@@ -30,6 +30,13 @@ test('GET /api proxies upstream failure as 502', async () => {
   assert.equal(res.status, 502);
 });
 
+test('GET /api maps upstream throw to 502', async () => {
+  globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
+  const res = await worker.fetch(new Request('http://x/api?stop=1&route=2'));
+  assert.equal(res.status, 502);
+  assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
+});
+
 test('GET /api without stop/route returns 400', async () => {
   const res = await worker.fetch(new Request('http://x/api?stop=1'));
   assert.equal(res.status, 400);

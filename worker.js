@@ -40,7 +40,12 @@ async function handleFetch(request) {
     const stop = url.searchParams.get('stop');
     const route = url.searchParams.get('route');
     if (!stop || !route) return Response.json({ error: 'missing stop/route' }, { status: 400 });
-    const upstream = await globalThis.fetch(`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`);
+    let upstream;
+    try {
+      upstream = await globalThis.fetch(`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`);
+    } catch {
+      return Response.json({ error: 'upstream unreachable' }, { status: 502 });
+    }
     if (!upstream.ok) return Response.json({ error: `upstream ${upstream.status}` }, { status: 502 });
     return Response.json({ arrivals: parseArrivals(await upstream.text()) });
   }
