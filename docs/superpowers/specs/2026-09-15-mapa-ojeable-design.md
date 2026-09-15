@@ -24,4 +24,11 @@ Producto: mapa a pantalla completa para decidir andando-vs-bus en Cádiz, usable
 - Teselas OSM, Nominatim (búsqueda + respeto 1 req/s), OSRM demo (`route/v1/foot`) para andar.
 - Propios: `GET /stops` (106 paradas), `GET /api?stop=N` (stop-only).
 
+## Reglas técnicas
+- Búsqueda Nominatim solo tras pausa/submit (debounce), 1 req/s; sin búsquedas mientras escribe.
+- Carrera de peticiones: si cambia destino/parada, solo la última respuesta actualiza el estado (AbortController o request-id monotónico).
+- Estado explícito: `LOCATING | LOADING_STOPS | READY | GEOCODING | ROUTING | DECIDING | ERROR` (sin booleanos accidentales).
+- Fallback único: sin destino → paradas; sin ruta andando → Andar; sin llegada viva → Andar; si no → `decide(andar, bus)`.
+- Leaflet solo dibuja: datos en `api/`, decisión en `decision/decide()`, la UI representa.
+
 No-objetivos: favoritos/guardados, origen manual distinto del GPS, tiempo de trayecto en bus, modo offline, PWA instalable.
