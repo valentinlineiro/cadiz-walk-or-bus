@@ -40,11 +40,19 @@ function rankScore(candidate) {
   return candidate.minutes + rideMinutes(candidate) + lastMile;
 }
 
+// A bus arriving before you can physically reach the stop isn't catchable —
+// showing it as "arrives in 1'" when the walk there takes 5' is misleading,
+// not useful. Arriving exactly as it does (walkToStop === minutes) still
+// counts as making it.
+function reachable(candidate, walkToStop) {
+  return walkToStop == null || candidate.minutes >= walkToStop;
+}
+
 export function verdict(walkTotal, walkToStop, arrivals, resolveAlight) {
   if (walkTotal == null) {
     return { kind: 'walk', walkMinutes: null, walkToStop: walkToStop ?? null, bus: null };
   }
-  const candidates = filterCandidates(arrivals, resolveAlight);
+  const candidates = filterCandidates(arrivals, resolveAlight).filter((c) => reachable(c, walkToStop));
   if (candidates.length === 0) {
     return { kind: 'walk', walkMinutes: walkTotal, walkToStop: walkToStop ?? null, bus: null };
   }

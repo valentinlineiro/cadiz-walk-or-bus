@@ -25,10 +25,33 @@ test('verdict falls back to walk without live arrivals', () => {
 });
 
 test('verdict adds walk-to-stop to the wait before comparing (no driveMinutes in decision)', () => {
-  const arr = [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 3 }];
+  const arr = [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 8 }];
   const v = verdict(19, 5, arr);
-  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 3, rideMinutes: 0, total: 8, line: '1', destination: 'X', alight: null } });
+  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 8, rideMinutes: 0, total: 13, line: '1', destination: 'X', alight: null } });
   assert.equal(verdict(7, 5, arr).kind, 'walk');
+});
+
+test('verdict skips a bus that arrives before you could reach the stop', () => {
+  // walkToStop=5: the 1' bus is gone before you'd get there — not catchable —
+  // the 6' one is. "Arrives in 1'" must not be offered as if it were useful.
+  const arr = [{ line: '1', destination: 'X', minutes: 1 }, { line: '1', destination: 'X', minutes: 6 }];
+  const v = verdict(19, 5, arr);
+  assert.equal(v.kind, 'bus');
+  assert.equal(v.bus.minutes, 6);
+});
+
+test('verdict falls back to walk when every bus arrives before you could reach the stop', () => {
+  const arr = [{ line: '1', destination: 'X', minutes: 1 }, { line: '1', destination: 'X', minutes: 2 }];
+  const v = verdict(19, 5, arr);
+  assert.equal(v.kind, 'walk');
+  assert.equal(v.bus, null);
+});
+
+test('verdict treats arriving exactly when the bus does as still catching it', () => {
+  const arr = [{ line: '1', destination: 'X', minutes: 5 }];
+  const v = verdict(19, 5, arr);
+  assert.equal(v.kind, 'bus');
+  assert.equal(v.bus.minutes, 5);
 });
 
 test('verdict without walk-to-stop compares wait alone (degraded)', () => {
