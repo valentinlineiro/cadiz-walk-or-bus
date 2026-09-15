@@ -4,6 +4,7 @@ import { decide, verdict } from './decision.js';
 import { nearestStops } from './geo.js';
 import { transition } from './state.js';
 import { getStops, getArrivals, geocode, walkMinutes } from './api.js';
+import { pinStyle } from './map.js';
 
 test('decide prefers bus only when strictly faster', () => {
   const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
@@ -66,4 +67,10 @@ test('walkMinutes rounds OSRM duration up', async () => {
 test('walkMinutes is null when no route', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [] }) });
   assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
+});
+
+test('pinStyle marks wait gray when no data, amber with minutes, halo when focused', () => {
+  assert.deepEqual(pinStyle([], false), { label: '—', color: 'gray', scale: 1, halo: false });
+  assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], false), { label: '4′', color: 'amber', scale: 1, halo: false });
+  assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], true), { label: '4′', color: 'amber', scale: 1.25, halo: true });
 });
