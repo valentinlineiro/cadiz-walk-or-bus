@@ -12,7 +12,8 @@ Tesis: el mapa explica la decisión en menos de un segundo, sin abrir nada. Mode
 - Solo render en `map.js`; sin lógica de negocio en Leaflet.
 
 ## Tarjeta duelo (opción B elegida)
-- Dos mitades: 🚶 Andar `12′` vs 🚌 Espera `4′ (L1)`; la ganadora enmarcada en su color; veredicto `→ BUS` / `→ ANDAR` debajo.
+- Dos mitades: 🚶 Andar `12′` vs 🚌 Espera `4′ (L1)`; la ganadora se marca con marco + ✓ + jerarquía tipográfica (nunca solo color: legible con brillo bajo o daltonismo); veredicto `→ BUS` / `→ ANDAR` debajo.
+- Calculando: tarjeta limpia con spinner + «Calculando…»; se ocultan los números anteriores (nunca decidir con datos obsoletos).
 - Sin destino: la tarjeta lista las cercanas con sus círculos-pequeños/tiempos.
 - Estado calculando: spinner + «Calculando…» (nunca texto gris estático que parezca congelado).
 
