@@ -1,5 +1,5 @@
 import { nearestStops } from './geo.js';
-import { verdict } from './decision.js';
+import { verdict, filterCandidates } from './decision.js';
 import { getStops, getLines, getArrivals, searchDestinations, walkRoute, walkMinutes } from './api.js';
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, fitRoute } from './map.js';
 import { transition } from './state.js';
@@ -31,10 +31,15 @@ async function loadNearby() {
   await Promise.all(
     near.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
   );
+  // Focus/pin only on arrivals that actually approach destCoords — a stop whose
+  // sole bus runs the opposite direction must not be highlighted as useful.
+  const eligibleByStop = new Map(
+    near.map((s) => [s.stop, filterCandidates(arrivalsByStop.get(s.stop) ?? [], makeAlightResolver(s, destCoords))]),
+  );
   if (!focused || !near.some((s) => s.stop === focused)) {
-    focused = (near.find((s) => (arrivalsByStop.get(s.stop) ?? []).length > 0) ?? near[0])?.stop ?? null;
+    focused = (near.find((s) => (eligibleByStop.get(s.stop) ?? []).length > 0) ?? near[0])?.stop ?? null;
   }
-  showStops(near, arrivalsByStop, focused);
+  showStops(near, eligibleByStop, focused);
   return near;
 }
 

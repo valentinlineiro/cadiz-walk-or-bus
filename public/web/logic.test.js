@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, verdict } from './decision.js';
+import { decide, verdict, filterCandidates } from './decision.js';
 import { nearestStops } from './geo.js';
 import { transition } from './state.js';
 import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes } from './api.js';
@@ -159,6 +159,23 @@ test('driveMinutes rounds up and rejects absurd speeds', async () => {
 test('walkMinutes is null when no route', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [] }) });
   assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
+});
+
+test('regression: map must not highlight a stop whose only bus runs the opposite direction (Santa María del Mar 1106 -> Plaza Mina)', () => {
+  const destMina = { lat: 36.5338, lon: -6.2974 };
+  const arrivals = [{ line: '1', destination: 'CORTADURA', minutes: 1 }];
+  const resolveAlight = (arr) => findAlightStop({
+    line: arr.line,
+    direction: arr.destination,
+    boardingStopId: '1106',
+    destCoords: destMina,
+    stops: stopsFixture,
+    lines: linesFixture.lines,
+  });
+
+  const eligible = filterCandidates(arrivals, resolveAlight);
+  assert.deepEqual(eligible, []);
+  assert.deepEqual(pinStyle(eligible, true), { label: '—', color: 'gray', scale: 1, halo: false });
 });
 
 test('pinStyle marks wait gray when no data, amber with minutes, halo when focused', () => {
