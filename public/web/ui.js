@@ -127,6 +127,30 @@ function renderSheet(near, walk, walkToStop) {
   ]);
 }
 
+// A failed search must not leave the previous destination's verdict on
+// screen looking current — clear the sheet instead of leaving it stale.
+function showSearchError(query) {
+  const verdictEl = document.getElementById('verdict');
+  const detail = document.getElementById('detail');
+  verdictEl.textContent = '';
+  verdictEl.className = '';
+  detail.replaceChildren();
+  const row = document.createElement('div');
+  row.textContent = `No encontramos «${query}». Prueba con otro nombre.`;
+  detail.append(row);
+}
+
+function renderNoResultsHint(query) {
+  const dropdown = document.getElementById('dropdown');
+  if (!dropdown) return;
+  dropdown.replaceChildren();
+  const row = document.createElement('div');
+  row.className = 'dropdown-header';
+  row.textContent = `Sin resultados para "${query}"`;
+  dropdown.appendChild(row);
+  dropdown.classList.remove('hidden');
+}
+
 function closeDropdown() {
   const dropdown = document.getElementById('dropdown');
   if (!dropdown) return;
@@ -222,7 +246,7 @@ async function routeToDestination(dest) {
   // auto-focus from a previous search must not carry over to a new one.
   focused = null;
   showDestination(dest.lat, dest.lon, dest.label);
-  setState('GEOCODED', 'Calculando ruta…');
+  setState('GEOCODED', '🚶 Calculando ruta…');
 
   let routeRes;
   try {
@@ -239,7 +263,7 @@ async function routeToDestination(dest) {
   }
 
   showWalkRoute(routeRes.coordinates);
-  setState('ROUTED', 'Decidiendo…');
+  setState('ROUTED', '🚌 Consultando llegadas…');
 
   const near = await loadNearby();
   const f = near.find((s) => s.stop === focused);
@@ -266,6 +290,7 @@ async function onFormSubmit(query) {
   const hits = await searchDestinations(fetch, q, 1);
   if (hits.length === 0) {
     setState('FAILED', 'Destino no encontrado');
+    showSearchError(q);
     return;
   }
   selectDestination(hits[0]);
@@ -320,7 +345,8 @@ export function initUI() {
     debounce = setTimeout(async () => {
       const hits = await searchDestinations(fetch, q, 3);
       if (input.value.trim() === q) {
-        renderSuggestions(hits);
+        if (hits.length === 0) renderNoResultsHint(q);
+        else renderSuggestions(hits);
       }
     }, 400);
   });
