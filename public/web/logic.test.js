@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { decide, verdict, filterCandidates } from './decision.js';
 import { nearestStops } from './geo.js';
 import { transition } from './state.js';
-import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes } from './api.js';
+import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes, busRoute } from './api.js';
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
@@ -173,12 +173,12 @@ test('geocode bounds to Cádiz and returns null on no hit', async () => {
 
 test('walkMinutes rounds OSRM duration up', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 1120, distance: 1500 }] }) });
-  assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 19);
+  assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 19);
 });
 
 test('walkMinutes estimates from distance when OSRM duration is impossibly fast', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 522, distance: 3373 }] }) });
-  assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 41);
+  assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 41);
 });
 
 test('driveMinutes rounds up and rejects absurd speeds', async () => {
@@ -242,7 +242,7 @@ test('walkRoute returns minutes and coordinates converted to [lat, lon]', async 
       routes: [
         {
           duration: 600,
-          distance: 700,
+          distance: 1500,
           geometry: {
             coordinates: [
               [-6.28, 36.52],
@@ -259,6 +259,63 @@ test('walkRoute returns minutes and coordinates converted to [lat, lon]', async 
     [36.52, -6.28],
     [36.53, -6.29],
   ]);
+});
+
+test('walkRoute rejects a route shorter than the straight-line distance between its endpoints', async () => {
+  // 36.52,-6.28 -> 36.53,-6.29 is ~1426m apart as the crow flies; a "route"
+  // claiming 300m is physically impossible (e.g. a corrupted/degenerate
+  // response cutting straight through something no one can walk across).
+  const f = async () => ({
+    ok: true,
+    json: async () => ({ routes: [{ duration: 60, distance: 300, geometry: { coordinates: [] } }] }),
+  });
+  assert.equal(await walkRoute(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), null);
+});
+
+test('busRoute routes each stop-to-stop hop independently and stitches them without duplicate junctions', async () => {
+  const f = async (url) => ({
+    ok: true,
+    json: async () => ({
+      routes: [{
+        distance: 2000,
+        geometry: { coordinates: url.includes('-6.28,36.52;-6.285,36.525') ? [[-6.28, 36.52], [-6.285, 36.525]] : [[-6.285, 36.525], [-6.29, 36.53]] },
+      }],
+    }),
+  });
+  const coords = await busRoute(f, [
+    { lat: 36.52, lon: -6.28 },
+    { lat: 36.525, lon: -6.285 },
+    { lat: 36.53, lon: -6.29 },
+  ]);
+  assert.deepEqual(coords, [
+    [36.52, -6.28],
+    [36.525, -6.285],
+    [36.53, -6.29],
+  ]);
+});
+
+test('busRoute falls back to a straight line only for the hop that fails to route', async () => {
+  const f = async (url) => {
+    if (url.includes('-6.285,36.525;-6.29,36.53')) return { ok: false, status: 500 };
+    return { ok: true, json: async () => ({ routes: [{ distance: 2000, geometry: { coordinates: [[-6.28, 36.52], [-6.2825, 36.5225], [-6.285, 36.525]] } }] }) };
+  };
+  const coords = await busRoute(f, [
+    { lat: 36.52, lon: -6.28 },
+    { lat: 36.525, lon: -6.285 },
+    { lat: 36.53, lon: -6.29 },
+  ]);
+  // First hop keeps its routed shape (3 points); second hop, which failed,
+  // degrades to a straight 2-point line instead of the whole trip.
+  assert.deepEqual(coords, [
+    [36.52, -6.28],
+    [36.5225, -6.2825],
+    [36.525, -6.285],
+    [36.53, -6.29],
+  ]);
+});
+
+test('busRoute needs at least 2 stops and returns null on total failure', async () => {
+  assert.equal(await busRoute(async () => ({ ok: false }), [{ lat: 1, lon: 2 }]), null);
 });
 
 test('getRecent survives missing storage or corrupt JSON', () => {
