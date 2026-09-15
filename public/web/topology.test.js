@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { matchDirection, findAlightStop, haversineMeters } from './topology.js';
+import { matchDirection, findAlightStop, haversineMeters, diversifyByLine, stopLineMap } from './topology.js';
 
 test('matchDirection matches exact, case-insensitive, substring, and keyword', () => {
   const dirs = {
@@ -199,4 +199,24 @@ test('findAlightStop with real Cadiz lines.json and stops.json topology', () => 
   assert.equal(res.stop.stop, '1109');
   assert.match(res.stop.name, /HOSPITAL PUERTA DEL MAR/);
   assert.ok(res.distanceMeters < 100, `Expected distance < 100m, got ${res.distanceMeters}m`);
+});
+
+test('diversifyByLine skips a closer stop that only repeats an already-covered line', () => {
+  const lines = { A: { X: ['s1', 's2'] }, B: { X: ['s3'] } };
+  const sorted = [{ stop: 's1' }, { stop: 's2' }, { stop: 's3' }];
+  const picked = diversifyByLine(sorted, lines, 2);
+  assert.deepEqual(picked.map((s) => s.stop), ['s1', 's3']);
+});
+
+test('diversifyByLine falls back to nearest stops once every line is covered or unknown', () => {
+  const lines = { A: { X: ['s1'] } };
+  const sorted = [{ stop: 's1' }, { stop: 's1b' }, { stop: 's2' }];
+  const picked = diversifyByLine(sorted, lines, 3);
+  assert.deepEqual(picked.map((s) => s.stop), ['s1', 's1b', 's2']);
+});
+
+test('stopLineMap and diversifyByLine degrade to nearest-n when lines is null', () => {
+  assert.deepEqual([...stopLineMap(null).keys()], []);
+  const sorted = [{ stop: 's1' }, { stop: 's2' }];
+  assert.deepEqual(diversifyByLine(sorted, null, 2).map((s) => s.stop), ['s1', 's2']);
 });

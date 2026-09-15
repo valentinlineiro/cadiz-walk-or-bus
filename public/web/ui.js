@@ -4,7 +4,7 @@ import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRout
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
-import { findAlightStop } from './topology.js';
+import { findAlightStop, diversifyByLine } from './topology.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -33,8 +33,15 @@ function eligibleArrivalsByStop(near) {
   );
 }
 
+// Nearest 3 stops, but not 3 stops all on the same line — pull from a
+// wider pool of close stops and keep only ones that add a new line.
+function nearbyDiverseStops(n = 3) {
+  const pool = nearestStops(stops, me.lat, me.lon, Math.max(n * 4, 10));
+  return diversifyByLine(pool, lines, n);
+}
+
 async function loadNearby() {
-  const near = nearestStops(stops, me.lat, me.lon, 3);
+  const near = nearbyDiverseStops(3);
   arrivalsByStop = new Map();
   await Promise.all(
     near.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
@@ -320,7 +327,7 @@ export function initUI() {
     async (stop) => {
       focused = stop;
       if (!destCoords) return;
-      const near = nearestStops(stops, me.lat, me.lon, 3);
+      const near = nearbyDiverseStops(3);
       showStops(near, eligibleArrivalsByStop(near), focused);
       const f = near.find((s) => s.stop === focused);
       const walkToStopRoute = f ? await walkRoute(fetch, me, { lat: f.lat, lon: f.lon }) : null;

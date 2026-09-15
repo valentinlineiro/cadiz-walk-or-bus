@@ -15,6 +15,49 @@ function stripAccents(str) {
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Which lines serve each stop, from the static line topology \u2014 not live
+// arrivals, so it still works when a line just has no bus due right now.
+export function stopLineMap(lines) {
+  const map = new Map();
+  if (!lines) return map;
+  for (const [line, directions] of Object.entries(lines)) {
+    for (const sequence of Object.values(directions)) {
+      if (!Array.isArray(sequence)) continue;
+      for (const stopId of sequence) {
+        const key = String(stopId);
+        if (!map.has(key)) map.set(key, new Set());
+        map.get(key).add(line);
+      }
+    }
+  }
+  return map;
+}
+
+// Picks n stops from a distance-sorted list, preferring ones that add a
+// line not already covered by a closer pick \u2014 so 3 nearby stops on the
+// same line don't crowd out a different line a bit further away.
+export function diversifyByLine(sortedStops, lines, n) {
+  const linesByStop = stopLineMap(lines);
+  const covered = new Set();
+  const picked = [];
+  const leftover = [];
+  for (const s of sortedStops) {
+    const stopLines = linesByStop.get(String(s.stop ?? s.number)) ?? new Set();
+    const isNew = stopLines.size === 0 || [...stopLines].some((l) => !covered.has(l));
+    if (isNew && picked.length < n) {
+      picked.push(s);
+      for (const l of stopLines) covered.add(l);
+    } else {
+      leftover.push(s);
+    }
+  }
+  for (const s of leftover) {
+    if (picked.length >= n) break;
+    picked.push(s);
+  }
+  return picked;
+}
+
 export function matchDirection(lineDirections, destination) {
   if (!lineDirections || !destination) return null;
   const raw = String(destination).trim().toUpperCase();
