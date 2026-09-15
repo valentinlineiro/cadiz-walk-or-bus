@@ -52,8 +52,20 @@ function renderSheet(near, walk) {
     return;
   }
   const v = verdict(walk, arrivalsByStop.get(focused) ?? []);
-  verdictEl.textContent = v.kind === 'bus' ? `→ Bus (${v.bus.minutes}′)` : '→ Andar';
-  detail.textContent = `Andar ${walk}′` + (v.bus ? ` · Bus ${v.bus.line} (${v.bus.destination}) ${v.bus.minutes}′` : ' · sin datos en vivo → Andar');
+  verdictEl.textContent = v.kind === 'bus' ? '→ BUS' : '→ ANDAR';
+  verdictEl.className = v.kind;
+  detail.innerHTML = '';
+  const duel = document.createElement('div');
+  duel.className = 'duel';
+  const walkSide = document.createElement('div');
+  walkSide.className = 'side walk' + (v.kind === 'walk' ? ' winner' : '');
+  walkSide.append('🚶', Object.assign(document.createElement('div'), { className: 'lbl', textContent: 'ANDAR' }), Object.assign(document.createElement('div'), { className: 'mins', textContent: `${walk}′` }), Object.assign(document.createElement('div'), { className: 'check', textContent: '✓' }));
+  const busSide = document.createElement('div');
+  busSide.className = 'side bus' + (v.kind === 'bus' ? ' winner' : '');
+  busSide.append('🚌', Object.assign(document.createElement('div'), { className: 'lbl', textContent: 'ESPERA' }), Object.assign(document.createElement('div'), { className: 'mins', textContent: v.bus ? `${v.bus.minutes}′` : '—' }), Object.assign(document.createElement('div'), { className: 'check', textContent: '✓' }));
+  if (v.bus) busSide.append(Object.assign(document.createElement('div'), { className: 'lbl', textContent: `L${v.bus.line} ${v.bus.destination}` }));
+  duel.append(walkSide, busSide);
+  detail.append(duel);
 }
 
 export function initUI() {
@@ -109,8 +121,11 @@ async function onSearch(q) {
   const now = Date.now();
   if (now - lastGeocode < 1100) return;
   lastGeocode = now;
+  document.getElementById('verdict').textContent = '';
+  document.getElementById('detail').replaceChildren();
   const id = ++requestId;
   setState('SEARCH', 'Buscando destino…');
+  document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
   let dest;
   try {
     dest = await geocode(fetch, q);

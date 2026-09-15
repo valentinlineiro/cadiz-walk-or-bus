@@ -11,6 +11,21 @@
   #search input { flex: 1; font-size: 16px; padding: 12px; border: 1px solid #ccc; border-radius: 12px; }
   #sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: #fff; border-radius: 16px 16px 0 0; padding: 16px; box-shadow: 0 -2px 12px rgba(0,0,0,.2); font-size: 16px; }
   #verdict { font-size: 28px; font-weight: bold; }
+.duel { display: flex; gap: 10px; }
+.side { flex: 1; border: 2px solid #e5e7eb; border-radius: 12px; padding: 12px; text-align: center; opacity: .65; }
+.side .mins { font-weight: 800; font-size: 22px; }
+.side .lbl { font-size: 12px; color: #666; letter-spacing: .06em; }
+.side .check { display: none; font-weight: 900; font-size: 20px; }
+.side.winner { opacity: 1; }
+.side.winner.walk { border-color: #16a34a; }
+.side.winner.bus { border-color: #d97706; }
+.side.winner .check { display: block; }
+.side.winner.bus .check { color: #d97706; }
+.side.winner.walk .check { color: #16a34a; }
+#verdict { font-size: 28px; font-weight: 900; }
+#verdict.bus { color: #d97706; }
+#verdict.walk { color: #16a34a; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #ccc; border-top-color: #16a34a; border-radius: 50%; }
 </style>
 </head>
 <body>
