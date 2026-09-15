@@ -4,7 +4,7 @@
 
 **Goal:** Crawl the Cádiz panel site once into `stops.json` and serve it at `GET /stops` for map pins.
 
-**Architecture:** `scrape-stops.js` (Node stdlib, manual run) drives the site's own search flow: `POST default.aspx` (name query) → intermediate `search.aspx` form → parse `RepeaterBusStops` rows → per-row `btnTimes` postback → panel `stop=`/`route=` IDs → Nominatim geocode (cached, 1 req/s) → `stops.json`. Worker serves the file verbatim at `GET /stops`.
+**Architecture:** `scrape-stops.js` (Node stdlib, manual run) drives the site's own search flow: `POST default.aspx` (name query) → intermediate `search.aspx` form → parse `RepeaterBusStops` rows → per-row `btnTimes` post (browser-style, positional button) → panel `stop=` ID → Nominatim geocode (cached, 1 req/s) → `stops.json`. Worker serves the file verbatim at `GET /stops`. The site exposes no route IDs anywhere (verified live), so the model is stop-only: `/api` accepts stop without route and returns all lines at that stop.
 
 **Tech Stack:** Node 24 stdlib only (`fetch`, regex), existing `node --test`, Nominatim (one-time, scrape time only).
 
@@ -124,35 +124,55 @@ git commit -m "feat: stop search client for scraper"
 - Produces: `stops.json` (git-committed data, created by live run in Task 3 — NOT in this task)
 
 **Interfaces:**
-- Consumes: Task 1 row `{ detailAction, detailFields }` (row button name `ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctlNN$btnTimes` found in `detailFields` keys)
-- Produces: `resolveIds(fetch, row)` → `{ stop: '1106', route: '110001' }`; `crawl(fetch, queries)` → full `[{name, number, stop, route, lat, lon}]` array (no file write — caller writes)
+- Consumes: Task 1 row `{ detailAction, detailFields, index }` (`index` = position among parsed rows; selects the nth key ending `$btnTimes`. Post browser-style: button name as submitter, no `__EVENTTARGET` — live `__EVENTTARGET` posts all return the last row's panel)
+- Produces: `resolveIds(fetch, row)` → `{ stop: '9905' }` (stop-only; refresh link shape `panel.aspx?previous=…&t1=…&stop=9905&…`, `&` may be `&amp;`-escaped); `crawl(fetch, queries)` → full `[{name, number, stop, lat, lon}]` array (no file write — caller writes)
+
+**Parser fix (Task 1 follow-up, grounded live):** live CORTADURA search has 4 stop buttons but `searchStops` parses 3 rows — one valid row shape is skipped. Extend `searchStops` to attach `index` and parse it. Failing test first:
 
 - [ ] **Step 1: Write the failing tests**
 
 ```js
-test('resolveIds follows the row postback to panel stop/route IDs', async () => {
+test('searchStops parses every stop row and attaches its index', async () => {
+  const fetchImpl = async () => ({ ok: true, text: async () => FORM_HTML_WITH_4_ROWS });
+  const rows = await searchStops(fetchImpl, 'CORTADURA');
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.map((r) => r.index), [0, 1, 2, 3]);
+});
+
+test('resolveIds posts the row-indexed button and reads stop from the refresh link', async () => {
   const row = {
+    index: 1,
     detailAction: './search.aspx?t1=CORTADURA&t2=&t3=',
-    detailFields: { __VIEWSTATE: 'VS2', 'ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes': '' },
+    detailFields: {
+      __VIEWSTATE: 'VS2',
+      'ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes': '',
+      'ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl02$btnTimes': '',
+    },
   };
-  const fetchImpl = async () => ({ ok: true, text: async () => '<a href="panel.aspx?stop=1106&route=110001">Horarios</a>' });
-  assert.deepEqual(await resolveIds(fetchImpl, row), { stop: '1106', route: '110001' });
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push(opts?.body || '');
+    return { ok: true, text: async () => '<a href="panel.aspx?previous=x&amp;t1=CORTADURA&amp;stop=9905&amp;t3=">Horarios</a>' };
+  };
+  assert.deepEqual(await resolveIds(fetchImpl, row), { stop: '9905' });
+  assert.match(String(calls[0]), /ctl02\$btnTimes/);
+  assert.doesNotMatch(String(calls[0]), /__EVENTTARGET/);
 });
 
 test('crawl dedupes stops across queries and drops rows without coords', async () => {
   const fetchImpl = async (url, opts) => {
-    const body = opts?.body || '';
+    const body = String(opts?.body ?? '');
     if (opts?.method === 'POST' && body.includes('btnSearch')) {
-      return { ok: true, text: async () => `<form action="./search.aspx?t1=X&t2=&t3="><table><tr><td>1114</td><td>CORTADURA</td><td></td></tr></table><input name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes" value=""/><input name="__VIEWSTATE" value="V"/></form>` };
+      return { ok: true, text: async () => `<form action="./search.aspx?t1=X&t2=&t3="><table id="ctl00_ContentPlaceHolderContenido_RepeaterBusStops"><tr><td>1114</td><td>CORTADURA</td><td></td></tr></table><input name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes" value=""/><input name="__VIEWSTATE" value="V"/></form>` };
     }
     if (url.includes('nominatim')) {
       return { ok: true, json: async () => [{ lat: '36.5001', lon: '-6.2721' }] };
     }
-    return { ok: true, text: async () => 'panel.aspx?stop=1106&route=110001' };
+    return { ok: true, text: async () => 'panel.aspx?stop=9905&t3=' };
   };
   const rows = await crawl(fetchImpl, ['CORTADURA', 'CORTADURA']);
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0], { name: 'CORTADURA', number: '1114', stop: '1106', route: '110001', lat: 36.5001, lon: -6.2721 });
+  assert.deepEqual(rows[0], { name: 'CORTADURA', number: '1114', stop: '9905', lat: 36.5001, lon: -6.2721 });
 });
 ```
 
@@ -165,13 +185,15 @@ Expected: FAIL with "resolveIds is not defined"
 
 ```js
 async function resolveIds(fetchImpl, row) {
-  const btn = Object.keys(row.detailFields).find((k) => k.endsWith('$btnTimes'));
-  const body = new URLSearchParams({ ...row.detailFields, __EVENTTARGET: btn });
+  const btns = Object.keys(row.detailFields).filter((k) => k.endsWith('$btnTimes'));
+  const btn = btns[row.index];
+  if (!btn) throw new Error(`no button for row ${row.index} (${row.name})`);
+  const body = new URLSearchParams({ ...row.detailFields, [btn]: '' });
   const action = row.detailAction.startsWith('http') ? row.detailAction : `${BASE}/${row.detailAction.replace(/^\.\//, '')}`;
-  const resHtml = await (await fetchImpl(action, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).text();
-  const m = resHtml.match(/panel\.aspx\?stop=(\d+)&route=(\d+)/);
-  if (!m) throw new Error(`no panel IDs for ${row.name} (${row.number})`);
-  return { stop: m[1], route: m[2] };
+  const resHtml = (await (await fetchImpl(action, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).text()).replaceAll('&amp;', '&');
+  const m = resHtml.match(/panel\.aspx\?[^"]*stop=(\d+)/);
+  if (!m) throw new Error(`no panel stop ID for ${row.name} (${row.number})`);
+  return { stop: m[1] };
 }
 
 async function geocode(fetchImpl, name) {
@@ -216,12 +238,12 @@ git commit -m "feat: scraper ID resolution and geocoded crawl"
 **Files:**
 - Modify: `scrape-stops.js` (append CLI main: queries = two-letter combos `aa`..`zz` + `00`..`99` over `abcdefghijklmnñopqrstuvwxyz0123456789`; runs `crawl`, writes `stops.json` only on full success)
 - Create: `stops.json` (live output, committed)
-- Modify: `worker.js` (add `GET /stops` serving the file content: `import stops from './stops.json' with { type: 'json' }` — if import attributes fail under wrangler, fallback: inline file read at build; implementer picks what passes `wrangler deploy --dry-run`)
-- Modify: `worker.test.js` (add: `GET /stops` → 200 JSON array whose first item has `name/number/stop/route/lat/lon`)
+- Modify: `worker.js` (add `GET /stops` serving the file content: `import stops from './stops.json' with { type: 'json' }` — if import attributes fail under wrangler, fallback: inline file read at build; implementer picks what passes `wrangler deploy --dry-run`. Also make `/api` route optional: `GET /api?stop=N` fetches `panel.aspx?stop=N` (all lines); `route` still honored when given)
+- Modify: `worker.test.js` (add: `GET /stops` → 200 JSON array whose first item has `name/number/stop/lat/lon`; add: `GET /api?stop=N` without route → 200 upstream fetch URL has no `route=`)
 
 **Interfaces:**
 - Consumes: Task 2 `crawl`; live site + live Nominatim (1 req/s throttle already in `geocode`)
-- Produces: `GET /stops` → `[{name, number, stop, route, lat, lon}]`
+- Produces: `GET /stops` → `[{name, number, stop, lat, lon}]`
 
 - [ ] **Step 1: Write the failing worker test**
 
@@ -231,7 +253,17 @@ test('GET /stops returns the stop directory', async () => {
   assert.equal(res.status, 200);
   const stops = await res.json();
   assert.ok(stops.length > 0);
-  assert.deepEqual(Object.keys(stops[0]).sort(), ['lat', 'lon', 'name', 'number', 'route', 'stop']);
+  assert.deepEqual(Object.keys(stops[0]).sort(), ['lat', 'lon', 'name', 'number', 'stop']);
+});
+
+test('GET /api works stop-only (no route)', async () => {
+  let fetched = '';
+  globalThis.fetch = async (url) => { fetched = String(url); return { ok: true, text: async () => '<table></table>' }; };
+  try {
+    const res = await worker.fetch(new Request('http://x/api?stop=9905'));
+    assert.equal(res.status, 200);
+    assert.match(fetched, /panel\.aspx\?stop=9905$/);
+  } finally { delete globalThis.fetch; }
 });
 ```
 
