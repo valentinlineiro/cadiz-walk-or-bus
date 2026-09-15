@@ -257,6 +257,7 @@ git commit -m "feat: map API client with injectable fetch"
 - Modify: `worker.js` (serve `/map` + `/web/*` via Static Assets config)
 - Create: `wrangler.toml` assets entry (`assets = { directory = "./public/" }`)
 - Modify: `server.js` (serve `/map` + `/web/*` from disk for Docker local eval)
+- Modify: `Dockerfile` (`COPY worker.js server.js stops.json public ./` — map assets must ship in the image)
 - Test: manual checklist below (Leaflet/DOM not unit-testable without a browser harness — covered by Docker verification)
 
 **Interfaces:**
@@ -487,6 +488,6 @@ Run: `npx -y wrangler deploy --dry-run` (PASS) then rebuild + run Docker and che
 - [ ] **Step 3: Commit**
 
 ```bash
-git add public wrangler.toml worker.js server.js worker.test.js
+git add public wrangler.toml worker.js server.js Dockerfile worker.test.js
 git commit -m "feat: glanceable map page with verdict sheet"
 ```
