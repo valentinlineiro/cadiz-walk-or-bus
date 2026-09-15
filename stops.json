@@ -740,5 +740,124 @@
     "stop": "1313",
     "lat": 36.5123095,
     "lon": -6.2726084
+  },
+  {
+    "name": "COMISARÍA-AVD.ANDALUCIA 32",
+    "number": "1105",
+    "stop": "1105",
+    "lat": 36.5205,
+    "lon": -6.2872
+  },
+  {
+    "name": "PLAZA ASDRUBAL-MERCADO VIRGEN ROSARIO",
+    "number": "1106",
+    "stop": "1106",
+    "lat": 36.5176,
+    "lon": -6.2859
+  },
+  {
+    "name": "RESIDENCIA-HOSPITAL PUERTA DEL MAR",
+    "number": "1109",
+    "stop": "1109",
+    "lat": 36.5085,
+    "lon": -6.2784
+  },
+  {
+    "name": "BALNEARIO-GLORIETA ANA ORANTES",
+    "number": "1110",
+    "stop": "1110",
+    "lat": 36.5055,
+    "lon": -6.2771
+  },
+  {
+    "name": "BALNEARIO-GLORIETA ANA ORANTES",
+    "number": "1117",
+    "stop": "1117",
+    "lat": 36.5056,
+    "lon": -6.2769
+  },
+  {
+    "name": "RESIDENCIA-HOSPITAL PUERTA DEL MAR",
+    "number": "1118",
+    "stop": "1118",
+    "lat": 36.5087,
+    "lon": -6.2782
+  },
+  {
+    "name": "PLAZA ASDRUBAL-MERCADO VIRGEN ROSARIO",
+    "number": "1121",
+    "stop": "1121",
+    "lat": 36.5178,
+    "lon": -6.2857
+  },
+  {
+    "name": "COMISARÍA-AVD.ANDALUCIA 45",
+    "number": "1122",
+    "stop": "1122",
+    "lat": 36.5207,
+    "lon": -6.287
+  },
+  {
+    "name": "HOSPITAL MORA-PLAYA LA CALETA",
+    "number": "1207",
+    "stop": "1207",
+    "lat": 36.5313,
+    "lon": -6.3055
+  },
+  {
+    "name": "BDA. LORETO",
+    "number": "1223",
+    "stop": "1223",
+    "lat": 36.5042,
+    "lon": -6.271
+  },
+  {
+    "name": "JUAN R. JIMÉNEZ",
+    "number": "1233",
+    "stop": "1233",
+    "lat": 36.503,
+    "lon": -6.2725
+  },
+  {
+    "name": "HOSPITAL MORA-PLAYA LA CALETA",
+    "number": "1240",
+    "stop": "1240",
+    "lat": 36.5314,
+    "lon": -6.3053
+  },
+  {
+    "name": "DIQUE-ESTACION DE AUTOBUSES",
+    "number": "1504",
+    "stop": "1504",
+    "lat": 36.527,
+    "lon": -6.2851
+  },
+  {
+    "name": "JIMENA DE LA FRA.",
+    "number": "1511",
+    "stop": "1511",
+    "lat": 36.4998,
+    "lon": -6.2693
+  },
+  {
+    "name": "BDA. LORETO",
+    "number": "1520",
+    "stop": "1520",
+    "lat": 36.5043,
+    "lon": -6.2711
+  },
+  {
+    "name": "DIQUE-ESTACION DE AUTOBUSES",
+    "number": "1525",
+    "stop": "1525",
+    "lat": 36.5271,
+    "lon": -6.285
+  },
+  {
+    "name": "AVDA AMILCAR BARCA 31",
+    "number": "1712",
+    "stop": "1712",
+    "lat": 36.514,
+    "lon": -6.2875
   }
 ]

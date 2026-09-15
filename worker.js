@@ -1,4 +1,5 @@
 import stops from './stops.json' with { type: 'json' };
+import lines from './lines.json' with { type: 'json' };
 
 export function decide(arrivals, walkMinutes) {
   if (arrivals.length === 0) return { decision: 'walk', soonest: null };
@@ -39,6 +40,7 @@ $('f').onsubmit=async e=>{e.preventDefault();const s=$('stop').value,r=$('route'
 async function handleFetch(request) {
   const url = new URL(request.url);
   if (url.pathname === '/stops') return Response.json(stops);
+  if (url.pathname === '/lines') return Response.json(lines);
   if (url.pathname === '/api') {
     const stop = url.searchParams.get('stop');
     const route = url.searchParams.get('route');

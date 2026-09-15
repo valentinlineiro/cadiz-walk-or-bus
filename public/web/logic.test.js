@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { decide, verdict } from './decision.js';
 import { nearestStops } from './geo.js';
 import { transition } from './state.js';
-import { getStops, getArrivals, geocode, walkMinutes, driveMinutes } from './api.js';
+import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes } from './api.js';
 import { pinStyle } from './map.js';
+import { getRecent, saveRecent } from './recent.js';
 
 test('decide prefers bus only when strictly faster', () => {
   const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
@@ -96,3 +97,86 @@ test('pinStyle marks wait gray when no data, amber with minutes, halo when focus
   assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], false), { label: '4′', color: 'amber', scale: 1, halo: false });
   assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], true), { label: '4′', color: 'amber', scale: 1.25, halo: true });
 });
+
+test('searchDestinations parses and formats up to limit suggestions', async () => {
+  const hits = [
+    { name: 'Hospital Puerta del Mar', display_name: 'Hospital Puerta del Mar, Avda Ana de Viya, Cádiz', lat: '36.505', lon: '-6.278' },
+    { display_name: 'Calle Hospital de Mujeres, Cádiz', lat: '36.531', lon: '-6.299' },
+  ];
+  const f = async () => ({ ok: true, json: async () => hits });
+  const res = await searchDestinations(f, 'Hospital', 3);
+  assert.equal(res.length, 2);
+  assert.deepEqual(res[0], { label: 'Hospital Puerta del Mar', sub: 'Avda Ana de Viya, Cádiz', lat: 36.505, lon: -6.278 });
+  assert.deepEqual(res[1], { label: 'Calle Hospital de Mujeres', sub: 'Cádiz', lat: 36.531, lon: -6.299 });
+});
+
+test('searchDestinations returns empty array on network error', async () => {
+  const f = async () => ({ ok: false, status: 500 });
+  assert.deepEqual(await searchDestinations(f, 'Plaza', 3), []);
+});
+
+test('walkRoute returns minutes and coordinates converted to [lat, lon]', async () => {
+  const f = async () => ({
+    ok: true,
+    json: async () => ({
+      routes: [
+        {
+          duration: 600,
+          distance: 700,
+          geometry: {
+            coordinates: [
+              [-6.28, 36.52],
+              [-6.29, 36.53],
+            ],
+          },
+        },
+      ],
+    }),
+  });
+  const res = await walkRoute(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 });
+  assert.equal(res.minutes, 10);
+  assert.deepEqual(res.coordinates, [
+    [36.52, -6.28],
+    [36.53, -6.29],
+  ]);
+});
+
+test('getRecent survives missing storage or corrupt JSON', () => {
+  assert.deepEqual(getRecent(null), []);
+  const badJsonStorage = { getItem: () => 'invalid-json{{{' };
+  assert.deepEqual(getRecent(badJsonStorage), []);
+  const notArrayStorage = { getItem: () => JSON.stringify({ not: 'array' }) };
+  assert.deepEqual(getRecent(notArrayStorage), []);
+});
+
+test('saveRecent prepends, deduplicates by label/coords, caps at 5, and survives errors', () => {
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  saveRecent({ label: 'Destino 1', lat: 36.51, lon: -6.28 }, mockStorage);
+  saveRecent({ label: 'Destino 2', lat: 36.52, lon: -6.29 }, mockStorage);
+  saveRecent({ label: 'Destino 1', lat: 36.51005, lon: -6.28005 }, mockStorage);
+
+  const items = getRecent(mockStorage);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].label, 'Destino 1');
+  assert.equal(items[1].label, 'Destino 2');
+
+  for (let i = 3; i <= 8; i++) {
+    saveRecent({ label: `Destino ${i}`, lat: 36.5 + i * 0.01, lon: -6.2 - i * 0.01 }, mockStorage);
+  }
+  const capped = getRecent(mockStorage);
+  assert.equal(capped.length, 5);
+  assert.equal(capped[0].label, 'Destino 8');
+
+  const throwingStorage = {
+    getItem: () => { throw new Error('Blocked storage'); },
+    setItem: () => { throw new Error('Quota exceeded'); },
+  };
+  assert.doesNotThrow(() => saveRecent({ label: 'Fail', lat: 36.5, lon: -6.2 }, throwingStorage));
+  assert.doesNotThrow(() => getRecent(throwingStorage));
+});
+

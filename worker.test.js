@@ -59,3 +59,12 @@ test('GET /api works stop-only (no route)', async () => {
     assert.match(fetched, /panel\.aspx\?stop=9905$/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('GET /lines returns the topology directory', async () => {
+  const res = await worker.fetch(new Request('http://x/lines'));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.version, 1);
+  assert.ok(data.lines);
+  assert.ok(data.lines['1']);
+});
