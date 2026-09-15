@@ -55,7 +55,8 @@ async function handleFetch(request) {
     if (!upstream.ok) return Response.json({ error: `upstream ${upstream.status}` }, { status: 502 });
     return Response.json({ arrivals: parseArrivals(await upstream.text()) });
   }
-  return new Response(HTML, { headers: { 'content-type': 'text/html' } });
+  if (url.pathname === '/') return new Response(HTML, { headers: { 'content-type': 'text/html' } });
+  return new Response('not found', { status: 404 });
 }
 
 export default { fetch: handleFetch };
