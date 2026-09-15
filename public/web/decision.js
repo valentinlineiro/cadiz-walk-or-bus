@@ -5,9 +5,18 @@ export function decide(arrivals, walkMinutes) {
   return { decision, soonest };
 }
 
-export function verdict(walkMinutes, arrivals) {
-  if (walkMinutes == null || arrivals.length === 0) return { kind: 'walk', walkMinutes, bus: null };
-  const { decision, soonest } = decide(arrivals, walkMinutes);
-  if (decision !== 'bus') return { kind: 'walk', walkMinutes, bus: null };
-  return { kind: 'bus', walkMinutes, bus: { minutes: soonest.minutes, line: soonest.line, destination: soonest.destination } };
+export function verdict(walkTotal, walkToStop, rideEst, arrivals) {
+  if (walkTotal == null || arrivals.length === 0) {
+    return { kind: 'walk', walkMinutes: walkTotal, walkToStop: walkToStop ?? null, rideEst: rideEst ?? null, bus: null };
+  }
+  const soonest = arrivals.reduce((a, b) => (a.minutes <= b.minutes ? a : b));
+  const bus = {
+    minutes: soonest.minutes,
+    total: (walkToStop ?? 0) + soonest.minutes + (rideEst ?? 0),
+    line: soonest.line,
+    destination: soonest.destination,
+    ride: rideEst ?? null,
+  };
+  const kind = bus.total < walkTotal ? 'bus' : 'walk';
+  return { kind, walkMinutes: walkTotal, walkToStop: walkToStop ?? null, bus };
 }

@@ -1,6 +1,6 @@
 import { nearestStops } from './geo.js';
 import { verdict } from './decision.js';
-import { getStops, getArrivals, geocode, walkMinutes } from './api.js';
+import { getStops, getArrivals, geocode, walkMinutes, driveMinutes } from './api.js';
 import { initMap, showMe, showStops } from './map.js';
 import { transition } from './state.js';
 
@@ -11,6 +11,8 @@ let focused = null;
 let arrivalsByStop = new Map();
 let requestId = 0;
 let lastGeocode = 0;
+let destCoords = null;
+let lastWalk = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 function setState(event, statusText) {
@@ -21,7 +23,7 @@ function setState(event, statusText) {
   if (form) for (const el of form.elements) el.disabled = !me;
 }
 
-async function refreshArrivals() {
+async function loadNearby() {
   const near = nearestStops(stops, me.lat, me.lon, 3);
   arrivalsByStop = new Map();
   await Promise.all(
@@ -31,27 +33,21 @@ async function refreshArrivals() {
     focused = (near.find((s) => (arrivalsByStop.get(s.stop) ?? []).length > 0) ?? near[0])?.stop ?? null;
   }
   showStops(near, arrivalsByStop, focused);
-  renderSheet(near, null);
+  return near;
 }
 
-function renderSheet(near, walk) {
+function renderSheet(near, walk, walkToStop, rideEst) {
   const detail = document.getElementById('detail');
   const verdictEl = document.getElementById('verdict');
   if (walk == null) {
     verdictEl.textContent = '';
     detail.replaceChildren();
-    for (const s of near) {
-      const arr = arrivalsByStop.get(s.stop) ?? [];
-      const t = arr.length === 0 ? '—' : `${Math.min(...arr.map((a) => a.minutes))}′`;
-      const row = document.createElement('div');
-      const b = document.createElement('b');
-      b.textContent = t;
-      row.append(`${s.name}: `, b);
-      detail.append(row);
-    }
+    const row = document.createElement('div');
+    row.textContent = 'Busca un destino para comparar.';
+    detail.append(row);
     return;
   }
-  const v = verdict(walk, arrivalsByStop.get(focused) ?? []);
+  const v = verdict(walk, walkToStop, rideEst, arrivalsByStop.get(focused) ?? []);
   verdictEl.textContent = v.kind === 'bus' ? '→ BUS' : '→ ANDAR';
   verdictEl.className = v.kind;
   detail.innerHTML = '';
@@ -64,14 +60,22 @@ function renderSheet(near, walk) {
   busSide.className = 'side bus' + (v.kind === 'bus' ? ' winner' : '');
   busSide.append('🚌', Object.assign(document.createElement('div'), { className: 'lbl', textContent: 'ESPERA' }), Object.assign(document.createElement('div'), { className: 'mins', textContent: v.bus ? `${v.bus.minutes}′` : '—' }), Object.assign(document.createElement('div'), { className: 'check', textContent: '✓' }));
   if (v.bus) busSide.append(Object.assign(document.createElement('div'), { className: 'lbl', textContent: `L${v.bus.line} ${v.bus.destination}` }));
+  if (v.bus && walkToStop != null) busSide.append(Object.assign(document.createElement('div'), { className: 'lbl', textContent: `a pie ${walkToStop}′ · total ${v.bus.total}′` }));
+  if (v.bus && v.bus.ride != null) busSide.append(Object.assign(document.createElement('div'), { className: 'lbl', textContent: `trayecto ~${v.bus.ride}′ est.` }));
   duel.append(walkSide, busSide);
   detail.append(duel);
 }
 
 export function initUI() {
-  initMap((stop) => {
+  initMap(async (stop) => {
     focused = stop;
-    showStops(nearestStops(stops, me.lat, me.lon, 3), arrivalsByStop, focused);
+    if (!destCoords) return;
+    const near = nearestStops(stops, me.lat, me.lon, 3);
+    showStops(near, arrivalsByStop, focused);
+    const f = near.find((s) => s.stop === focused);
+    const walkToStop = f ? await walkMinutes(fetch, me, { lat: f.lat, lon: f.lon }) : null;
+    const rideEst = f ? await driveMinutes(fetch, { lat: f.lat, lon: f.lon }, destCoords) : null;
+    renderSheet(near, lastWalk, walkToStop, rideEst);
   });
   locate();
   const form = document.getElementById('search');
@@ -101,16 +105,16 @@ function locate() {
         setState('FAILED', 'No se pudieron cargar las paradas');
         return;
       }
-      setState('STOPS_LOADED', 'Toca una parada o busca destino');
-      await refreshArrivals();
+      setState('STOPS_LOADED', '¿A dónde vas?');
+      renderSheet([], null, null, null);
     },
     () => {
       me = { ...CADIZ };
       setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
       showMe(me.lat, me.lon);
-      getStops(fetch).then(async (s) => {
+      getStops(fetch).then((s) => {
         stops = s;
-        await refreshArrivals();
+        renderSheet([], null, null, null);
       }).catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
     },
   );
@@ -147,6 +151,13 @@ async function onSearch(q) {
   }
   if (id !== requestId) return;
   setState('ROUTED', 'Decidiendo…');
-  renderSheet(nearestStops(stops, me.lat, me.lon, 3), walk);
+  destCoords = dest;
+  const near = await loadNearby();
+  const f = near.find((s) => s.stop === focused);
+  const walkToStop = f ? await walkMinutes(fetch, me, { lat: f.lat, lon: f.lon }) : null;
+  const rideEst = f ? await driveMinutes(fetch, { lat: f.lat, lon: f.lon }, dest) : null;
+  if (id !== requestId) return;
+  lastWalk = walk;
+  renderSheet(near, walk, walkToStop, rideEst);
   setState('DONE', walk == null ? 'Sin ruta andando → Andar' : 'Listo');
 }

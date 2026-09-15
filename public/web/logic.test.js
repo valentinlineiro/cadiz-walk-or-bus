@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { decide, verdict } from './decision.js';
 import { nearestStops } from './geo.js';
 import { transition } from './state.js';
-import { getStops, getArrivals, geocode, walkMinutes } from './api.js';
+import { getStops, getArrivals, geocode, walkMinutes, driveMinutes } from './api.js';
 import { pinStyle } from './map.js';
 
 test('decide prefers bus only when strictly faster', () => {
@@ -14,13 +14,21 @@ test('decide prefers bus only when strictly faster', () => {
 });
 
 test('verdict falls back to walk without live arrivals', () => {
-  assert.deepEqual(verdict(19, []), { kind: 'walk', walkMinutes: 19, bus: null });
-  assert.deepEqual(verdict(null, [{ line: '1', destination: 'X', minutes: 3 }]), { kind: 'walk', walkMinutes: null, bus: null });
+  assert.deepEqual(verdict(19, 5, null, []), { kind: 'walk', walkMinutes: 19, walkToStop: 5, rideEst: null, bus: null });
+  assert.deepEqual(verdict(null, 5, 7, [{ line: '1', destination: 'X', minutes: 3 }]), { kind: 'walk', walkMinutes: null, walkToStop: 5, rideEst: 7, bus: null });
 });
 
-test('verdict picks soonest bus arrival', () => {
-  const v = verdict(19, [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 3 }]);
-  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, bus: { minutes: 3, line: '1', destination: 'X' } });
+test('verdict adds walk-to-stop and ride to the wait before comparing', () => {
+  const arr = [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 3 }];
+  const v = verdict(19, 5, 9, arr);
+  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 3, total: 17, line: '1', destination: 'X', ride: 9 } });
+  assert.equal(verdict(16, 5, 9, arr).kind, 'walk');
+});
+
+test('verdict without walk-to-stop and ride compares wait alone (degraded)', () => {
+  const arr = [{ line: '1', destination: 'X', minutes: 3 }];
+  assert.equal(verdict(19, null, null, arr).kind, 'bus');
+  assert.equal(verdict(3, null, null, arr).kind, 'walk');
 });
 
 test('nearestStops returns 3 closest with _km', () => {
@@ -60,8 +68,22 @@ test('geocode bounds to Cádiz and returns null on no hit', async () => {
 });
 
 test('walkMinutes rounds OSRM duration up', async () => {
-  const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 1120 }] }) });
+  const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 1120, distance: 1500 }] }) });
   assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 19);
+});
+
+test('walkMinutes estimates from distance when OSRM duration is impossibly fast', async () => {
+  const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 522, distance: 3373 }] }) });
+  assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 41);
+});
+
+test('driveMinutes rounds up and rejects absurd speeds', async () => {
+  const ok = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 480, distance: 3200 }] }) });
+  assert.equal(await driveMinutes(ok, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 8);
+  const absurd = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 10, distance: 3200 }] }) });
+  assert.equal(await driveMinutes(absurd, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
+  const down = async () => ({ ok: false, status: 500 });
+  assert.equal(await driveMinutes(down, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
 });
 
 test('walkMinutes is null when no route', async () => {
