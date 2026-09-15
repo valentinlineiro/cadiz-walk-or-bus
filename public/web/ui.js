@@ -25,17 +25,21 @@ function setState(event, statusText) {
   if (form) for (const el of form.elements) el.disabled = !me;
 }
 
+// Arrivals filtered by direction eligibility toward destCoords — a stop whose
+// sole bus runs the opposite direction must not be highlighted as useful.
+function eligibleArrivalsByStop(near) {
+  return new Map(
+    near.map((s) => [s.stop, filterCandidates(arrivalsByStop.get(s.stop) ?? [], makeAlightResolver(s, destCoords))]),
+  );
+}
+
 async function loadNearby() {
   const near = nearestStops(stops, me.lat, me.lon, 3);
   arrivalsByStop = new Map();
   await Promise.all(
     near.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
   );
-  // Focus/pin only on arrivals that actually approach destCoords — a stop whose
-  // sole bus runs the opposite direction must not be highlighted as useful.
-  const eligibleByStop = new Map(
-    near.map((s) => [s.stop, filterCandidates(arrivalsByStop.get(s.stop) ?? [], makeAlightResolver(s, destCoords))]),
-  );
+  const eligibleByStop = eligibleArrivalsByStop(near);
   if (!focused || !near.some((s) => s.stop === focused)) {
     focused = (near.find((s) => (eligibleByStop.get(s.stop) ?? []).length > 0) ?? near[0])?.stop ?? null;
   }
@@ -214,6 +218,9 @@ async function routeToDestination(dest) {
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
 
   destCoords = { lat: dest.lat, lon: dest.lon };
+  // A stop's eligibility depends on the destination — a manual pin pick or
+  // auto-focus from a previous search must not carry over to a new one.
+  focused = null;
   showDestination(dest.lat, dest.lon, dest.label);
   setState('GEOCODED', 'Calculando ruta…');
 
@@ -270,7 +277,7 @@ export function initUI() {
       focused = stop;
       if (!destCoords) return;
       const near = nearestStops(stops, me.lat, me.lon, 3);
-      showStops(near, arrivalsByStop, focused);
+      showStops(near, eligibleArrivalsByStop(near), focused);
       const f = near.find((s) => s.stop === focused);
       const walkToStop = f ? await walkMinutes(fetch, me, { lat: f.lat, lon: f.lon }) : null;
       renderSheet(near, lastWalk, walkToStop);

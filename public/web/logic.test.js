@@ -101,6 +101,24 @@ test('regression: Santa María del Mar (1121) to Plaza Mina with L1 Cortadura 1m
   assert.equal(v.bus.alight.direction, 'PLAZA ESPAÑA');
 });
 
+test('regression: Guillén Moreno (1229) to Hospital de Mora - F. Ciencias Empresariales with L2 Plaza España finds the bus', () => {
+  const destHospitalMora = { lat: 36.5313241, lon: -6.3054551 };
+  const arrivals = [{ line: '2', destination: 'PLAZA ESPAÑA', minutes: 2 }];
+  const resolveAlight = (arr) => findAlightStop({
+    line: arr.line,
+    direction: arr.destination,
+    boardingStopId: '1229',
+    destCoords: destHospitalMora,
+    stops: stopsFixture,
+    lines: linesFixture.lines,
+  });
+
+  const v = verdict(25, 2, arrivals, resolveAlight);
+  assert.equal(v.kind, 'bus');
+  assert.equal(v.bus.line, '2');
+  assert.equal(v.bus.alight.stop.stop, '1240');
+});
+
 test('nearestStops returns 3 closest with _km', () => {
   const stops = [
     { name: 'FAR', number: '1', stop: '1', lat: 36.6, lon: -6.2 },
