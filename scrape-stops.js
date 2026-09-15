@@ -19,24 +19,29 @@ export async function searchStops(fetchImpl, query) {
     await fetchImpl(`${BASE}/default.aspx`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })
   ).text();
   const action = resHtml.match(/<form[^>]*action="([^"]+)"/)[1].replaceAll('&amp;', '&');
-  const seg = resHtml.slice(resHtml.indexOf('RepeaterBusStops'));
+  const marker = resHtml.indexOf('RepeaterBusStops');
+  const seg = resHtml.slice(resHtml.lastIndexOf('<table', marker));
   const rows = [];
   for (const r of seg.match(/<tr>[\s\S]*?<\/tr>/g) || []) {
     const cells = [...r.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').trim());
     if (cells.length < 2 || !cells[0] || !cells[1]) continue;
-    rows.push({ number: cells[0], name: cells[1], detailAction: action, detailFields: hiddenInputs(resHtml) });
+    rows.push({ number: cells[0], name: cells[1], index: rows.length, detailAction: action, detailFields: hiddenInputs(resHtml) });
   }
   return rows;
 }
 
 export async function resolveIds(fetchImpl, row) {
-  const btn = Object.keys(row.detailFields).find((k) => k.endsWith('$btnTimes'));
-  const body = new URLSearchParams({ ...row.detailFields, __EVENTTARGET: btn });
+  const btns = Object.keys(row.detailFields).filter((k) => k.endsWith('$btnTimes'));
+  const btn = btns[row.index];
+  if (!btn) throw new Error(`no button for row ${row.index} (${row.name})`);
+  const fields = { ...row.detailFields };
+  for (const k of btns) if (k !== btn) delete fields[k];
+  const body = new URLSearchParams({ ...fields, [btn]: '' });
   const action = row.detailAction.startsWith('http') ? row.detailAction : `${BASE}/${row.detailAction.replace(/^\.\//, '')}`;
-  const resHtml = await (await fetchImpl(action, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).text();
-  const m = resHtml.replaceAll('&amp;', '&').match(/panel\.aspx\?stop=(\d+)&route=(\d+)/);
-  if (!m) throw new Error(`no panel IDs for ${row.name} (${row.number})`);
-  return { stop: m[1], route: m[2] };
+  const resHtml = (await (await fetchImpl(action, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body })).text()).replaceAll('&amp;', '&');
+  const m = resHtml.match(/panel\.aspx\?[^"]*stop=(\d+)/);
+  if (!m) throw new Error(`no panel stop ID for ${row.name} (${row.number})`);
+  return { stop: m[1] };
 }
 
 export async function geocode(fetchImpl, name) {

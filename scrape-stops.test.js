@@ -28,13 +28,40 @@ test('searchStops posts the query and parses [number, name] rows', async () => {
   assert.ok(rows[0].detailAction.includes('search.aspx?t1=CORTADURA'));
 });
 
-test('resolveIds follows the row postback to panel stop/route IDs', async () => {
+const FORM_HTML_WITH_4_ROWS = `<form action="./search.aspx?t1=CORTADURA&amp;t2=&amp;t3=">
+<table class="table" style="width: 100%;">
+<tr><td>1113</td><td>CORTADURA</td><td><input type="submit" name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes" value="Tiempos" /></td></tr>
+<tr><td>1114</td><td>CORTADURA</td><td><input type="submit" name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl02$btnTimes" value="Tiempos" /></td></tr>
+<tr><td>1901</td><td>CORTADURA</td><td><input type="submit" name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl03$btnTimes" value="Tiempos" /></td></tr>
+<tr><td>9905</td><td>CENTRO EDUCATIVO CORTADURA</td><td><input type="submit" name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl04$btnTimes" value="Tiempos" /></td></tr>
+</table>
+<input name="__VIEWSTATE" value="VS2" /></form>`;
+
+test('searchStops parses every stop row and attaches its index', async () => {
+  const fetchImpl = async () => ({ ok: true, text: async () => FORM_HTML_WITH_4_ROWS });
+  const rows = await searchStops(fetchImpl, 'CORTADURA');
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.map((r) => r.index), [0, 1, 2, 3]);
+});
+
+test('resolveIds posts the row-indexed button and reads stop from the refresh link', async () => {
   const row = {
+    index: 1,
     detailAction: './search.aspx?t1=CORTADURA&t2=&t3=',
-    detailFields: { __VIEWSTATE: 'VS2', 'ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes': '' },
+    detailFields: {
+      __VIEWSTATE: 'VS2',
+      'ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes': '',
+      'ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl02$btnTimes': '',
+    },
   };
-  const fetchImpl = async () => ({ ok: true, text: async () => '<a href="panel.aspx?stop=1106&route=110001">Horarios</a>' });
-  assert.deepEqual(await resolveIds(fetchImpl, row), { stop: '1106', route: '110001' });
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push(opts?.body || '');
+    return { ok: true, text: async () => '<a href="panel.aspx?previous=x&amp;t1=CORTADURA&amp;stop=9905&amp;t3=">Horarios</a>' };
+  };
+  assert.deepEqual(await resolveIds(fetchImpl, row), { stop: '9905' });
+  assert.match(decodeURIComponent(String(calls[0])), /ctl02\$btnTimes/);
+  assert.doesNotMatch(String(calls[0]), /__EVENTTARGET/);
 });
 
 test('crawl dedupes stops across queries and drops rows without coords', async () => {
@@ -46,9 +73,9 @@ test('crawl dedupes stops across queries and drops rows without coords', async (
     if (url.includes('nominatim')) {
       return { ok: true, json: async () => [{ lat: '36.5001', lon: '-6.2721' }] };
     }
-    return { ok: true, text: async () => 'panel.aspx?stop=1106&route=110001' };
+    return { ok: true, text: async () => 'panel.aspx?stop=9905&t3=' };
   };
   const rows = await crawl(fetchImpl, ['CORTADURA', 'CORTADURA']);
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0], { name: 'CORTADURA', number: '1114', stop: '1106', route: '110001', lat: 36.5001, lon: -6.2721 });
+  assert.deepEqual(rows[0], { name: 'CORTADURA', number: '1114', stop: '9905', lat: 36.5001, lon: -6.2721 });
 });
