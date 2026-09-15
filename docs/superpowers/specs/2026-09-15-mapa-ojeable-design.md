@@ -1,0 +1,27 @@
+# Mapa ojeable — Diseño (2026-09-15)
+
+Producto: mapa a pantalla completa para decidir andando-vs-bus en Cádiz, usable a una mano y con prisa.
+
+## Pantalla principal
+- Mapa 100% (Leaflet + teselas OSM, sin claves).
+- Punto azul GPS (permiso una vez; autocentrado al abrir).
+- Las 3 paradas más cercanas con insignia de minutos en vivo (datos de `GET /stops` + `GET /api?stop=N`).
+- Buscador fijo arriba: «¿A dónde vas?» (Nominatim).
+- Apertura: centra por GPS → carga `/stops` → pide tiempos de las cercanas.
+
+## Tarjeta inferior
+- Sin destino: lista las paradas cercanas con sus minutos en vivo; tocar un pin centra la tarjeta en esa parada.
+- Con destino: `Andar X min` (OSRM a pie GPS→destino) vs `Bus Y min (Línea Z destino)` (mejor llegada viva de la parada enfocada) + veredicto grande →Bus / →Andar (regla actual de `decide()`).
+- Sin parada enfocada: se usa la más cercana con datos en vivo.
+
+## Errores y casos borde
+- Sin GPS: aviso + centro en Cádiz para explorar manual.
+- Parada sin buses próximos: insignia «—», veredicto Andar.
+- Panel caído (`/api` 502): «sin datos en vivo → Andar».
+- Geocodificación sin resultados: mensaje inline, se mantiene el mapa.
+
+## Datos y APIs (todo sin claves)
+- Teselas OSM, Nominatim (búsqueda + respeto 1 req/s), OSRM demo (`route/v1/foot`) para andar.
+- Propios: `GET /stops` (106 paradas), `GET /api?stop=N` (stop-only).
+
+No-objetivos: favoritos/guardados, origen manual distinto del GPS, tiempo de trayecto en bus, modo offline, PWA instalable.
