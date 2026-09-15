@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { searchStops, resolveIds, crawl } from './scrape-stops.js';
+import { searchStops, resolveIds, crawl, geocode } from './scrape-stops.js';
 
 const FORM_HTML = `<form action="./default.aspx"><input type="hidden" name="__VIEWSTATE" value="VS1" />
 <input type="hidden" name="__VIEWSTATEGENERATOR" value="VG1" />
@@ -78,4 +78,13 @@ test('crawl dedupes stops across queries and drops rows without coords', async (
   const rows = await crawl(fetchImpl, ['CORTADURA', 'CORTADURA']);
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0], { name: 'CORTADURA', number: '1114', stop: '9905', lat: 36.5001, lon: -6.2721 });
+});
+
+test('geocode bounds queries to Cadiz and drops out-of-bbox hits', async () => {
+  let url;
+  const inBox = async (u) => { url = u; return { ok: true, json: async () => [{ lat: '36.5001', lon: '-6.2721' }] }; };
+  assert.deepEqual(await geocode(inBox, 'CORTADURA'), { lat: 36.5001, lon: -6.2721 });
+  assert.match(url, /viewbox=-6\.35,36\.60,-6\.20,36\.40&bounded=1/);
+  const algeciras = async () => ({ ok: true, json: async () => [{ lat: '36.13', lon: '-5.45' }] });
+  assert.equal(await geocode(algeciras, 'ALGECIRAS'), null);
 });

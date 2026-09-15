@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const BASE = 'http://77.224.241.76/urbanos/mobile';
 
 function hiddenInputs(html) {
@@ -45,11 +49,14 @@ export async function resolveIds(fetchImpl, row) {
 }
 
 export async function geocode(fetchImpl, name) {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name + ', Cádiz, Spain')}&format=json&limit=1`;
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(name + ', Cádiz, Spain')}&format=json&limit=1&viewbox=-6.35,36.60,-6.20,36.40&bounded=1`;
   const r = await fetchImpl(url, { headers: { 'User-Agent': 'cadiz-walk-or-bus (one-time scraper)' } });
   const [hit] = await r.json();
   await new Promise((r2) => setTimeout(r2, 1100));
-  return hit ? { lat: Number(hit.lat), lon: Number(hit.lon) } : null;
+  if (!hit) return null;
+  // ponytail: bbox box-check, tighter polygon only if outliers persist
+  const lat = Number(hit.lat), lon = Number(hit.lon);
+  return lat >= 36.40 && lat <= 36.60 && lon >= -6.35 && lon <= -6.20 ? { lat, lon } : null;
 }
 
 export async function crawl(fetchImpl, queries) {
@@ -66,9 +73,7 @@ export async function crawl(fetchImpl, queries) {
   return [...seen.values()];
 }
 
-import fs from 'node:fs';
-
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const chars = 'abcdefghijklmnñopqrstuvwxyz0123456789';
   const queries = [];
   for (const a of chars) for (const b of chars) queries.push(a + b);

@@ -24,15 +24,15 @@
     "name": "AVDA. LACAVE",
     "number": "1225",
     "stop": "1225",
-    "lat": 36.5075615,
-    "lon": -6.2711096
+    "lat": 36.507582,
+    "lon": -6.2710627
   },
   {
     "name": "AVDA. LACAVE",
     "number": "1308",
     "stop": "1308",
-    "lat": 36.5075615,
-    "lon": -6.2711096
+    "lat": 36.507582,
+    "lon": -6.2710627
   },
   {
     "name": "A.ILUSTRACION",
@@ -73,8 +73,8 @@
     "name": "MIRADOR",
     "number": "1708",
     "stop": "1708",
-    "lat": 36.0894922,
-    "lon": -5.7808354
+    "lat": 36.4709836,
+    "lon": -6.2114942
   },
   {
     "name": "BRIGADIER TOFIÑO",
@@ -122,29 +122,29 @@
     "name": "MERCADO CENTRAL",
     "number": "1210",
     "stop": "1210",
-    "lat": 36.4656134,
-    "lon": -6.1991705
+    "lat": 36.5287773,
+    "lon": -6.2980524
   },
   {
     "name": "MERCADO CENTRAL",
     "number": "1237",
     "stop": "1237",
-    "lat": 36.4656134,
-    "lon": -6.1991705
+    "lat": 36.5287773,
+    "lon": -6.2980524
   },
   {
     "name": "AVDA. GUADALETE",
     "number": "1307",
     "stop": "1307",
-    "lat": 36.8417652,
-    "lon": -5.3899227
+    "lat": 36.511283,
+    "lon": -6.2713336
   },
   {
     "name": "AVDA. GUADALETE",
     "number": "1312",
     "stop": "1312",
-    "lat": 36.8417652,
-    "lon": -5.3899227
+    "lat": 36.511283,
+    "lon": -6.2713336
   },
   {
     "name": "TELEGRAFÍA",
@@ -164,15 +164,15 @@
     "name": "SAGASTA",
     "number": "1209",
     "stop": "1209",
-    "lat": 36.5302878,
-    "lon": -6.1864643
+    "lat": 36.5282648,
+    "lon": -6.3008859
   },
   {
     "name": "SAGASTA",
     "number": "1238",
     "stop": "1238",
-    "lat": 36.5302878,
-    "lon": -6.1864643
+    "lat": 36.5282648,
+    "lon": -6.3008859
   },
   {
     "name": "LA LAGUNA 1",
@@ -192,8 +192,8 @@
     "name": "INSTITUTO DRAGO",
     "number": "1711",
     "stop": "1711",
-    "lat": 36.5141018,
-    "lon": -6.2833162
+    "lat": 36.5139176,
+    "lon": -6.2836661
   },
   {
     "name": "ALAMEDA CLARA CAMPOAMOR",
@@ -234,8 +234,8 @@
     "name": "ALGECIRAS",
     "number": "1518",
     "stop": "1518",
-    "lat": 36.1311725,
-    "lon": -5.4473991
+    "lat": 36.4976637,
+    "lon": -6.2670817
   },
   {
     "name": "CATEDRAL",
@@ -248,22 +248,22 @@
     "name": "VICENTE ALEIXANDRE",
     "number": "1216",
     "stop": "1216",
-    "lat": 36.5378213,
-    "lon": -6.1775179
+    "lat": 36.5195423,
+    "lon": -6.2810061
   },
   {
     "name": "AVDA. ANDALUCÍA",
     "number": "1104",
     "stop": "1104",
-    "lat": 36.7007388,
-    "lon": -6.1227864
+    "lat": 36.4610374,
+    "lon": -6.2087883
   },
   {
     "name": "AVDA. ANDALUCÍA",
     "number": "1123",
     "stop": "1123",
-    "lat": 36.7007388,
-    "lon": -6.1227864
+    "lat": 36.4610374,
+    "lon": -6.2087883
   },
   {
     "name": "A.V.V.PUNTALES",
@@ -283,15 +283,15 @@
     "name": "AVDA. PORTUGAL",
     "number": "1218",
     "stop": "1218",
-    "lat": 36.3154046,
-    "lon": -6.1521667
+    "lat": 36.5142963,
+    "lon": -6.2770285
   },
   {
     "name": "AVDA. PORTUGAL",
     "number": "1228",
     "stop": "1228",
-    "lat": 36.3154046,
-    "lon": -6.1521667
+    "lat": 36.5142963,
+    "lon": -6.2770285
   },
   {
     "name": "PLAZA ASDRUBAL",
@@ -304,15 +304,15 @@
     "name": "CENTRO COMERCIAL",
     "number": "1506",
     "stop": "1506",
-    "lat": 36.6167835,
-    "lon": -6.2129242
+    "lat": 36.4714009,
+    "lon": -6.2090782
   },
   {
     "name": "CENTRO COMERCIAL",
     "number": "1523",
     "stop": "1523",
-    "lat": 36.6167835,
-    "lon": -6.2129242
+    "lat": 36.4714009,
+    "lon": -6.2090782
   },
   {
     "name": "RENFE-CUESTA DE LAS CALESAS",
@@ -322,25 +322,18 @@
     "lon": -6.2897426
   },
   {
-    "name": "AVDA AMILCAR BARCA 31",
-    "number": "1712",
-    "stop": "1712",
-    "lat": 36.3555205,
-    "lon": -6.1681826
-  },
-  {
     "name": "SAN FELIPE",
     "number": "1107",
     "stop": "1107",
-    "lat": 36.157208,
-    "lon": -5.3490493
+    "lat": 36.5328564,
+    "lon": -6.2997983
   },
   {
     "name": "SAN FELIPE",
     "number": "1120",
     "stop": "1120",
-    "lat": 36.157208,
-    "lon": -5.3490493
+    "lat": 36.5328564,
+    "lon": -6.2997983
   },
   {
     "name": "SAN FÉLIX",
@@ -388,22 +381,22 @@
     "name": "SANTO DOMINGO",
     "number": "1303",
     "stop": "1303",
-    "lat": 36.6728301,
-    "lon": -6.194809
+    "lat": 36.5288478,
+    "lon": -6.2900719
   },
   {
     "name": "SANTO DOMINGO",
     "number": "1316",
     "stop": "1316",
-    "lat": 36.6728301,
-    "lon": -6.194809
+    "lat": 36.5288478,
+    "lon": -6.2900719
   },
   {
     "name": "SANTO TOMÁS",
     "number": "1220",
     "stop": "1220",
-    "lat": 36.6707217,
-    "lon": -6.1358511
+    "lat": 36.5086162,
+    "lon": -6.2759569
   },
   {
     "name": "MIRANDILLA-TEATRO ROMANO",
@@ -437,8 +430,8 @@
     "name": "RONDA DE VIGILANCIA 1",
     "number": "1512",
     "stop": "1512",
-    "lat": 36.5042754,
-    "lon": -6.270261
+    "lat": 36.5016115,
+    "lon": -6.2690847
   },
   {
     "name": "RONDA DE VIGILANCIA 2",
@@ -458,29 +451,29 @@
     "name": "PLAZA ESPAÑA",
     "number": "1101",
     "stop": "1101",
-    "lat": 36.687292,
-    "lon": -6.1292479
+    "lat": 36.5351276,
+    "lon": -6.2931981
   },
   {
     "name": "PLAZA ESPAÑA",
     "number": "1201",
     "stop": "1201",
-    "lat": 36.687292,
-    "lon": -6.1292479
+    "lat": 36.5351276,
+    "lon": -6.2931981
   },
   {
     "name": "PLAZA ESPAÑA",
     "number": "1301",
     "stop": "1301",
-    "lat": 36.687292,
-    "lon": -6.1292479
+    "lat": 36.5351276,
+    "lon": -6.2931981
   },
   {
     "name": "PLAZA ESPAÑA",
     "number": "1501",
     "stop": "1501",
-    "lat": 36.687292,
-    "lon": -6.1292479
+    "lat": 36.5351276,
+    "lon": -6.2931981
   },
   {
     "name": "PARQUE GENOVÉS",
@@ -500,50 +493,50 @@
     "name": "COMISARÍA",
     "number": "1709",
     "stop": "1709",
-    "lat": 36.5207423,
-    "lon": -6.2865468
+    "lat": 36.5209697,
+    "lon": -6.285175
   },
   {
     "name": "AVDA. MARCONI",
     "number": "1221",
     "stop": "1221",
-    "lat": 36.5073686,
-    "lon": -6.2713055
+    "lat": 36.5070191,
+    "lon": -6.2697145
   },
   {
     "name": "AVDA. MARCONI",
     "number": "1309",
     "stop": "1309",
-    "lat": 36.5073686,
-    "lon": -6.2713055
+    "lat": 36.5070191,
+    "lon": -6.2697145
   },
   {
     "name": "AVDA. MARCONI",
     "number": "1311",
     "stop": "1311",
-    "lat": 36.5073686,
-    "lon": -6.2713055
+    "lat": 36.5070191,
+    "lon": -6.2697145
   },
   {
     "name": "PASEO MARITIMO",
     "number": "1713",
     "stop": "1713",
-    "lat": 36.465349,
-    "lon": -6.1892041
+    "lat": 36.5007913,
+    "lon": -6.2749651
   },
   {
     "name": "REPÚBLICA ARGENTINA",
     "number": "1202",
     "stop": "1202",
-    "lat": 36.5360796,
-    "lon": -6.291839
+    "lat": 36.5362742,
+    "lon": -6.2916028
   },
   {
     "name": "REPÚBLICA ARGENTINA",
     "number": "1245",
     "stop": "1245",
-    "lat": 36.5360796,
-    "lon": -6.291839
+    "lat": 36.5362742,
+    "lon": -6.2916028
   },
   {
     "name": "SIMÓN BOLIVAR",
@@ -556,43 +549,43 @@
     "name": "PUERTAS DE TIERRA",
     "number": "1103",
     "stop": "1103",
-    "lat": 36.5263611,
-    "lon": -6.2899383
+    "lat": 36.5268985,
+    "lon": -6.2891028
   },
   {
     "name": "PUERTAS DE TIERRA",
     "number": "1124",
     "stop": "1124",
-    "lat": 36.5263611,
-    "lon": -6.2899383
+    "lat": 36.5268985,
+    "lon": -6.2891028
   },
   {
     "name": "PUERTAS DE TIERRA",
     "number": "1212",
     "stop": "1212",
-    "lat": 36.5263611,
-    "lon": -6.2899383
+    "lat": 36.5268985,
+    "lon": -6.2891028
   },
   {
     "name": "PUERTAS DE TIERRA",
     "number": "1234",
     "stop": "1234",
-    "lat": 36.5263611,
-    "lon": -6.2899383
+    "lat": 36.5268985,
+    "lon": -6.2891028
   },
   {
     "name": "AVDA. DE LAS CORTES",
     "number": "1524",
     "stop": "1524",
-    "lat": 36.4645908,
-    "lon": -5.9283174
+    "lat": 36.52274,
+    "lon": -6.2785729
   },
   {
     "name": "AVDA. DE  LAS CORTES",
     "number": "1505",
     "stop": "1505",
-    "lat": 36.4671284,
-    "lon": -5.9299097
+    "lat": 36.52274,
+    "lon": -6.2785729
   },
   {
     "name": "HOTEL ATLÁNTICO",
@@ -612,29 +605,29 @@
     "name": "TOLOSA LATOUR 1",
     "number": "1231",
     "stop": "1231",
-    "lat": 36.7406241,
-    "lon": -6.4369812
+    "lat": 36.5222416,
+    "lon": -6.2831192
   },
   {
     "name": "TOLOSA LATOUR 2",
     "number": "1232",
     "stop": "1232",
-    "lat": 36.7406241,
-    "lon": -6.4369812
+    "lat": 36.5222416,
+    "lon": -6.2831192
   },
   {
     "name": "AVD. DE HUELVA",
     "number": "1522",
     "stop": "1522",
-    "lat": 36.7860391,
-    "lon": -6.3429164
+    "lat": 36.5205167,
+    "lon": -6.2760682
   },
   {
     "name": "AVDA. DE HUELVA",
     "number": "1507",
     "stop": "1507",
-    "lat": 36.787069,
-    "lon": -6.3414541
+    "lat": 36.5206798,
+    "lon": -6.2758271
   },
   {
     "name": "AVDA. DEL PUERTO",
@@ -661,22 +654,22 @@
     "name": "PLAZA SEVILLA",
     "number": "1503",
     "stop": "1503",
-    "lat": 36.7933537,
-    "lon": -6.336141
+    "lat": 36.5300462,
+    "lon": -6.2900026
   },
   {
     "name": "PLAZA SEVILLA",
     "number": "1526",
     "stop": "1526",
-    "lat": 36.7933537,
-    "lon": -6.336141
+    "lat": 36.5300462,
+    "lon": -6.2900026
   },
   {
     "name": "CIBELES",
     "number": "1230",
     "stop": "1230",
-    "lat": 36.1720469,
-    "lon": -5.3437825
+    "lat": 36.5205774,
+    "lon": -6.2795355
   },
   {
     "name": "BRUNETE",
@@ -738,14 +731,14 @@
     "name": "SOTILLO",
     "number": "1306",
     "stop": "1306",
-    "lat": 36.5126059,
-    "lon": -6.2725274
+    "lat": 36.5123095,
+    "lon": -6.2726084
   },
   {
     "name": "SOTILLO",
     "number": "1313",
     "stop": "1313",
-    "lat": 36.5126059,
-    "lon": -6.2725274
+    "lat": 36.5123095,
+    "lon": -6.2726084
   }
 ]
