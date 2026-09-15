@@ -15,6 +15,8 @@ let arrivalsByStop = new Map();
 let requestId = 0;
 let destCoords = null;
 let lastWalkRoute = null;
+let walkToStopCache = new Map();
+let lastNear = [];
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 function setState(event, statusText) {
@@ -33,24 +35,47 @@ function eligibleArrivalsByStop(near) {
   );
 }
 
-// Nearest 3 stops, but not 3 stops all on the same line — pull from a
+// Nearest stops, but not several stops all on the same line — pull from a
 // wider pool of close stops and keep only ones that add a new line.
-function nearbyDiverseStops(n = 3) {
+function nearbyDiverseStops(n) {
   const pool = nearestStops(stops, me.lat, me.lon, Math.max(n * 4, 10));
   return diversifyByLine(pool, lines, n);
 }
 
+async function getWalkToStopRoute(stop) {
+  if (walkToStopCache.has(stop.stop)) return walkToStopCache.get(stop.stop);
+  const route = await walkRoute(fetch, me, { lat: stop.lat, lon: stop.lon });
+  walkToStopCache.set(stop.stop, route);
+  return route;
+}
+
+// Only offer stops with a bus actually heading toward destCoords, and only
+// if that bus beats walking there — a stop going the wrong way, or one
+// whose bus loses to walking, isn't worth showing on the map.
 async function loadNearby() {
-  const near = nearbyDiverseStops(3);
+  const pool = nearbyDiverseStops(8);
   arrivalsByStop = new Map();
+  walkToStopCache = new Map();
   await Promise.all(
-    near.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
+    pool.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
   );
-  const eligibleByStop = eligibleArrivalsByStop(near);
-  if (!focused || !near.some((s) => s.stop === focused)) {
-    focused = (near.find((s) => (eligibleByStop.get(s.stop) ?? []).length > 0) ?? near[0])?.stop ?? null;
+  const eligibleByPool = eligibleArrivalsByStop(pool);
+  const candidates = pool.filter((s) => (eligibleByPool.get(s.stop) ?? []).length > 0);
+
+  const walkTotal = lastWalkRoute?.minutes ?? null;
+  const near = [];
+  for (const s of candidates) {
+    if (near.length >= 3) break;
+    const walkToStopRoute = await getWalkToStopRoute(s);
+    const v = verdict(walkTotal, walkToStopRoute?.minutes ?? null, arrivalsByStop.get(s.stop) ?? [], makeAlightResolver(s, destCoords));
+    if (v.kind === 'bus') near.push(s);
   }
-  showStops(near, eligibleByStop, focused);
+
+  if (!focused || !near.some((s) => s.stop === focused)) {
+    focused = near[0]?.stop ?? null;
+  }
+  showStops(near, eligibleArrivalsByStop(near), focused);
+  lastNear = near;
   return near;
 }
 
@@ -289,14 +314,14 @@ async function routeToDestination(dest) {
     return;
   }
 
+  lastWalkRoute = routeRes;
   setState('ROUTED', '🚌 Consultando llegadas…');
 
   const near = await loadNearby();
   const f = near.find((s) => s.stop === focused);
-  const walkToStopRoute = f ? await walkRoute(fetch, me, { lat: f.lat, lon: f.lon }) : null;
+  const walkToStopRoute = f ? await getWalkToStopRoute(f) : null;
   if (id !== requestId) return;
 
-  lastWalkRoute = routeRes;
   await renderSheet(near, lastWalkRoute, walkToStopRoute);
   setState('DONE', 'Listo');
 }
@@ -325,13 +350,14 @@ async function onFormSubmit(query) {
 export function initUI() {
   initMap(
     async (stop) => {
+      // Only stops already offered (eligible direction, beats walking) have
+      // a pin to tap, so switch focus among lastNear rather than recompute.
       focused = stop;
       if (!destCoords) return;
-      const near = nearbyDiverseStops(3);
-      showStops(near, eligibleArrivalsByStop(near), focused);
-      const f = near.find((s) => s.stop === focused);
-      const walkToStopRoute = f ? await walkRoute(fetch, me, { lat: f.lat, lon: f.lon }) : null;
-      await renderSheet(near, lastWalkRoute, walkToStopRoute);
+      showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
+      const f = lastNear.find((s) => s.stop === focused);
+      const walkToStopRoute = f ? await getWalkToStopRoute(f) : null;
+      await renderSheet(lastNear, lastWalkRoute, walkToStopRoute);
     },
     async (coords) => {
       if (!me) return;
