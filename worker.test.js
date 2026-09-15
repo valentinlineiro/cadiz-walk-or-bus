@@ -37,7 +37,25 @@ test('GET /api maps upstream throw to 502', async () => {
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
-test('GET /api without stop/route returns 400', async () => {
-  const res = await worker.fetch(new Request('http://x/api?stop=1'));
+test('GET /api without stop returns 400', async () => {
+  const res = await worker.fetch(new Request('http://x/api'));
   assert.equal(res.status, 400);
+});
+
+test('GET /stops returns the stop directory', async () => {
+  const res = await worker.fetch(new Request('http://x/stops'));
+  assert.equal(res.status, 200);
+  const stops = await res.json();
+  assert.ok(stops.length > 0);
+  assert.deepEqual(Object.keys(stops[0]).sort(), ['lat', 'lon', 'name', 'number', 'stop']);
+});
+
+test('GET /api works stop-only (no route)', async () => {
+  let fetched = '';
+  globalThis.fetch = async (url) => { fetched = String(url); return { ok: true, text: async () => '<table></table>' }; };
+  try {
+    const res = await worker.fetch(new Request('http://x/api?stop=9905'));
+    assert.equal(res.status, 200);
+    assert.match(fetched, /panel\.aspx\?stop=9905$/);
+  } finally { globalThis.fetch = originalFetch; }
 });

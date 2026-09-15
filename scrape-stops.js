@@ -65,3 +65,15 @@ export async function crawl(fetchImpl, queries) {
   }
   return [...seen.values()];
 }
+
+import fs from 'node:fs';
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const chars = 'abcdefghijklmnñopqrstuvwxyz0123456789';
+  const queries = [];
+  for (const a of chars) for (const b of chars) queries.push(a + b);
+  crawl(fetch, queries).then((rows) => {
+    fs.writeFileSync('stops.json', JSON.stringify(rows, null, 2));
+    console.error(`wrote stops.json with ${rows.length} stops`);
+  }).catch((err) => { console.error(err.message); process.exit(1); });
+}

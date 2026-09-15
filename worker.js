@@ -1,3 +1,5 @@
+import stops from './stops.json' with { type: 'json' };
+
 export function decide(arrivals, walkMinutes) {
   if (arrivals.length === 0) return { decision: 'walk', soonest: null };
   const soonest = arrivals.reduce((a, b) => (a.minutes <= b.minutes ? a : b));
@@ -36,13 +38,17 @@ $('f').onsubmit=async e=>{e.preventDefault();const s=$('stop').value,r=$('route'
 
 async function handleFetch(request) {
   const url = new URL(request.url);
+  if (url.pathname === '/stops') return Response.json(stops);
   if (url.pathname === '/api') {
     const stop = url.searchParams.get('stop');
     const route = url.searchParams.get('route');
-    if (!stop || !route) return Response.json({ error: 'missing stop/route' }, { status: 400 });
+    if (!stop) return Response.json({ error: 'missing stop/route' }, { status: 400 });
+    const panel = route
+      ? `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`
+      : `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}`;
     let upstream;
     try {
-      upstream = await globalThis.fetch(`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`);
+      upstream = await globalThis.fetch(panel);
     } catch {
       return Response.json({ error: 'upstream unreachable' }, { status: 502 });
     }
