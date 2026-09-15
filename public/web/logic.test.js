@@ -7,6 +7,10 @@ import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinu
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 
+import { findAlightStop } from './topology.js';
+import stopsFixture from '../../stops.json' with { type: 'json' };
+import linesFixture from '../../lines.json' with { type: 'json' };
+
 test('decide prefers bus only when strictly faster', () => {
   const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
   assert.equal(decide(a, 19).decision, 'bus');
@@ -15,21 +19,86 @@ test('decide prefers bus only when strictly faster', () => {
 });
 
 test('verdict falls back to walk without live arrivals', () => {
-  assert.deepEqual(verdict(19, 5, null, []), { kind: 'walk', walkMinutes: 19, walkToStop: 5, rideEst: null, bus: null });
-  assert.deepEqual(verdict(null, 5, 7, [{ line: '1', destination: 'X', minutes: 3 }]), { kind: 'walk', walkMinutes: null, walkToStop: 5, rideEst: 7, bus: null });
+  assert.deepEqual(verdict(19, 5, []), { kind: 'walk', walkMinutes: 19, walkToStop: 5, bus: null });
+  assert.deepEqual(verdict(null, 5, [{ line: '1', destination: 'X', minutes: 3 }]), { kind: 'walk', walkMinutes: null, walkToStop: 5, bus: null });
 });
 
-test('verdict adds walk-to-stop and ride to the wait before comparing', () => {
+test('verdict adds walk-to-stop to the wait before comparing (no driveMinutes in decision)', () => {
   const arr = [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 3 }];
-  const v = verdict(19, 5, 9, arr);
-  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 3, total: 17, line: '1', destination: 'X', ride: 9 } });
-  assert.equal(verdict(16, 5, 9, arr).kind, 'walk');
+  const v = verdict(19, 5, arr);
+  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 3, total: 8, line: '1', destination: 'X', alight: null } });
+  assert.equal(verdict(7, 5, arr).kind, 'walk');
 });
 
-test('verdict without walk-to-stop and ride compares wait alone (degraded)', () => {
+test('verdict without walk-to-stop compares wait alone (degraded)', () => {
   const arr = [{ line: '1', destination: 'X', minutes: 3 }];
-  assert.equal(verdict(19, null, null, arr).kind, 'bus');
-  assert.equal(verdict(3, null, null, arr).kind, 'walk');
+  assert.equal(verdict(19, null, arr).kind, 'bus');
+  assert.equal(verdict(3, null, arr).kind, 'walk');
+});
+
+test('regression: verdict discards bus in opposite direction and recommends walk even if bus arrives in 1 min', () => {
+  const arr = [{ line: '1', destination: 'CORTADURA', minutes: 1 }];
+  // resolveAlight returns null for any arrival that does not get closer to destination
+  const resolveAlight = () => null;
+  const v = verdict(25, 2, arr, resolveAlight);
+  assert.equal(v.kind, 'walk');
+  assert.equal(v.bus, null);
+});
+
+test('verdict picks soonest eligible bus when faster bus goes wrong direction', () => {
+  const arr = [
+    { line: '1', destination: 'CORTADURA', minutes: 1 },
+    { line: '1', destination: 'PLAZA ESPAÑA', minutes: 4 },
+  ];
+  const resolveAlight = (a) => (a.destination === 'PLAZA ESPAÑA' ? { stop: { name: 'PLAZA ESPAÑA', stop: '1101' }, distanceMeters: 300, direction: 'PLAZA ESPAÑA' } : null);
+  const v = verdict(20, 2, arr, resolveAlight);
+  assert.equal(v.kind, 'bus');
+  assert.equal(v.bus.line, '1');
+  assert.equal(v.bus.destination, 'PLAZA ESPAÑA');
+  assert.equal(v.bus.minutes, 4);
+  assert.equal(v.bus.total, 6);
+  assert.equal(v.bus.alight.stop.name, 'PLAZA ESPAÑA');
+});
+
+test('regression: real Cadiz topology - Santa María del Mar (1106) to Plaza Mina with L1 Cortadura in 1 min returns walk', () => {
+  const destMina = { lat: 36.5338, lon: -6.2974 };
+  const arrivals = [{ line: '1', destination: 'CORTADURA', minutes: 1 }];
+  const resolveAlight = (arr) => findAlightStop({
+    line: arr.line,
+    direction: arr.destination,
+    boardingStopId: '1106',
+    destCoords: destMina,
+    stops: stopsFixture,
+    lines: linesFixture.lines,
+  });
+
+  const v = verdict(25, 1, arrivals, resolveAlight);
+  assert.equal(v.kind, 'walk');
+  assert.equal(v.bus, null);
+});
+
+test('regression: Santa María del Mar (1121) to Plaza Mina with L1 Cortadura 1min and L1 Plaza España 4min selects Plaza España and never Cortadura', () => {
+  const destMina = { lat: 36.5338, lon: -6.2974 };
+  const arrivals = [
+    { line: '1', destination: 'L1 CORTADURA', minutes: 1 },
+    { line: '1', destination: 'L1 PLAZA ESPAÑA', minutes: 4 },
+  ];
+  const resolveAlight = (arr) => findAlightStop({
+    line: arr.line,
+    direction: arr.destination,
+    boardingStopId: '1121',
+    destCoords: destMina,
+    stops: stopsFixture,
+    lines: linesFixture.lines,
+  });
+
+  const v = verdict(25, 2, arrivals, resolveAlight);
+  assert.equal(v.kind, 'bus');
+  assert.equal(v.bus.line, '1');
+  assert.equal(v.bus.destination, 'L1 PLAZA ESPAÑA');
+  assert.equal(v.bus.minutes, 4);
+  assert.equal(v.bus.alight.stop.stop, '1101');
+  assert.equal(v.bus.alight.direction, 'PLAZA ESPAÑA');
 });
 
 test('nearestStops returns 3 closest with _km', () => {

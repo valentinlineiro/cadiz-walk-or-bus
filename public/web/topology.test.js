@@ -12,10 +12,23 @@ test('matchDirection matches exact, case-insensitive, substring, and keyword', (
 
   assert.equal(matchDirection(dirs, 'CORTADURA'), 'CORTADURA');
   assert.equal(matchDirection(dirs, 'cortadura'), 'CORTADURA');
+  assert.equal(matchDirection(dirs, 'L1 CORTADURA'), 'CORTADURA');
+  assert.equal(matchDirection(dirs, '1 · CORTADURA'), 'CORTADURA');
   assert.equal(matchDirection(dirs, 'PLAZA DE ESPAÑA'), 'PLAZA ESPAÑA');
   assert.equal(matchDirection(dirs, 'PLAZA ESPAÑA'), 'PLAZA ESPAÑA');
+  assert.equal(matchDirection(dirs, 'L1 PLAZA ESPAÑA'), 'PLAZA ESPAÑA');
   assert.equal(matchDirection(dirs, 'SIMON BOLIVAR'), 'SIMÓN BOLIVAR');
   assert.equal(matchDirection(dirs, 'NON_EXISTENT'), null);
+});
+
+test('matchDirection discards ambiguously matching directions conservatively', () => {
+  const ambiguousDirs = {
+    'PLAZA ESPAÑA': [1, 2],
+    'PLAZA SEVILLA': [3, 4],
+  };
+  // "PLAZA" matches both keys -> must return null instead of guessing
+  assert.equal(matchDirection(ambiguousDirs, 'PLAZA'), null);
+  assert.equal(matchDirection(ambiguousDirs, 'L1 PLAZA'), null);
 });
 
 test('findAlightStop enforces index(alightStop) > index(boardingStop) strictly', () => {

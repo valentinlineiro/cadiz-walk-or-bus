@@ -11,27 +11,43 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
   return Math.round(2 * R * Math.asin(Math.sqrt(a)));
 }
 
+function stripAccents(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 export function matchDirection(lineDirections, destination) {
   if (!lineDirections || !destination) return null;
-  const target = destination.toUpperCase().trim();
+  const raw = String(destination).trim().toUpperCase();
+  const target = raw.replace(/^(L\s*\d+|\d+)\s*[-:·/]?\s*/i, '').trim();
+  if (!target) return null;
+
+  const targetNorm = stripAccents(target);
   const keys = Object.keys(lineDirections);
 
-  // Exact match
-  for (const k of keys) {
-    if (k.toUpperCase().trim() === target) return k;
-  }
+  // 1. Exact match (case and accent insensitive)
+  const exactMatches = keys.filter(
+    (k) => stripAccents(k.toUpperCase().trim()) === targetNorm
+  );
+  if (exactMatches.length === 1) return exactMatches[0];
+  if (exactMatches.length > 1) return null;
 
-  // Substring match
-  for (const k of keys) {
-    const normK = k.toUpperCase().trim();
-    if (normK.includes(target) || target.includes(normK)) return k;
-  }
+  // 2. Substring match (either target contains key or key contains target)
+  const subMatches = keys.filter((k) => {
+    const kNorm = stripAccents(k.toUpperCase().trim());
+    return kNorm.includes(targetNorm) || targetNorm.includes(kNorm);
+  });
+  if (subMatches.length === 1) return subMatches[0];
+  if (subMatches.length > 1) return null;
 
-  // First significant word match
-  const words = target.split(/\s+/).filter((w) => w.length > 3);
-  for (const k of keys) {
-    const normK = k.toUpperCase();
-    if (words.some((w) => normK.includes(w))) return k;
+  // 3. Significant word match (words with length > 3)
+  const words = targetNorm.split(/\s+/).filter((w) => w.length > 3);
+  if (words.length > 0) {
+    const wordMatches = keys.filter((k) => {
+      const kNorm = stripAccents(k.toUpperCase().trim());
+      return words.some((w) => kNorm.includes(w));
+    });
+    if (wordMatches.length === 1) return wordMatches[0];
+    if (wordMatches.length > 1) return null;
   }
 
   return null;

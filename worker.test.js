@@ -16,12 +16,26 @@ test('GET /api returns parsed arrivals with mocked upstream', async () => {
   assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 3 }] });
 });
 
-test('GET / serves HTML with favorites UI', async () => {
+test('GET / serves map UI', async () => {
   const res = await worker.fetch(new Request('http://x/'));
   assert.equal(res.status, 200);
   const body = await res.text();
-  assert.match(body, /localStorage/);
-  assert.match(body, /walkMinutes/);
+  assert.match(body, /¿Andar o bus\? — Cádiz/);
+  assert.match(body, /leaflet/);
+});
+
+test('GET /map serves map UI', async () => {
+  const res = await worker.fetch(new Request('http://x/map'));
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /¿Andar o bus\? — Cádiz/);
+});
+
+test('GET /api times out and returns 502 cleanly on slow upstream', async () => {
+  globalThis.fetch = async () => new Promise((_, reject) => setTimeout(() => reject(new DOMException('Timeout', 'TimeoutError')), 20));
+  const res = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(res.status, 502);
+  assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
 test('GET /api proxies upstream failure as 502', async () => {

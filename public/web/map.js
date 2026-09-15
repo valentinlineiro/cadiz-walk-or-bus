@@ -1,9 +1,14 @@
 let map, me, destPin, alightPin, walkLine, pins = new Map();
 
-export function initMap(onPin) {
+export function initMap(onPin, onMapClick) {
   map = L.map('map').setView([36.5271, -6.2885], 14);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
   map._onPin = onPin;
+  if (onMapClick) {
+    map.on('click', (e) => {
+      onMapClick({ lat: e.latlng.lat, lon: e.latlng.lng });
+    });
+  }
 }
 
 export function showMe(lat, lon) {
@@ -84,7 +89,10 @@ export function showStops(stops, arrivalsByStop, focused) {
   for (const s of stops) {
     const arr = arrivalsByStop.get(s.stop) ?? [];
     const pin = L.marker([s.lat, s.lon], { icon: pinIcon(pinStyle(arr, s.stop === focused), s.name) }).addTo(map);
-    pin.on('click', () => map._onPin(s.stop));
+    pin.on('click', (e) => {
+      if (e?.originalEvent) L.DomEvent.stopPropagation(e.originalEvent);
+      map._onPin(s.stop);
+    });
     pins.set(s.stop, pin);
   }
 }
