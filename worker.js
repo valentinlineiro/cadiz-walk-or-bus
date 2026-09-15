@@ -98,7 +98,13 @@ async function handleFetch(request) {
       : `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}`;
     let upstream;
     try {
-      upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
+      upstream = await globalThis.fetch(panel, {
+        signal: AbortSignal.timeout(4000),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
     } catch {
       return Response.json({ error: 'upstream unreachable' }, { status: 502 });
     }
