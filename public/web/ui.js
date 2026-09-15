@@ -2,6 +2,7 @@ import { nearestStops } from './geo.js';
 import { verdict } from './decision.js';
 import { getStops, getArrivals, geocode, walkMinutes } from './api.js';
 import { initMap, showMe, showStops } from './map.js';
+import { transition } from './state.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -9,11 +10,15 @@ let stops = [];
 let focused = null;
 let arrivalsByStop = new Map();
 let requestId = 0;
+let lastGeocode = 0;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
-function setState(next, statusText) {
-  state = next;
+function setState(event, statusText) {
+  // ponytail: 'LOCATING' is the initial reset, no table path leads into it
+  state = event === 'LOCATING' ? 'LOCATING' : transition(state, event);
   document.getElementById('status').textContent = statusText ?? state;
+  const form = document.getElementById('search');
+  if (form) for (const el of form.elements) el.disabled = !me;
 }
 
 async function refreshArrivals() {
@@ -34,13 +39,16 @@ function renderSheet(near, walk) {
   const verdictEl = document.getElementById('verdict');
   if (walk == null) {
     verdictEl.textContent = '';
-    detail.innerHTML = near
-      .map((s) => {
-        const arr = arrivalsByStop.get(s.stop) ?? [];
-        const t = arr.length === 0 ? '—' : `${Math.min(...arr.map((a) => a.minutes))}′`;
-        return `<div>${s.name}: <b>${t}</b></div>`;
-      })
-      .join('');
+    detail.replaceChildren();
+    for (const s of near) {
+      const arr = arrivalsByStop.get(s.stop) ?? [];
+      const t = arr.length === 0 ? '—' : `${Math.min(...arr.map((a) => a.minutes))}′`;
+      const row = document.createElement('div');
+      const b = document.createElement('b');
+      b.textContent = t;
+      row.append(`${s.name}: `, b);
+      detail.append(row);
+    }
     return;
   }
   const v = verdict(walk, arrivalsByStop.get(focused) ?? []);
@@ -73,41 +81,57 @@ function locate() {
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
       me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
-      setState('LOADING_STOPS', 'Cargando paradas…');
+      setState('LOCATED', 'Cargando paradas…');
       showMe(me.lat, me.lon);
       try {
         stops = await getStops(fetch);
       } catch {
-        setState('ERROR', 'No se pudieron cargar las paradas');
+        setState('FAILED', 'No se pudieron cargar las paradas');
         return;
       }
-      setState('READY', 'Toca una parada o busca destino');
+      setState('STOPS_LOADED', 'Toca una parada o busca destino');
       await refreshArrivals();
     },
     () => {
       me = { ...CADIZ };
-      setState('READY', 'Sin GPS: explora Cádiz manualmente');
+      setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
       showMe(me.lat, me.lon);
       getStops(fetch).then(async (s) => {
         stops = s;
         await refreshArrivals();
-      });
+      }).catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
     },
   );
 }
 
 async function onSearch(q) {
+  if (!me) return;
+  const now = Date.now();
+  if (now - lastGeocode < 1100) return;
+  lastGeocode = now;
   const id = ++requestId;
-  setState('GEOCODING', 'Buscando destino…');
-  const dest = await geocode(fetch, q);
-  if (id !== requestId || !dest) {
-    if (id === requestId) setState('READY', 'Destino no encontrado');
+  setState('SEARCH', 'Buscando destino…');
+  let dest;
+  try {
+    dest = await geocode(fetch, q);
+  } catch {
+    if (id === requestId) setState('FAILED', 'Destino no encontrado');
     return;
   }
-  setState('ROUTING', 'Calculando…');
-  const walk = await walkMinutes(fetch, me, dest);
+  if (id !== requestId || !dest) {
+    if (id === requestId) setState('FAILED', 'Destino no encontrado');
+    return;
+  }
+  setState('GEOCODED', 'Calculando…');
+  let walk;
+  try {
+    walk = await walkMinutes(fetch, me, dest);
+  } catch {
+    if (id === requestId) setState('FAILED', 'Sin ruta andando → Andar');
+    return;
+  }
   if (id !== requestId) return;
-  setState('DECIDING', 'Decidiendo…');
+  setState('ROUTED', 'Decidiendo…');
   renderSheet(nearestStops(stops, me.lat, me.lon, 3), walk);
-  setState('READY', walk == null ? 'Sin ruta andando → Andar' : 'Listo');
+  setState('DONE', walk == null ? 'Sin ruta andando → Andar' : 'Listo');
 }
