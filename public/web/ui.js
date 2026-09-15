@@ -147,7 +147,10 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
       }));
     }
     if (walkToStop != null) {
-      busSide.append(Object.assign(document.createElement('div'), { className: 'lbl', textContent: `a pie ${walkToStop}′ · espera + pie ${v.bus.total}′` }));
+      busSide.append(Object.assign(document.createElement('div'), {
+        className: 'lbl',
+        textContent: `a pie ${walkToStop}′ · espera ${v.bus.minutes}′ · bus ${v.bus.rideMinutes}′ · total ${v.bus.total}′`,
+      }));
     }
   } else {
     busSide.append(Object.assign(document.createElement('div'), { className: 'lbl', textContent: 'Sin bus útil' }));

@@ -27,7 +27,7 @@ test('verdict falls back to walk without live arrivals', () => {
 test('verdict adds walk-to-stop to the wait before comparing (no driveMinutes in decision)', () => {
   const arr = [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 3 }];
   const v = verdict(19, 5, arr);
-  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 3, total: 8, line: '1', destination: 'X', alight: null } });
+  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 3, rideMinutes: 0, total: 8, line: '1', destination: 'X', alight: null } });
   assert.equal(verdict(7, 5, arr).kind, 'walk');
 });
 

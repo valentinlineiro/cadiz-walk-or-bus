@@ -26,9 +26,18 @@ export function filterCandidates(arrivals, resolveAlight) {
 // ranking needs to get sharper than "prefer the bus that lands you closer".
 const WALK_METERS_PER_MINUTE = 80;
 
+// ponytail: constant urban bus pace (~15 km/h, incl. stops/traffic) to
+// estimate ride time from rideMeters — swap for the busRoute() driving-time
+// estimate (already fetched for the map line) if this needs to get sharper.
+const BUS_METERS_PER_MINUTE = 250;
+
+function rideMinutes(candidate) {
+  return candidate.alight?.rideMeters != null ? candidate.alight.rideMeters / BUS_METERS_PER_MINUTE : 0;
+}
+
 function rankScore(candidate) {
   const lastMile = candidate.alight?.distanceMeters != null ? candidate.alight.distanceMeters / WALK_METERS_PER_MINUTE : 0;
-  return candidate.minutes + lastMile;
+  return candidate.minutes + rideMinutes(candidate) + lastMile;
 }
 
 export function verdict(walkTotal, walkToStop, arrivals, resolveAlight) {
@@ -40,9 +49,11 @@ export function verdict(walkTotal, walkToStop, arrivals, resolveAlight) {
     return { kind: 'walk', walkMinutes: walkTotal, walkToStop: walkToStop ?? null, bus: null };
   }
   const soonest = candidates.reduce((a, b) => (rankScore(a) <= rankScore(b) ? a : b));
+  const ride = Math.round(rideMinutes(soonest));
   const bus = {
     minutes: soonest.minutes,
-    total: (walkToStop ?? 0) + soonest.minutes,
+    rideMinutes: ride,
+    total: (walkToStop ?? 0) + soonest.minutes + ride,
     line: soonest.line,
     destination: soonest.destination,
     alight: soonest.alight ?? null,

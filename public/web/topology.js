@@ -155,14 +155,21 @@ export function findAlightStop({ line, direction, boardingStopId, destCoords, st
   if (!bestCandidate) return null;
 
   // Stops the bus actually passes through, boarding to alighting inclusive —
-  // used to draw the real bus leg instead of a straight walking line over it.
+  // used to draw the real bus leg instead of a straight walking line over it,
+  // and to estimate ride time (rideMeters below) instead of ignoring it.
   const path = [boardingStopObj, ...subsequentIds.slice(0, bestOffset + 1).map((id) => stopMap.get(String(id)))]
     .filter((s) => s && Number.isFinite(s.lat) && Number.isFinite(s.lon));
+
+  let rideMeters = 0;
+  for (let i = 1; i < path.length; i++) {
+    rideMeters += haversineMeters(path[i - 1].lat, path[i - 1].lon, path[i].lat, path[i].lon);
+  }
 
   return {
     stop: bestCandidate,
     distanceMeters: minDistance,
     direction: dirKey,
     path,
+    rideMeters,
   };
 }
