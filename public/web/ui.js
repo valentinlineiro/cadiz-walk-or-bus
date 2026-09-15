@@ -4,6 +4,7 @@ import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRout
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
+import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { findAlightStop, diversifyByLine } from './topology.js';
 
 let state = 'LOCATING';
@@ -14,6 +15,7 @@ let focused = null;
 let arrivalsByStop = new Map();
 let requestId = 0;
 let destCoords = null;
+let destLabel = null;
 let lastWalkRoute = null;
 let walkToStopCache = new Map();
 let lastNear = [];
@@ -104,6 +106,7 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
     detail.append(row);
     showAlightStop(null);
     showBusRoute(null);
+    hideFavToggle();
     return;
   }
   const walkToStop = walkToStopRouteObj?.minutes ?? null;
@@ -177,6 +180,22 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
     f ? { lat: f.lat, lon: f.lon } : null,
     v.bus?.alight?.stop ? { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon } : null,
   ]);
+
+  updateFavToggle();
+}
+
+function hideFavToggle() {
+  document.getElementById('fav-toggle')?.classList.add('hidden');
+}
+
+function updateFavToggle() {
+  const favBtn = document.getElementById('fav-toggle');
+  if (!favBtn || !destCoords) return;
+  favBtn.classList.remove('hidden');
+  const fav = isFavorite(destCoords);
+  favBtn.textContent = fav ? '★' : '☆';
+  favBtn.classList.toggle('active', fav);
+  favBtn.setAttribute('aria-label', fav ? 'Quitar de destinos habituales' : 'Guardar como destino habitual');
 }
 
 // A failed search must not leave the previous destination's verdict on
@@ -190,6 +209,7 @@ function showSearchError(query) {
   const row = document.createElement('div');
   row.textContent = `No encontramos «${query}». Prueba con otro nombre.`;
   detail.append(row);
+  hideFavToggle();
 }
 
 function renderNoResultsHint(query) {
@@ -210,37 +230,68 @@ function closeDropdown() {
   dropdown.replaceChildren();
 }
 
-function renderRecents() {
+function buildDropdownRow(icon, item) {
+  const row = document.createElement('div');
+  row.className = 'dropdown-item';
+  row._data = item;
+  const iconEl = document.createElement('span');
+  iconEl.className = 'icon';
+  iconEl.textContent = icon;
+  const text = document.createElement('div');
+  text.className = 'text';
+  const main = document.createElement('div');
+  main.className = 'main';
+  main.textContent = item.label;
+  text.appendChild(main);
+  if (item.sub) {
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    sub.textContent = item.sub;
+    text.appendChild(sub);
+  }
+  row.append(iconEl, text);
+  return row;
+}
+
+function appendDropdownSection(dropdown, title, items, icon, { removable } = {}) {
+  if (items.length === 0) return;
+  if (title) {
+    const header = document.createElement('div');
+    header.className = 'dropdown-header';
+    header.textContent = title;
+    dropdown.appendChild(header);
+  }
+  for (const item of items) {
+    const row = buildDropdownRow(icon, item);
+    if (removable) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'remove-fav';
+      removeBtn.textContent = '✕';
+      removeBtn.setAttribute('aria-label', `Quitar ${item.label} de habituales`);
+      row.classList.add('favorite-item');
+      row.appendChild(removeBtn);
+    }
+    dropdown.appendChild(row);
+  }
+}
+
+// Manually pinned destinations first, then auto-tracked search history —
+// skip a recent entry already covered by a favorite so it isn't listed twice.
+function renderQuickPicks() {
   const dropdown = document.getElementById('dropdown');
   if (!dropdown) return;
+  let favorites = [];
   let recents = [];
-  try { recents = getRecent(); } catch { recents = []; }
-  if (recents.length === 0) {
+  try { favorites = getFavorites(); } catch { favorites = []; }
+  try { recents = getRecent().filter((r) => !isFavorite(r)); } catch { recents = []; }
+  if (favorites.length === 0 && recents.length === 0) {
     closeDropdown();
     return;
   }
   dropdown.replaceChildren();
-  const header = document.createElement('div');
-  header.className = 'dropdown-header';
-  header.textContent = 'Últimos';
-  dropdown.appendChild(header);
-
-  for (const item of recents) {
-    const row = document.createElement('div');
-    row.className = 'dropdown-item';
-    row._data = item;
-    const icon = document.createElement('span');
-    icon.className = 'icon';
-    icon.textContent = '🕘';
-    const text = document.createElement('div');
-    text.className = 'text';
-    const main = document.createElement('div');
-    main.className = 'main';
-    main.textContent = item.label;
-    text.appendChild(main);
-    row.append(icon, text);
-    dropdown.appendChild(row);
-  }
+  appendDropdownSection(dropdown, 'Habituales', favorites, '★', { removable: true });
+  appendDropdownSection(dropdown, 'Últimos', recents, '🕘');
   dropdown.classList.remove('hidden');
 }
 
@@ -252,28 +303,7 @@ function renderSuggestions(hits) {
     return;
   }
   dropdown.replaceChildren();
-  for (const hit of hits) {
-    const row = document.createElement('div');
-    row.className = 'dropdown-item';
-    row._data = hit;
-    const icon = document.createElement('span');
-    icon.className = 'icon';
-    icon.textContent = '📍';
-    const text = document.createElement('div');
-    text.className = 'text';
-    const main = document.createElement('div');
-    main.className = 'main';
-    main.textContent = hit.label;
-    text.appendChild(main);
-    if (hit.sub) {
-      const sub = document.createElement('div');
-      sub.className = 'sub';
-      sub.textContent = hit.sub;
-      text.appendChild(sub);
-    }
-    row.append(icon, text);
-    dropdown.appendChild(row);
-  }
+  appendDropdownSection(dropdown, null, hits, '📍');
   dropdown.classList.remove('hidden');
 }
 
@@ -294,6 +324,7 @@ async function routeToDestination(dest) {
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
 
   destCoords = { lat: dest.lat, lon: dest.lon };
+  destLabel = dest.label;
   // A stop's eligibility depends on the destination — a manual pin pick or
   // auto-focus from a previous search must not carry over to a new one.
   focused = null;
@@ -383,7 +414,7 @@ export function initUI() {
 
   input.addEventListener('focus', () => {
     if (!input.value.trim()) {
-      renderRecents();
+      renderQuickPicks();
     }
   });
 
@@ -391,7 +422,7 @@ export function initUI() {
     clearTimeout(debounce);
     const q = input.value.trim();
     if (!q) {
-      renderRecents();
+      renderQuickPicks();
       return;
     }
     debounce = setTimeout(async () => {
@@ -405,10 +436,33 @@ export function initUI() {
 
   if (dropdown) {
     dropdown.addEventListener('pointerdown', (e) => {
+      const removeBtn = e.target.closest('.remove-fav');
+      if (removeBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const itemEl = removeBtn.closest('.dropdown-item');
+        if (itemEl?._data) {
+          removeFavorite(itemEl._data);
+          renderQuickPicks();
+          updateFavToggle();
+        }
+        return;
+      }
       const itemEl = e.target.closest('.dropdown-item');
       if (!itemEl || !itemEl._data) return;
       e.preventDefault();
       selectDestination(itemEl._data);
+    });
+  }
+
+  const favBtn = document.getElementById('fav-toggle');
+  if (favBtn) {
+    favBtn.addEventListener('click', () => {
+      if (!destCoords || !destLabel) return;
+      const dest = { label: destLabel, lat: destCoords.lat, lon: destCoords.lon };
+      if (isFavorite(dest)) removeFavorite(dest);
+      else addFavorite(dest);
+      updateFavToggle();
     });
   }
 

@@ -6,6 +6,7 @@ import { transition } from './state.js';
 import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes } from './api.js';
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
+import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -297,5 +298,35 @@ test('saveRecent prepends, deduplicates by label/coords, caps at 5, and survives
   };
   assert.doesNotThrow(() => saveRecent({ label: 'Fail', lat: 36.5, lon: -6.2 }, throwingStorage));
   assert.doesNotThrow(() => getRecent(throwingStorage));
+});
+
+test('favorites: add, isFavorite, remove, dedupe by coords, and survives errors', () => {
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  assert.deepEqual(getFavorites(mockStorage), []);
+  addFavorite({ label: 'Casa', lat: 36.51, lon: -6.28 }, mockStorage);
+  addFavorite({ label: 'Trabajo', lat: 36.52, lon: -6.29 }, mockStorage);
+  assert.equal(isFavorite({ lat: 36.51, lon: -6.28 }, mockStorage), true);
+  assert.equal(isFavorite({ lat: 36.9, lon: -6.9 }, mockStorage), false);
+
+  // Re-adding the same spot updates it in place instead of duplicating.
+  addFavorite({ label: 'Casa (portal)', lat: 36.51005, lon: -6.28005 }, mockStorage);
+  const items = getFavorites(mockStorage);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].label, 'Casa (portal)');
+
+  removeFavorite({ lat: 36.52, lon: -6.29 }, mockStorage);
+  assert.deepEqual(getFavorites(mockStorage).map((f) => f.label), ['Casa (portal)']);
+
+  const throwingStorage = {
+    getItem: () => { throw new Error('Blocked storage'); },
+    setItem: () => { throw new Error('Quota exceeded'); },
+  };
+  assert.doesNotThrow(() => addFavorite({ label: 'Fail', lat: 36.5, lon: -6.2 }, throwingStorage));
+  assert.doesNotThrow(() => getFavorites(throwingStorage));
 });
 
