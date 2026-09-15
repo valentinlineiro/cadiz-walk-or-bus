@@ -1,6 +1,6 @@
 import { nearestStops } from './geo.js';
 import { verdict, filterCandidates } from './decision.js';
-import { getStops, getLines, getArrivals, searchDestinations, walkRoute } from './api.js';
+import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRoute } from './api.js';
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
@@ -124,7 +124,8 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   showAlightStop(v.bus?.alight?.stop ?? null);
 
   if (v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2) {
-    showBusRoute(v.bus.alight.path.map((s) => [s.lat, s.lon]));
+    const routedBus = await busRoute(fetch, v.bus.alight.path).catch(() => null);
+    showBusRoute(routedBus ?? v.bus.alight.path.map((s) => [s.lat, s.lon]));
     let lastMile = null;
     try {
       lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);

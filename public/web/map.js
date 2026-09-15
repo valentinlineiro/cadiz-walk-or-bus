@@ -61,11 +61,9 @@ export function showWalkRoute(coordinates) {
   }).addTo(map);
 }
 
-// The bus's actual leg — straight lines between the stops it really passes
-// through, not a walking-route guess over the same ground.
-// ponytail: straight segments between stops, not the real street/bridge
-// geometry (can visibly cut across a bay) — upgrade to a routed line if that
-// reads as wrong often enough to matter.
+// The bus's actual leg — routed over real roads between the stops it
+// passes through (caller falls back to straight stop-to-stop segments if
+// routing fails), not a walking-route guess over the same ground.
 export function showBusRoute(coordinates) {
   if (busLine) {
     map.removeLayer(busLine);

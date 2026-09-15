@@ -58,8 +58,12 @@ export async function geocode(fetchImpl, q) {
   return hits.length > 0 ? { lat: hits[0].lat, lon: hits[0].lon, name: hits[0].label } : null;
 }
 
+// The public router.project-osrm.org demo has no real foot profile — its
+// /foot/ route silently serves the car graph (same distance/duration as
+// /driving/, one-way streets and all), producing walking detours ~2x too
+// long. FOSSGIS's routed-foot mirror is an actual pedestrian graph.
 export async function walkRoute(fetchImpl, from, to) {
-  const url = `https://router.project-osrm.org/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+  const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
   let r;
   try {
     r = await fetchImpl(url);
@@ -82,6 +86,25 @@ export async function walkRoute(fetchImpl, from, to) {
 export async function walkMinutes(fetchImpl, from, to) {
   const res = await walkRoute(fetchImpl, from, to);
   return res ? res.minutes : null;
+}
+
+// Roads the bus actually drives on, through every stop it passes — the
+// driving graph (unlike /foot/ above) is real on the public OSRM demo.
+export async function busRoute(fetchImpl, stopCoords) {
+  if (!Array.isArray(stopCoords) || stopCoords.length < 2) return null;
+  const waypoints = stopCoords.map((s) => `${s.lon},${s.lat}`).join(';');
+  const url = `https://router.project-osrm.org/route/v1/driving/${waypoints}?overview=full&geometries=geojson`;
+  let r;
+  try {
+    r = await fetchImpl(url);
+  } catch {
+    return null;
+  }
+  if (!r.ok) return null;
+  const [route] = (await r.json()).routes ?? [];
+  const rawCoords = route?.geometry?.coordinates ?? [];
+  if (rawCoords.length < 2) return null;
+  return rawCoords.map(([lon, lat]) => [lat, lon]);
 }
 
 export async function driveMinutes(fetchImpl, from, to) {
