@@ -1,4 +1,4 @@
-let map, me, destPin, alightPin, walkLine, pins = new Map();
+let map, me, destPin, alightPin, walkLine, busLine, pins = new Map();
 
 export function initMap(onPin, onMapClick) {
   map = L.map('map').setView([36.5271, -6.2885], 14);
@@ -61,10 +61,29 @@ export function showWalkRoute(coordinates) {
   }).addTo(map);
 }
 
+// The bus's actual leg — straight lines between the stops it really passes
+// through, not a walking-route guess over the same ground.
+// ponytail: straight segments between stops, not the real street/bridge
+// geometry (can visibly cut across a bay) — upgrade to a routed line if that
+// reads as wrong often enough to matter.
+export function showBusRoute(coordinates) {
+  if (busLine) {
+    map.removeLayer(busLine);
+    busLine = null;
+  }
+  if (!coordinates || coordinates.length < 2) return;
+  busLine = L.polyline(coordinates, {
+    color: '#2563eb',
+    weight: 5,
+    opacity: 0.85,
+  }).addTo(map);
+}
+
 export function clearRoute() {
   if (destPin) { map.removeLayer(destPin); destPin = null; }
   if (alightPin) { map.removeLayer(alightPin); alightPin = null; }
   if (walkLine) { map.removeLayer(walkLine); walkLine = null; }
+  if (busLine) { map.removeLayer(busLine); busLine = null; }
 }
 
 export function fitRoute(points) {

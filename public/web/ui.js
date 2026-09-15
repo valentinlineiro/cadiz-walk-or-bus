@@ -1,7 +1,7 @@
 import { nearestStops } from './geo.js';
 import { verdict, filterCandidates } from './decision.js';
-import { getStops, getLines, getArrivals, searchDestinations, walkRoute, walkMinutes } from './api.js';
-import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, fitRoute } from './map.js';
+import { getStops, getLines, getArrivals, searchDestinations, walkRoute } from './api.js';
+import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
 import { findAlightStop } from './topology.js';
@@ -14,7 +14,7 @@ let focused = null;
 let arrivalsByStop = new Map();
 let requestId = 0;
 let destCoords = null;
-let lastWalk = null;
+let lastWalkRoute = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 function setState(event, statusText) {
@@ -60,9 +60,10 @@ function makeAlightResolver(boardingStop, destinationCoords) {
     });
 }
 
-function renderSheet(near, walk, walkToStop) {
+async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const detail = document.getElementById('detail');
   const verdictEl = document.getElementById('verdict');
+  const walk = walkRouteObj?.minutes ?? null;
   if (walk == null) {
     verdictEl.textContent = '';
     detail.replaceChildren();
@@ -70,8 +71,10 @@ function renderSheet(near, walk, walkToStop) {
     row.textContent = 'Busca un destino o toca el mapa para comparar.';
     detail.append(row);
     showAlightStop(null);
+    showBusRoute(null);
     return;
   }
+  const walkToStop = walkToStopRouteObj?.minutes ?? null;
   const f = near.find((s) => s.stop === focused);
   const resolveAlight = makeAlightResolver(f, destCoords);
   const arrivals = arrivalsByStop.get(focused) ?? [];
@@ -119,6 +122,22 @@ function renderSheet(near, walk, walkToStop) {
   detail.append(duel);
 
   showAlightStop(v.bus?.alight?.stop ?? null);
+
+  if (v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2) {
+    showBusRoute(v.bus.alight.path.map((s) => [s.lat, s.lon]));
+    let lastMile = null;
+    try {
+      lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);
+    } catch {}
+    const segments = [];
+    if (walkToStopRouteObj?.coordinates?.length) segments.push(walkToStopRouteObj.coordinates);
+    if (lastMile?.coordinates?.length) segments.push(lastMile.coordinates);
+    showWalkRoute(segments);
+  } else {
+    showBusRoute(null);
+    showWalkRoute(walkRouteObj?.coordinates ?? null);
+  }
+
   fitRoute([
     me,
     destCoords,
@@ -262,16 +281,15 @@ async function routeToDestination(dest) {
     return;
   }
 
-  showWalkRoute(routeRes.coordinates);
   setState('ROUTED', '🚌 Consultando llegadas…');
 
   const near = await loadNearby();
   const f = near.find((s) => s.stop === focused);
-  const walkToStop = f ? await walkMinutes(fetch, me, { lat: f.lat, lon: f.lon }) : null;
+  const walkToStopRoute = f ? await walkRoute(fetch, me, { lat: f.lat, lon: f.lon }) : null;
   if (id !== requestId) return;
 
-  lastWalk = routeRes.minutes;
-  renderSheet(near, lastWalk, walkToStop);
+  lastWalkRoute = routeRes;
+  await renderSheet(near, lastWalkRoute, walkToStopRoute);
   setState('DONE', 'Listo');
 }
 
@@ -304,8 +322,8 @@ export function initUI() {
       const near = nearestStops(stops, me.lat, me.lon, 3);
       showStops(near, eligibleArrivalsByStop(near), focused);
       const f = near.find((s) => s.stop === focused);
-      const walkToStop = f ? await walkMinutes(fetch, me, { lat: f.lat, lon: f.lon }) : null;
-      renderSheet(near, lastWalk, walkToStop);
+      const walkToStopRoute = f ? await walkRoute(fetch, me, { lat: f.lat, lon: f.lon }) : null;
+      await renderSheet(near, lastWalkRoute, walkToStopRoute);
     },
     async (coords) => {
       if (!me) return;

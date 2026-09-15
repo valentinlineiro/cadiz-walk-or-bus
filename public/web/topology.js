@@ -89,29 +89,37 @@ export function findAlightStop({ line, direction, boardingStopId, destCoords, st
 
   const subsequentIds = sequence.slice(boardingIdx + 1);
   let bestCandidate = null;
+  let bestOffset = -1;
   let minDistance = Infinity;
 
-  for (const stopId of subsequentIds) {
+  subsequentIds.forEach((stopId, offset) => {
     const stopObj = stopMap.get(String(stopId));
-    if (!stopObj || !Number.isFinite(stopObj.lat) || !Number.isFinite(stopObj.lon)) continue;
+    if (!stopObj || !Number.isFinite(stopObj.lat) || !Number.isFinite(stopObj.lon)) return;
 
     const dist = haversineMeters(stopObj.lat, stopObj.lon, destCoords.lat, destCoords.lon);
 
     // Rule: candidate must be strictly closer to destination than the boarding stop
-    if (dist >= boardingDist) continue;
+    if (dist >= boardingDist) return;
 
     // Minimization with deterministic tie-breaker (earlier in sequence wins on strict inequality)
     if (dist < minDistance) {
       minDistance = dist;
       bestCandidate = stopObj;
+      bestOffset = offset;
     }
-  }
+  });
 
   if (!bestCandidate) return null;
+
+  // Stops the bus actually passes through, boarding to alighting inclusive —
+  // used to draw the real bus leg instead of a straight walking line over it.
+  const path = [boardingStopObj, ...subsequentIds.slice(0, bestOffset + 1).map((id) => stopMap.get(String(id)))]
+    .filter((s) => s && Number.isFinite(s.lat) && Number.isFinite(s.lon));
 
   return {
     stop: bestCandidate,
     distanceMeters: minDistance,
     direction: dirKey,
+    path,
   };
 }
