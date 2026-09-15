@@ -81,6 +81,29 @@ async function loadNearby() {
   return near;
 }
 
+// A lightweight verdict for a pinned destination we are NOT currently
+// routing to — used to badge favorites with "🚌 4′" / "🚶 12′" so the list
+// itself answers "bus or walk", without touching the current search state
+// (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
+async function quickVerdictFor(dest) {
+  if (!me || stops.length === 0) return null;
+  const walkRes = await walkRoute(fetch, me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
+  const walkTotal = walkRes?.minutes ?? null;
+  if (walkTotal == null) return null;
+  const pool = nearbyDiverseStops(6);
+  const arrivalsByPool = new Map(
+    await Promise.all(pool.map(async (s) => [s.stop, await getArrivals(fetch, s.stop)])),
+  );
+  let best = null;
+  for (const s of pool) {
+    const arrivals = arrivalsByPool.get(s.stop) ?? [];
+    const walkToStopRoute = await getWalkToStopRoute(s);
+    const v = verdict(walkTotal, walkToStopRoute?.minutes ?? null, arrivals, makeAlightResolver(s, dest));
+    if (v.kind === 'bus' && (!best || v.bus.total < best.bus.total)) best = v;
+  }
+  return best ?? { kind: 'walk', walkMinutes: walkTotal, bus: null };
+}
+
 function makeAlightResolver(boardingStop, destinationCoords) {
   if (!boardingStop || !destinationCoords || !lines) return null;
   return (arr) =>
@@ -233,7 +256,7 @@ function closeDropdown() {
   dropdown.replaceChildren();
 }
 
-function buildDropdownRow(icon, item) {
+function buildDropdownRow(icon, item, { badge } = {}) {
   const row = document.createElement('div');
   row.className = 'dropdown-item';
   row._data = item;
@@ -253,10 +276,37 @@ function buildDropdownRow(icon, item) {
     text.appendChild(sub);
   }
   row.append(iconEl, text);
+  if (badge) {
+    const badgeEl = document.createElement('span');
+    badgeEl.className = 'quick-verdict';
+    badgeEl.textContent = '⋯';
+    row.appendChild(badgeEl);
+    row._badgeEl = badgeEl;
+  }
   return row;
 }
 
-function appendDropdownSection(dropdown, title, items, icon, { removable } = {}) {
+// Fills a favorite's badge with a quick bus-or-walk read, computed in the
+// background — lets the list itself answer the question, no tap needed.
+function fillQuickVerdictBadge(row, dest) {
+  quickVerdictFor(dest)
+    .then((v) => {
+      const badgeEl = row._badgeEl;
+      if (!badgeEl) return;
+      if (v?.kind === 'bus' && v.bus) {
+        badgeEl.textContent = `🚌 ${v.bus.total}′`;
+        badgeEl.className = 'quick-verdict bus';
+      } else if (v?.walkMinutes != null) {
+        badgeEl.textContent = `🚶 ${v.walkMinutes}′`;
+        badgeEl.className = 'quick-verdict walk';
+      } else {
+        badgeEl.textContent = '';
+      }
+    })
+    .catch(() => { if (row._badgeEl) row._badgeEl.textContent = ''; });
+}
+
+function appendDropdownSection(dropdown, title, items, icon, { removable, badge } = {}) {
   if (items.length === 0) return;
   if (title) {
     const header = document.createElement('div');
@@ -265,7 +315,7 @@ function appendDropdownSection(dropdown, title, items, icon, { removable } = {})
     dropdown.appendChild(header);
   }
   for (const item of items) {
-    const row = buildDropdownRow(icon, item);
+    const row = buildDropdownRow(icon, item, { badge });
     if (removable) {
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
@@ -276,6 +326,7 @@ function appendDropdownSection(dropdown, title, items, icon, { removable } = {})
       row.appendChild(removeBtn);
     }
     dropdown.appendChild(row);
+    if (badge) fillQuickVerdictBadge(row, item);
   }
 }
 
@@ -293,7 +344,7 @@ function renderQuickPicks() {
     return;
   }
   dropdown.replaceChildren();
-  appendDropdownSection(dropdown, 'Habituales', favorites, '★', { removable: true });
+  appendDropdownSection(dropdown, 'Habituales', favorites, '★', { removable: true, badge: true });
   appendDropdownSection(dropdown, 'Últimos', recents, '🕘');
   dropdown.classList.remove('hidden');
 }
