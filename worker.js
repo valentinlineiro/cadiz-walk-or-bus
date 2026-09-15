@@ -1,6 +1,11 @@
 import stops from './stops.json' with { type: 'json' };
 import lines from './lines.json' with { type: 'json' };
 
+// Reverse-DNS name of 77.224.241.76 (the panel's real IP) -- Workers' fetch()
+// refuses plain-HTTP requests to a bare IP with error 1003, so a hostname is
+// required even though there's no real domain for this internal panel.
+const PANEL_HOST = 'static-76-241-224-77.ipcom.comunitel.net';
+
 export function decide(arrivals, walkMinutes) {
   if (arrivals.length === 0) return { decision: 'walk', soonest: null };
   const soonest = arrivals.reduce((a, b) => (a.minutes <= b.minutes ? a : b));
@@ -93,18 +98,16 @@ async function handleFetch(request) {
     const stop = url.searchParams.get('stop');
     const route = url.searchParams.get('route');
     if (!stop) return Response.json({ error: 'missing stop/route' }, { status: 400 });
+    // Workers' fetch() rejects plain-HTTP requests to a bare IP literal with its
+    // own error 1003 ("Direct IP access not allowed") before the request ever
+    // leaves Cloudflare's network. PANEL_HOST is the panel server's real reverse-DNS
+    // name (resolves to the same 77.224.241.76) -- using it sidesteps that entirely.
     const panel = route
-      ? `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`
-      : `http://77.224.241.76/urbanos/mobile/panel.aspx?stop=${stop}`;
+      ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`
+      : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${stop}`;
     let upstream;
     try {
-      upstream = await globalThis.fetch(panel, {
-        signal: AbortSignal.timeout(4000),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-      });
+      upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
     } catch {
       return Response.json({ error: 'upstream unreachable' }, { status: 502 });
     }
