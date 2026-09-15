@@ -1,6 +1,5 @@
 import { nearestStops } from './geo.js';
 import { verdict } from './decision.js';
-import { transition } from './state.js';
 import { getStops, getArrivals, geocode, walkMinutes } from './api.js';
 import { initMap, showMe, showStops } from './map.js';
 
