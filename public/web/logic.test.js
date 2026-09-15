@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { decide, verdict } from './decision.js';
 import { nearestStops } from './geo.js';
 import { transition } from './state.js';
+import { getStops, getArrivals, geocode, walkMinutes } from './api.js';
 
 test('decide prefers bus only when strictly faster', () => {
   const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
@@ -43,4 +44,26 @@ test('transition follows the locating→ready→deciding flow', () => {
   assert.equal(transition('READY', 'GPS_DENIED'), 'READY');
   assert.equal(transition('LOCATING', 'GPS_DENIED'), 'READY');
   assert.equal(transition('ROUTING', 'FAILED'), 'ERROR');
+});
+
+test('getArrivals returns [] on panel outage', async () => {
+  const f = async () => ({ ok: false, status: 502 });
+  assert.deepEqual(await getArrivals(f, '9905'), []);
+});
+
+test('geocode bounds to Cádiz and returns null on no hit', async () => {
+  let url = '';
+  const f = async (u) => { url = String(u); return { ok: true, json: async () => [] }; };
+  assert.equal(await geocode(f, 'Plaza Mina'), null);
+  assert.match(url, /bounded=1/);
+});
+
+test('walkMinutes rounds OSRM duration up', async () => {
+  const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 1120 }] }) });
+  assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 19);
+});
+
+test('walkMinutes is null when no route', async () => {
+  const f = async () => ({ ok: true, json: async () => ({ routes: [] }) });
+  assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
 });
