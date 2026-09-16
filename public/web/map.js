@@ -33,7 +33,7 @@ export function showDestination(lat, lon, label) {
     className: 'dest-pin',
     html: `<div title="${label ?? 'Destino'}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><div style="width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#111827;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.4);display:flex;align-items:center;justify-content:center"><span style="display:flex;align-items:center;justify-content:center;transform:rotate(45deg);color:#fff">${SVG.pin}</span></div></div>`,
     iconSize: [44, 44],
-    iconAnchor: [22, 39],
+    iconAnchor: [22, 35],
   });
   destPin = L.marker([lat, lon], { icon }).addTo(map);
 }

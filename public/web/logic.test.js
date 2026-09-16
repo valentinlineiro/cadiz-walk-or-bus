@@ -436,11 +436,14 @@ test('decisionCardHTML with bus verdict renders mode, line, wait, alight stop an
   const html = decisionCardHTML(busVerdict);
   assert.ok(html.includes('class="decision-card bus"'));
   assert.ok(html.includes('BUS'));
-  assert.ok(html.includes('L1 · 6′ de espera'));
+  assert.ok(html.includes('L1 · PLAZA ESPAÑA'));
+  assert.ok(html.includes('class="decision-wait"'));
+  assert.ok(html.includes('6<span class="unit">′ espera</span>'));
+  assert.ok(html.includes('espera'));
   assert.ok(html.includes('Bájate en Plaza de España'));
   assert.ok(html.includes('Andar · 22′'));
 
-  // Without alight stop, falls back to destination
+  // Without alight stop, omits alight badge
   const busWithoutAlight = {
     kind: 'bus',
     walkMinutes: 18,
@@ -454,7 +457,11 @@ test('decisionCardHTML with bus verdict renders mode, line, wait, alight stop an
     },
   };
   const htmlFallback = decisionCardHTML(busWithoutAlight);
-  assert.ok(htmlFallback.includes('Bájate en CORTADURA'));
+  assert.ok(htmlFallback.includes('L7 · CORTADURA'));
+  assert.ok(htmlFallback.includes('class="decision-wait"'));
+  assert.ok(htmlFallback.includes('3<span class="unit">′ espera</span>'));
+  assert.ok(!htmlFallback.includes('decision-sub'));
+  assert.ok(!htmlFallback.includes('Bájate en'));
 });
 
 test('decisionCardHTML with walk verdict renders mode, minutes and optional bus alternative', () => {

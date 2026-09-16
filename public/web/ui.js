@@ -222,12 +222,12 @@ export function decisionCardHTML(v, walkToStop) {
     return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
   }
   if (v.kind === 'bus' && v.bus) {
-    const alightName = v.bus.alight?.stop?.name ?? v.bus.destination ?? null;
     return `
       <div class="decision-card bus">
         <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
-        <div class="decision-line">L${escapeHTML(v.bus.line)} · ${v.bus.minutes}′ de espera</div>
-        ${alightName ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${escapeHTML(alightName)}</div>` : ''}
+        <div class="decision-line">L${escapeHTML(v.bus.line)} · ${escapeHTML(v.bus.destination)}</div>
+        <div class="decision-wait">${v.bus.minutes}<span class="unit">′ espera</span></div>
+        ${v.bus.alight?.stop ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${escapeHTML(v.bus.alight.stop.name)}</div>` : ''}
       </div>
       <div class="decision-alt"><span class="icon">${ICON.walk}</span>Andar · ${v.walkMinutes}′</div>
     `;
