@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 
 test('isValidCapturedAt validates ISO-8601 strings and handles future/synthetic dates', () => {
@@ -52,4 +54,21 @@ test('normalizeScenario returns null for non-object or incomplete inputs', () =>
   assert.equal(normalizeScenario(null), null);
   assert.equal(normalizeScenario('str'), null);
   assert.equal(normalizeScenario({}), null);
+});
+
+test('all scenario fixtures on disk conform to canonical contract', () => {
+  const scenariosDir = path.resolve('public/scenarios');
+  const fixtures = ['bus.json', 'walk.json', 'no-bus.json', 'search-error.json'];
+
+  for (const file of fixtures) {
+    const content = JSON.parse(fs.readFileSync(path.join(scenariosDir, file), 'utf-8'));
+    assert.ok(isValidCapturedAt(content.capturedAt), `${file} must have valid capturedAt`);
+    const normalized = normalizeScenario(content);
+    assert.ok(normalized, `${file} must be normalizable`);
+    if (!content.error) {
+      assert.ok(content.origin?.lat != null, `${file} must have canonical origin.lat`);
+      assert.ok(content.destination?.lat != null, `${file} must have canonical destination.lat`);
+      assert.ok(content.verdict != null, `${file} must have verdict`);
+    }
+  }
 });

@@ -1,6 +1,7 @@
 {
-  "me": { "lat": 36.5290, "lon": -6.2860 },
-  "dest": { "lat": 36.5300, "lon": -6.2845, "label": "Mirador del 1812" },
+  "capturedAt": "2026-09-16T08:35:00+02:00",
+  "origin": { "lat": 36.5290, "lon": -6.2860 },
+  "destination": { "lat": 36.5300, "lon": -6.2845, "label": "Mirador del 1812" },
   "stops": [
     { "stop": "1229", "name": "Plaza España", "lat": 36.5295, "lon": -6.2855, "minutes": 7 }
   ],
