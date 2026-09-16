@@ -1,12 +1,13 @@
 import { nearestStops } from './geo.js';
 import { verdict, filterCandidates } from './decision.js';
 import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRoute } from './api.js';
-import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute } from './map.js';
+import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
+import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -31,13 +32,96 @@ const ICON = {
   flag: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 3v18h2v-6h9l-2.5-4L17 7H8V3z"/></svg>',
   star: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2.5l3.09 6.26 6.91.94-5 4.87 1.18 6.88L12 17.77 5.82 21.45 7 14.57l-5-4.87 6.91-.94z"/></svg>',
   starFill: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2.5l3.09 6.26 6.91.94-5 4.87 1.18 6.88L12 17.77 5.82 21.45 7 14.57l-5-4.87 6.91-.94z"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
 };
+
+export let sheetState = SHEET_STATES.IDLE;
+
+export function getSheetState() {
+  return sheetState;
+}
+
+export function setSheetState(nextState) {
+  sheetState = nextState;
+  const searchTrigger = document.getElementById('search-trigger');
+  const searchForm = document.getElementById('search-form');
+  const btnChangeDest = document.getElementById('btn-change-dest');
+  const destName = document.getElementById('dest-name');
+  const decision = document.getElementById('decision');
+
+  if (nextState === 'IDLE') {
+    searchTrigger?.classList.remove('hidden');
+    searchForm?.classList.add('hidden');
+    btnChangeDest?.classList.add('hidden');
+    if (destName) destName.textContent = '';
+    if (decision) {
+      decision.classList.remove('hidden');
+      decision.innerHTML = '<div class="decision-empty">Busca un destino o toca el mapa para comparar.</div>';
+    }
+    hideFavToggle();
+  } else if (nextState === 'SEARCH') {
+    searchTrigger?.classList.add('hidden');
+    searchForm?.classList.remove('hidden');
+    btnChangeDest?.classList.add('hidden');
+    if (destName) destName.textContent = '';
+    if (decision) {
+      decision.classList.add('hidden');
+    }
+    hideFavToggle();
+  } else if (nextState === 'VERDICT') {
+    searchTrigger?.classList.add('hidden');
+    searchForm?.classList.add('hidden');
+    btnChangeDest?.classList.remove('hidden');
+    closeDropdown();
+    if (decision) {
+      decision.classList.remove('hidden');
+    }
+    if (destLabel && destName) {
+      destName.textContent = destLabel;
+    }
+  }
+}
+
+function openSearch(selectQuery = false) {
+  setSheetState(transitionSheet(sheetState, 'OPEN_SEARCH'));
+  const qInput = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+  if (qInput) {
+    qInput.focus();
+    if (selectQuery) qInput.select();
+    if (clearBtn) {
+      clearBtn.classList.toggle('hidden', qInput.value.length === 0);
+    }
+    if (!qInput.value.trim()) {
+      renderQuickPicks();
+    }
+  }
+}
+
+function cancelSearch() {
+  closeDropdown();
+  const next = transitionSheet(sheetState, 'CANCEL', { hasDestination: Boolean(destCoords) });
+  const qInput = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+  if (next === 'VERDICT') {
+    if (qInput) qInput.value = destLabel ?? '';
+    if (clearBtn) clearBtn.classList.add('hidden');
+    setSheetState(next);
+    updateFavToggle();
+  } else {
+    if (qInput) qInput.value = '';
+    if (clearBtn) clearBtn.classList.add('hidden');
+    setSheetState(next);
+    renderQuickPicks();
+  }
+}
 
 function setState(event, statusText) {
   state = event === 'LOCATING' ? 'LOCATING' : transition(state, event);
   const statusEl = document.getElementById('status');
-  if (statusEl) statusEl.textContent = statusText ?? state;
-  const form = document.getElementById('search');
+  if (statusEl && statusText !== undefined) statusEl.textContent = statusText;
+  const form = document.getElementById('search-form');
   if (form) for (const el of form.elements) el.disabled = !me;
 }
 
@@ -94,7 +178,7 @@ async function loadNearby() {
 }
 
 // A lightweight verdict for a pinned destination we are NOT currently
-// routing to — used to badge favorites with "🚌 4′" / "🚶 12′" so the list
+// routing to — used to badge favorites with bus or walk minutes so the list
 // itself answers "bus or walk", without touching the current search state
 // (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
 async function quickVerdictFor(dest) {
@@ -129,14 +213,29 @@ function makeAlightResolver(boardingStop, destinationCoords) {
     });
 }
 
-function decisionCardHTML(v, walkToStop) {
+export function escapeHTML(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function errorCardHTML(query) {
+  const q = query ? ` «${escapeHTML(query)}»` : '';
+  return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
+}
+
+export function decisionCardHTML(v, walkToStop) {
   if (v.kind === 'bus' && v.bus) {
     return `
       <div class="decision-card bus">
         <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
-        <div class="decision-line">L${v.bus.line} · ${v.bus.destination}</div>
+        <div class="decision-line">L${escapeHTML(v.bus.line)} · ${escapeHTML(v.bus.destination)}</div>
         <div class="decision-wait">${v.bus.minutes}<span class="unit">′ espera</span></div>
-        ${v.bus.alight?.stop ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${v.bus.alight.stop.name}</div>` : ''}
+        ${v.bus.alight?.stop ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${escapeHTML(v.bus.alight.stop.name)}</div>` : ''}
       </div>
       <div class="decision-alt"><span class="icon">${ICON.walk}</span>Andar · ${v.walkMinutes}′</div>
     `;
@@ -146,7 +245,7 @@ function decisionCardHTML(v, walkToStop) {
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
       <div class="decision-wait">${v.walkMinutes}<span class="unit">′</span></div>
     </div>
-    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${v.bus.line} · ${v.bus.total}′ en total</div>` : ''}
+    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${escapeHTML(v.bus.line)} · ${v.bus.total}′ total</div>` : ''}
   `;
 }
 
@@ -155,11 +254,10 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const decision = document.getElementById('decision');
   const walk = walkRouteObj?.minutes ?? null;
   if (walk == null) {
-    destNameEl.textContent = '';
-    decision.innerHTML = '<div class="decision-empty">Busca un destino o toca el mapa para comparar.</div>';
+    setSheetState('IDLE');
     showAlightStop(null);
     showBusRoute(null);
-    hideFavToggle();
+    showWalkRoute(null);
     return;
   }
   destNameEl.textContent = destLabel ?? '';
@@ -169,6 +267,7 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const arrivals = arrivalsByStop.get(focused) ?? [];
   const v = verdict(walk, walkToStop, arrivals, resolveAlight);
   decision.innerHTML = decisionCardHTML(v, walkToStop);
+  decision.classList.remove('hidden');
 
   showAlightStop(v.bus?.alight?.stop ?? null);
 
@@ -215,13 +314,17 @@ function updateFavToggle() {
 // A failed search must not leave the previous destination's verdict on
 // screen looking current — clear the sheet instead of leaving it stale.
 function showSearchError(query) {
-  document.getElementById('dest-name').textContent = '';
+  destCoords = null;
+  destLabel = null;
+  clearRoute();
+  setSheetState('VERDICT');
+  const destNameEl = document.getElementById('dest-name');
+  if (destNameEl) destNameEl.textContent = '';
   const decision = document.getElementById('decision');
-  decision.innerHTML = '';
-  const row = document.createElement('div');
-  row.className = 'decision-error';
-  row.textContent = `No encontramos «${query}». Prueba con otro nombre.`;
-  decision.append(row);
+  if (decision) {
+    decision.classList.remove('hidden');
+    decision.innerHTML = errorCardHTML(query);
+  }
   hideFavToggle();
 }
 
@@ -307,7 +410,7 @@ function appendDropdownSection(dropdown, title, items, icon, { removable, badge 
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'remove-fav';
-      removeBtn.textContent = '✕';
+      removeBtn.innerHTML = ICON.close;
       removeBtn.setAttribute('aria-label', `Quitar ${item.label} de habituales`);
       row.classList.add('favorite-item');
       row.appendChild(removeBtn);
@@ -359,18 +462,19 @@ async function selectDestination(dest) {
 async function routeToDestination(dest) {
   if (!me) return;
   const id = ++requestId;
-  document.getElementById('decision').innerHTML = '';
-  document.getElementById('dest-name').textContent = dest.label;
-  setState('SEARCH', 'Buscando ruta…');
-  document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
-
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
+
+  setSheetState(transitionSheet(sheetState, 'SELECT_DEST'));
+  document.getElementById('dest-name').textContent = dest.label;
+  document.getElementById('decision').innerHTML = '';
+  document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
+
   // A stop's eligibility depends on the destination — a manual pin pick or
   // auto-focus from a previous search must not carry over to a new one.
   focused = null;
   showDestination(dest.lat, dest.lon, dest.label);
-  setState('GEOCODED', 'Calculando ruta…');
+  setState('GEOCODED');
 
   let routeRes;
   try {
@@ -387,7 +491,7 @@ async function routeToDestination(dest) {
   }
 
   lastWalkRoute = routeRes;
-  setState('ROUTED', 'Consultando llegadas…');
+  setState('ROUTED');
 
   const near = await loadNearby();
   const f = near.find((s) => s.stop === focused);
@@ -408,10 +512,15 @@ async function onFormSubmit(query) {
     return;
   }
   closeDropdown();
-  setState('SEARCH', 'Buscando destino…');
+  setSheetState('VERDICT');
+  document.getElementById('dest-name').textContent = q;
+  document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Buscando…';
+  setState('SEARCH');
   const hits = await searchDestinations(fetch, q, 1);
   if (hits.length === 0) {
+    destCoords = null;
+    destLabel = null;
     setState('FAILED', 'Destino no encontrado');
     showSearchError(q);
     return;
@@ -427,7 +536,7 @@ async function onFormSubmit(query) {
 // geolocation, no Nominatim/api/OSRM — only the one fixture fetch. An
 // unknown or missing scenario is not an error state; the caller falls back
 // to the normal locate() flow.
-async function loadScenario(name) {
+export async function loadScenario(name) {
   let raw;
   try {
     const res = await fetch(`/scenarios/${name}.json`);
@@ -447,6 +556,9 @@ async function loadScenario(name) {
   window.__SCENARIO__ = snapshot;
 
   if (snapshot.error) {
+    destCoords = null;
+    destLabel = null;
+    setSheetState('VERDICT');
     document.getElementById('status').textContent = '';
     showSearchError(snapshot.error.query);
     return true;
@@ -455,6 +567,7 @@ async function loadScenario(name) {
   me = snapshot.origin;
   destCoords = { lat: snapshot.destination.lat, lon: snapshot.destination.lon };
   destLabel = snapshot.destination.label;
+  setSheetState('VERDICT');
   focused = snapshot.focusedStop ?? null;
   arrivalsByStop = new Map((snapshot.stops ?? []).map((s) => [s.stop, [{ minutes: s.minutes }]]));
 
@@ -467,7 +580,11 @@ async function loadScenario(name) {
   showStops(snapshot.stops ?? [], arrivalsByStop, focused);
 
   const v = snapshot.verdict;
-  document.getElementById('decision').innerHTML = decisionCardHTML(v, v.walkToStop);
+  const decEl = document.getElementById('decision');
+  if (decEl) {
+    decEl.innerHTML = decisionCardHTML(v, v.walkToStop);
+    decEl.classList.remove('hidden');
+  }
   showAlightStop(v.bus?.alight?.stop ?? null);
   showBusRoute(snapshot.busRoute?.coordinates ?? null);
   showWalkRoute(v.kind === 'bus' ? snapshot.walkToStopRoute?.coordinates ?? null : snapshot.walkRoute?.coordinates ?? null);
@@ -510,33 +627,76 @@ export function initUI() {
   if (scenario) loadScenario(scenario).then((ok) => { if (!ok) locate(); });
   else locate();
 
-  const searchBox = document.getElementById('search-box');
-  const form = document.getElementById('search');
+  const searchTrigger = document.getElementById('search-trigger');
+  const form = document.getElementById('search-form');
   const input = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+  const cancelBtn = document.getElementById('btn-cancel-search');
+  const changeDestBtn = document.getElementById('btn-change-dest');
   const dropdown = document.getElementById('dropdown');
+  const favBtn = document.getElementById('fav-toggle');
   let debounce = null;
 
-  input.addEventListener('focus', () => {
-    if (!input.value.trim()) {
-      renderQuickPicks();
-    }
-  });
+  if (searchTrigger) {
+    searchTrigger.addEventListener('click', () => {
+      openSearch(false);
+    });
+  }
 
-  input.addEventListener('input', () => {
-    clearTimeout(debounce);
-    const q = input.value.trim();
-    if (!q) {
-      renderQuickPicks();
-      return;
-    }
-    debounce = setTimeout(async () => {
-      const hits = await searchDestinations(fetch, q, 3);
-      if (input.value.trim() === q) {
-        if (hits.length === 0) renderNoResultsHint(q);
-        else renderSuggestions(hits);
+  if (changeDestBtn) {
+    changeDestBtn.addEventListener('click', () => {
+      if (input && destLabel) {
+        input.value = destLabel;
       }
-    }, 400);
-  });
+      openSearch(true);
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      cancelSearch();
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      clearBtn.classList.add('hidden');
+      renderQuickPicks();
+    });
+  }
+
+  if (input) {
+    input.addEventListener('focus', () => {
+      if (!input.value.trim()) {
+        renderQuickPicks();
+      }
+    });
+
+    input.addEventListener('input', () => {
+      clearTimeout(debounce);
+      const q = input.value.trim();
+      if (clearBtn) {
+        clearBtn.classList.toggle('hidden', input.value.length === 0);
+      }
+      if (!q) {
+        renderQuickPicks();
+        return;
+      }
+      debounce = setTimeout(async () => {
+        const hits = await searchDestinations(fetch, q, 3);
+        if (input.value.trim() === q) {
+          if (hits.length === 0) renderNoResultsHint(q);
+          else renderSuggestions(hits);
+        }
+      }, 400);
+    });
+  }
 
   if (dropdown) {
     dropdown.addEventListener('pointerdown', (e) => {
@@ -559,7 +719,6 @@ export function initUI() {
     });
   }
 
-  const favBtn = document.getElementById('fav-toggle');
   if (favBtn) {
     favBtn.addEventListener('click', () => {
       if (!destCoords || !destLabel) return;
@@ -571,16 +730,23 @@ export function initUI() {
   }
 
   document.addEventListener('pointerdown', (e) => {
-    if (searchBox && !searchBox.contains(e.target)) {
-      closeDropdown();
+    const sheet = document.getElementById('sheet');
+    if (sheet && !sheet.contains(e.target)) {
+      if (sheetState === 'SEARCH') {
+        cancelSearch();
+      }
     }
   });
 
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    clearTimeout(debounce);
-    onFormSubmit(input.value);
-  });
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      clearTimeout(debounce);
+      if (input) {
+        onFormSubmit(input.value);
+      }
+    });
+  }
 }
 
 // Locating can hang forever (denied, stuck "prompt" permission state, no
@@ -595,7 +761,7 @@ function locate() {
     if (settled) return;
     settled = true;
     clearTimeout(autoFallbackId);
-    skipBtn.classList.add('hidden');
+    skipBtn?.classList.add('hidden');
     me = { ...CADIZ };
     setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
     showMe(me.lat, me.lon);
@@ -603,13 +769,15 @@ function locate() {
       .then(([s, l]) => {
         stops = s;
         lines = l;
-        renderSheet([], null, null);
+        setSheetState('IDLE');
       })
       .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
   };
 
-  skipBtn.classList.remove('hidden');
-  skipBtn.onclick = fallback;
+  if (skipBtn) {
+    skipBtn.classList.remove('hidden');
+    skipBtn.onclick = fallback;
+  }
   const autoFallbackId = setTimeout(fallback, 8000);
 
   navigator.geolocation.getCurrentPosition(
@@ -617,7 +785,7 @@ function locate() {
       if (settled) return;
       settled = true;
       clearTimeout(autoFallbackId);
-      skipBtn.classList.add('hidden');
+      skipBtn?.classList.add('hidden');
       me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
@@ -628,8 +796,8 @@ function locate() {
         setState('FAILED', 'No se pudieron cargar las paradas');
         return;
       }
-      setState('STOPS_LOADED', '¿A dónde vas?');
-      renderSheet([], null, null);
+      setState('STOPS_LOADED', '');
+      setSheetState('IDLE');
     },
     fallback,
   );

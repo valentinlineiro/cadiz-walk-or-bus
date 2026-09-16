@@ -1,7 +1,7 @@
 // Bump this on every deploy that changes a shell file — the versioned name
 // is what makes the activate handler below purge the previous cache instead
 // of an install serving stale JS forever.
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const CACHE_NAME = `andar-o-bus-shell-${CACHE_VERSION}`;
 
 // Explicit allowlist, not a wildcard — only these exact paths are ever
@@ -19,6 +19,7 @@ const SHELL_URLS = [
   '/web/map.js',
   '/web/recent.js',
   '/web/scenario.js',
+  '/web/sheet-state.js',
   '/web/state.js',
   '/web/topology.js',
   '/icons/icon-192.png',
