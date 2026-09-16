@@ -17,6 +17,8 @@ function stripAccents(str: string): string {
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Which lines serve each stop, from the static line topology — not live
+// arrivals, so it still works when a line just has no bus due right now.
 export function stopLineMap(lines: LinesTopology | null | undefined): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
   if (!lines) return map;
@@ -33,6 +35,9 @@ export function stopLineMap(lines: LinesTopology | null | undefined): Map<string
   return map;
 }
 
+// Picks n stops from a distance-sorted list, preferring ones that add a
+// line not already covered by a closer pick — so 3 nearby stops on the
+// same line don't crowd out a different line a bit further away.
 export function diversifyByLine<T extends Stop>(
   sortedStops: T[],
   lines: LinesTopology | null | undefined,
@@ -174,6 +179,9 @@ export function findAlightStop({
 
   if (!bestCandidate) return null;
 
+  // Stops the bus actually passes through, boarding to alighting inclusive —
+  // used to draw the real bus leg instead of a straight walking line over it,
+  // and to estimate ride time (rideMeters below) instead of ignoring it.
   const path = [boardingStopObj, ...subsequentIds.slice(0, bestOffset + 1).map((id) => stopMap.get(String(id)))]
     .filter((s): s is Stop => Boolean(s && Number.isFinite(s.lat) && Number.isFinite(s.lon)));
 

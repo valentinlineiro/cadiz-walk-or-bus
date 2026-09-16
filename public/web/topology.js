@@ -11,6 +11,8 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
 function stripAccents(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
+// Which lines serve each stop, from the static line topology — not live
+// arrivals, so it still works when a line just has no bus due right now.
 export function stopLineMap(lines) {
     const map = new Map();
     if (!lines)
@@ -29,6 +31,9 @@ export function stopLineMap(lines) {
     }
     return map;
 }
+// Picks n stops from a distance-sorted list, preferring ones that add a
+// line not already covered by a closer pick — so 3 nearby stops on the
+// same line don't crowd out a different line a bit further away.
 export function diversifyByLine(sortedStops, lines, n) {
     const linesByStop = stopLineMap(lines);
     const covered = new Set();
@@ -139,6 +144,9 @@ export function findAlightStop({ line, direction, boardingStopId, destCoords, st
     });
     if (!bestCandidate)
         return null;
+    // Stops the bus actually passes through, boarding to alighting inclusive —
+    // used to draw the real bus leg instead of a straight walking line over it,
+    // and to estimate ride time (rideMeters below) instead of ignoring it.
     const path = [boardingStopObj, ...subsequentIds.slice(0, bestOffset + 1).map((id) => stopMap.get(String(id)))]
         .filter((s) => Boolean(s && Number.isFinite(s.lat) && Number.isFinite(s.lon)));
     let rideMeters = 0;
