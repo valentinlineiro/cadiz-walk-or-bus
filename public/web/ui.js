@@ -30,7 +30,6 @@ const ICON = {
   wait: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
   pin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C7.6 2 4 5.6 4 10c0 6 8 12 8 12s8-6 8-12c0-4.4-3.6-8-8-8zm0 11a3 3 0 110-6 3 3 0 010 6z"/></svg>',
   history: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
-  flag: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 3v18h2v-6h9l-2.5-4L17 7H8V3z"/></svg>',
   star: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2.5l3.09 6.26 6.91.94-5 4.87 1.18 6.88L12 17.77 5.82 21.45 7 14.57l-5-4.87 6.91-.94z"/></svg>',
   starFill: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2.5l3.09 6.26 6.91.94-5 4.87 1.18 6.88L12 17.77 5.82 21.45 7 14.57l-5-4.87 6.91-.94z"/></svg>',
   close: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
@@ -242,7 +241,7 @@ export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = f
         <div class="decision-wait">${doorToDoorTotal}<span class="unit">′ total</span></div>
         <div class="decision-line">${contextLine}</div>
         <div class="journey-timeline">
-          <span class="segment walk"><span class="icon">${ICON.walk}</span>${v.walkToStop}′</span>
+          <span class="segment walk"><span class="icon">${ICON.walk}</span>${v.walkToStop ?? '?'}′</span>
           <span class="segment wait"><span class="icon">${ICON.wait}</span>${v.bus.minutes}′</span>
           <span class="segment bus"><span class="icon">${ICON.bus}</span>${v.bus.rideMinutes}′</span>
           <span class="segment walk"><span class="icon">${ICON.walk}</span>${lastMileLabel}′</span>
@@ -260,6 +259,14 @@ export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = f
     </div>
     ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${escapeHTML(v.bus.line)} · ${doorToDoorTotal}′ total (espera ${v.bus.minutes}′)</div>` : ''}
   `;
+}
+
+// walkRoute() returns null on nearly every realistic failure (it only
+// throws on malformed JSON from a 200 response) — so "degraded" must be
+// derived from a missing `minutes`, not from the throw path alone.
+export function computeLastMile(lastMile, distanceMeters) {
+  if (lastMile?.minutes != null) return { lastMileMinutes: lastMile.minutes, lastMileDegraded: false };
+  return { lastMileMinutes: Math.round(distanceMeters / 80), lastMileDegraded: true };
 }
 
 async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
@@ -281,17 +288,18 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const v = verdict(walk, walkToStop, arrivals, resolveAlight);
   const hasAlightPath = v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2;
   let lastMile = null;
+  let lastMileMinutes = null;
   let lastMileDegraded = false;
   if (hasAlightPath) {
     try {
       lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);
     } catch {
-      lastMileDegraded = true;
+      lastMile = null;
     }
+    // Fallback last-mile estimate: straight-line distance / average walking speed (80 m/min).
+    // Flagged `degraded` — decisionCardHTML renders it with a `~` prefix, never as a routed duration.
+    ({ lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, v.bus.alight.distanceMeters));
   }
-  // Fallback last-mile estimate: straight-line distance / average walking speed (80 m/min).
-  // Flagged `degraded` — decisionCardHTML renders it with a `~` prefix, never as a routed duration.
-  const lastMileMinutes = lastMile?.minutes ?? (lastMileDegraded ? Math.round(v.bus.alight.distanceMeters / 80) : null);
 
   decision.innerHTML = decisionCardHTML(v, lastMileMinutes, lastMileDegraded);
   decision.classList.remove('hidden');

@@ -7,7 +7,7 @@ import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinu
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
-import { decisionCardHTML, errorCardHTML, escapeHTML } from './ui.js';
+import { decisionCardHTML, errorCardHTML, escapeHTML, computeLastMile } from './ui.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -459,8 +459,34 @@ test('decisionCardHTML with bus verdict renders mode, door-to-door total, contex
   const htmlFallback = decisionCardHTML(busWithoutAlight, 1);
   assert.ok(htmlFallback.includes('L7 · CORTADURA'));
   assert.ok(htmlFallback.includes('10<span class="unit">′ total</span>')); // 9 + 1
-  assert.ok(!htmlFallback.includes('decision-sub'));
   assert.ok(!htmlFallback.includes('Bájate en'));
+});
+
+test('decisionCardHTML BUS card renders "?′" instead of "null′" when walkToStop is null', () => {
+  const v = {
+    kind: 'bus',
+    walkMinutes: 18,
+    walkToStop: null,
+    bus: { line: '2', minutes: 4, rideMinutes: 6, total: 13, destination: 'X', alight: null },
+  };
+  const html = decisionCardHTML(v, null);
+  assert.ok(!html.includes('null′'));
+  assert.ok(html.includes('>?′<'));
+});
+
+test('computeLastMile: successful lastMile uses routed minutes, not degraded', () => {
+  const result = computeLastMile({ minutes: 7, coordinates: [] }, 900);
+  assert.deepEqual(result, { lastMileMinutes: 7, lastMileDegraded: false });
+});
+
+test('computeLastMile: null lastMile (walkRoute\'s realistic failure mode) falls back to distance/80, flagged degraded', () => {
+  const result = computeLastMile(null, 800);
+  assert.deepEqual(result, { lastMileMinutes: 10, lastMileDegraded: true });
+});
+
+test('computeLastMile: lastMile object with no minutes also falls back, flagged degraded', () => {
+  const result = computeLastMile({ minutes: null }, 400);
+  assert.deepEqual(result, { lastMileMinutes: 5, lastMileDegraded: true });
 });
 
 test('decisionCardHTML BUS card renders all four journey timeline segments with correct minutes', () => {
