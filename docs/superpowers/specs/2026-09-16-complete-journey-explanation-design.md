@@ -155,7 +155,7 @@ Walk legs must appear above the bus leg in z-order so they are not hidden.
 
 ### 6.3 Alighting stop badge
 
-Current: amber circle marker (same as boarding). F3: alighting stop gets a **distinct visual** — blue flag or blue outlined circle — to differentiate "get off here" from "get on here". Implementation: extend `showAlightStop()` or `pinStyle()` in `map.js` to accept a `role` parameter (`'board' | 'alight'`).
+Already satisfied by the existing implementation, no F3 change needed: `showAlightStop()` in `map.js` already renders the alighting stop as a blue pill badge (flag icon, "Bájate aquí") distinct from the amber circular boarding-stop pins produced by `pinStyle()`/`pinIcon()`. (An earlier draft of this section assumed both stops still shared the amber marker — that was stale by the time F3 was implemented; confirmed and left as-is during implementation.)
 
 ### 6.4 Fit bounds
 
