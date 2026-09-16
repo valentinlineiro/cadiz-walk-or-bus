@@ -38,6 +38,8 @@ test('normalizeScenario supports legacy me and dest aliases', () => {
   const normalized = normalizeScenario(raw);
   assert.deepEqual(normalized.origin, { lat: 36.52, lon: -6.28 });
   assert.deepEqual(normalized.destination, { lat: 36.53, lon: -6.29, label: 'Catedral' });
+  assert.equal(normalized.me, undefined);
+  assert.equal(normalized.dest, undefined);
 });
 
 test('normalizeScenario handles error fixtures', () => {

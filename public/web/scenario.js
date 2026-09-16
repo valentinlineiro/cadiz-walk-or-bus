@@ -18,8 +18,10 @@ export function normalizeScenario(raw) {
 
   if (!origin || !destination) return null;
 
+  const { me, dest, ...rest } = raw;
+
   return {
-    ...raw,
+    ...rest,
     origin,
     destination,
   };
