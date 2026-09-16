@@ -1,5 +1,11 @@
 let map, me, destPin, alightPin, walkLine, busLine, pins = new Map();
 
+// Inline SVG glyphs — no emoji on the map, each marker a distinct shape.
+const SVG = {
+  pin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C7.6 2 4 5.6 4 10c0 6 8 12 8 12s8-6 8-12c0-4.4-3.6-8-8-8zm0 11a3 3 0 110-6 3 3 0 010 6z"/></svg>',
+  flag: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 3v18h2v-6h9l-2.5-4L17 7H8V3z"/></svg>',
+};
+
 export function initMap(onPin, onMapClick) {
   map = L.map('map').setView([36.5271, -6.2885], 14);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
@@ -12,7 +18,7 @@ export function initMap(onPin, onMapClick) {
 }
 
 export function showMe(lat, lon) {
-  if (!me) me = L.circleMarker([lat, lon], { radius: 8, color: '#1a73e8' }).addTo(map);
+  if (!me) me = L.circleMarker([lat, lon], { radius: 9, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
   else me.setLatLng([lat, lon]);
   map.setView([lat, lon], 15);
 }
@@ -25,9 +31,9 @@ export function showDestination(lat, lon, label) {
   if (lat == null || lon == null) return;
   const icon = L.divIcon({
     className: 'dest-pin',
-    html: `<div title="${label ?? 'Destino'}" style="width:36px;height:36px;border-radius:50%;background:#dc2626;color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)">📍</div>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
+    html: `<div title="${label ?? 'Destino'}" style="width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#111827;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.4)"><span style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;transform:rotate(45deg);color:#fff">${SVG.pin}</span></div>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 30],
   });
   destPin = L.marker([lat, lon], { icon }).addTo(map);
 }
@@ -40,9 +46,9 @@ export function showAlightStop(stop) {
   if (!stop || !Number.isFinite(stop.lat) || !Number.isFinite(stop.lon)) return;
   const icon = L.divIcon({
     className: 'alight-pin',
-    html: `<div title="Bajar en: ${stop.name}" style="height:28px;padding:0 8px;border-radius:14px;background:#2563eb;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:4px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);white-space:nowrap"><span>🚏</span><span>Bajar aquí</span></div>`,
-    iconSize: [100, 28],
-    iconAnchor: [50, 14],
+    html: `<div title="Bajar en: ${stop.name}" style="height:28px;padding:0 10px;border-radius:14px;background:#2563eb;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #fff;box-shadow:0 2px 8px rgba(37,99,235,.45);white-space:nowrap"><span style="display:flex">${SVG.flag}</span><span>Bájate aquí</span></div>`,
+    iconSize: [110, 28],
+    iconAnchor: [55, 14],
   });
   alightPin = L.marker([stop.lat, stop.lon], { icon }).addTo(map);
 }
@@ -123,10 +129,11 @@ export function pinStyle(arrivals, focused) {
 const COLORS = { amber: '#d97706', gray: '#9ca3af' };
 
 function pinIcon(style, name) {
-  const size = Math.round(48 * style.scale);
+  const size = Math.round(44 * style.scale);
+  const fontSize = Math.round(15 * style.scale);
   return L.divIcon({
     className: 'stop-pin',
-    html: `<div title="${name}" style="width:${size}px;height:${size}px;border-radius:50%;background:${COLORS[style.color]};color:#fff;font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)${style.halo ? ',0 0 0 6px rgba(217,119,6,.35)' : ''}">${style.label}</div>`,
+    html: `<div title="${name}" style="width:${size}px;height:${size}px;border-radius:50%;background:${COLORS[style.color]};color:#fff;font-weight:800;font-size:${fontSize}px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.28)${style.halo ? ',0 0 0 6px rgba(217,119,6,.3)' : ''}">${style.label}</div>`,
     iconSize: [size, size],
     iconAnchor: [size / 2, size / 2],
   });
