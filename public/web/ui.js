@@ -533,10 +533,41 @@ export function initUI() {
   });
 }
 
+// Locating can hang forever (denied, stuck "prompt" permission state, no
+// GPS hardware) — never leave the user stuck behind a spinner: offer a
+// manual skip immediately-ish, and fall back to it automatically too.
 function locate() {
   setState('LOCATING', 'Localizando…');
+  const skipBtn = document.getElementById('skip-locate');
+  let settled = false;
+
+  const fallback = () => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(autoFallbackId);
+    skipBtn.classList.add('hidden');
+    me = { ...CADIZ };
+    setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
+    showMe(me.lat, me.lon);
+    Promise.all([getStops(fetch), getLines(fetch)])
+      .then(([s, l]) => {
+        stops = s;
+        lines = l;
+        renderSheet([], null, null);
+      })
+      .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
+  };
+
+  skipBtn.classList.remove('hidden');
+  skipBtn.onclick = fallback;
+  const autoFallbackId = setTimeout(fallback, 8000);
+
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(autoFallbackId);
+      skipBtn.classList.add('hidden');
       me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
@@ -550,17 +581,6 @@ function locate() {
       setState('STOPS_LOADED', '¿A dónde vas?');
       renderSheet([], null, null);
     },
-    () => {
-      me = { ...CADIZ };
-      setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
-      showMe(me.lat, me.lon);
-      Promise.all([getStops(fetch), getLines(fetch)])
-        .then(([s, l]) => {
-          stops = s;
-          lines = l;
-          renderSheet([], null, null);
-        })
-        .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
-    },
+    fallback,
   );
 }

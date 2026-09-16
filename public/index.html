@@ -35,6 +35,7 @@
   .quick-verdict.bus { color: #d97706; }
   .quick-verdict.walk { color: #16a34a; }
   .hidden { display: none !important; }
+  #skip-locate { display: block; margin-top: 6px; border: none; background: none; color: #2563eb; font-size: 13px; text-decoration: underline; cursor: pointer; padding: 0; }
   #sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: #fff; border-radius: 16px 16px 0 0; padding: 16px; box-shadow: 0 -2px 12px rgba(0,0,0,.2); font-size: 16px; }
   #verdict-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   #fav-toggle { border: none; background: none; font-size: 24px; line-height: 1; color: #d1d5db; cursor: pointer; padding: 4px 6px; }
@@ -66,7 +67,7 @@
   </form>
   <div id="dropdown" class="hidden"></div>
 </div>
-<div id="sheet"><div id="status">Localizando…</div><div id="verdict-row"><div id="verdict"></div><button id="fav-toggle" type="button" class="hidden" aria-label="Guardar como destino habitual">☆</button></div><div id="detail"></div></div>
+<div id="sheet"><div id="status">Localizando…</div><button id="skip-locate" type="button" class="hidden">Seguir sin ubicación</button><div id="verdict-row"><div id="verdict"></div><button id="fav-toggle" type="button" class="hidden" aria-label="Guardar como destino habitual">☆</button></div><div id="detail"></div></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module">
 import { initUI } from './web/ui.js';
