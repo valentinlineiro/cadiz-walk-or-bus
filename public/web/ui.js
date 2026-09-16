@@ -170,7 +170,7 @@ async function loadNearby() {
 }
 
 // A lightweight verdict for a pinned destination we are NOT currently
-// routing to — used to badge favorites with "🚌 4′" / "🚶 12′" so the list
+// routing to — used to badge favorites with bus or walk minutes so the list
 // itself answers "bus or walk", without touching the current search state
 // (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
 async function quickVerdictFor(dest) {
@@ -205,14 +205,18 @@ function makeAlightResolver(boardingStop, destinationCoords) {
     });
 }
 
-function decisionCardHTML(v, walkToStop) {
+export function decisionCardHTML(v, walkToStop) {
+  if (v.error || v.kind === 'error') {
+    const q = v.error?.query ?? v.query ?? (typeof v.error === 'string' ? v.error : '');
+    return `<div class="decision-error">No encontramos «${q}». Prueba con otro nombre.</div>`;
+  }
   if (v.kind === 'bus' && v.bus) {
+    const alightName = v.bus.alight?.stop?.name ?? v.bus.destination ?? null;
     return `
       <div class="decision-card bus">
         <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
-        <div class="decision-line">L${v.bus.line} · ${v.bus.destination}</div>
-        <div class="decision-wait">${v.bus.minutes}<span class="unit">′ espera</span></div>
-        ${v.bus.alight?.stop ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${v.bus.alight.stop.name}</div>` : ''}
+        <div class="decision-line">L${v.bus.line} · ${v.bus.minutes}′ de espera</div>
+        ${alightName ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${alightName}</div>` : ''}
       </div>
       <div class="decision-alt"><span class="icon">${ICON.walk}</span>Andar · ${v.walkMinutes}′</div>
     `;
@@ -222,7 +226,7 @@ function decisionCardHTML(v, walkToStop) {
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
       <div class="decision-wait">${v.walkMinutes}<span class="unit">′</span></div>
     </div>
-    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${v.bus.line} · ${v.bus.total}′ en total</div>` : ''}
+    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${v.bus.line} · ${v.bus.total}′ total</div>` : ''}
   `;
 }
 
@@ -298,11 +302,7 @@ function showSearchError(query) {
   const decision = document.getElementById('decision');
   if (decision) {
     decision.classList.remove('hidden');
-    decision.innerHTML = '';
-    const row = document.createElement('div');
-    row.className = 'decision-error';
-    row.textContent = `No encontramos «${query}». Prueba con otro nombre.`;
-    decision.append(row);
+    decision.innerHTML = decisionCardHTML({ kind: 'error', error: { query } });
   }
   hideFavToggle();
 }
@@ -389,7 +389,7 @@ function appendDropdownSection(dropdown, title, items, icon, { removable, badge 
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'remove-fav';
-      removeBtn.textContent = '✕';
+      removeBtn.innerHTML = ICON.close;
       removeBtn.setAttribute('aria-label', `Quitar ${item.label} de habituales`);
       row.classList.add('favorite-item');
       row.appendChild(removeBtn);
