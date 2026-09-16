@@ -85,21 +85,34 @@ For search/error fixtures (`search-error.json`):
 - **Zero Framework UI:** Keep vanilla TypeScript, explicit state, small modules, pure functions. No React, Vue, Svelte, or runtime state libraries.
 - **Strict Dependency Inversion & Layer Boundaries:**
   ```text
-  Infrastructure ───► Application ───► Domain ◄─── Presentation
+                   ┌──────────────┐
+                   │    Domain    │
+                   │ pure / stable│
+                   └──────▲───────┘
+                          │
+               ┌──────────┴──────────┐
+               │                     │
+         Application           Presentation
+               ▲                     │
+               │                     │
+         Infrastructure ─────────────┘
   ```
-  `domain/` must never import Leaflet, DOM, network, or storage APIs.
+  - **Domain:** Pure and stable. Knows no external layers (no Leaflet, DOM, network, storage).
+  - **Application:** Depends on Domain. Coordinates use cases.
+  - **Infrastructure:** Implements Application needs (HTTP, storage, geolocation, OSRM).
+  - **Presentation:** Consumes Application/Domain and contains no business rules.
 
 ### 3.2 Target Directory Structure
 
 ```text
 src/
 ├── domain/
-│   ├── models.ts          # Core interfaces: Arrival, Stop, Line, Direction, Verdict
+│   ├── models.ts          # Core interfaces: Arrival, Stop, Line, Direction, Verdict, ScenarioSnapshot
 │   ├── decision.ts        # Pure bus vs. walk ranking and decision logic
 │   └── topology.ts        # Alight-stop resolution, route eligibility, direction matching
 │
 ├── application/
-│   ├── scenario.ts        # ScenarioSnapshot types, validation, and loading
+│   ├── scenario.ts        # loadScenario(), validateScenario(), normalizeScenario()
 │   ├── findCandidates.ts  # Coordinating eligible stops and arrivals
 │   └── routeToDestination.ts
 │
@@ -124,9 +137,9 @@ src/
    - Zero DOM or browser dependencies.
 2. **Phase 2: Infrastructure & Application Layers**
    - Migrate `api.js`, `routing.js`, `geo.js`, `favorites.js`, `recent.js`.
-   - Formalize application use cases and error boundaries.
+   - Formalize application use cases and error boundaries (`application/scenario.ts`).
 3. **Phase 3: Presentation Layer & Build Integration**
-   - Lightweight TS bundling (e.g. esbuild or tsc emit to `public/web/` without framework overhead).
+   - Lightweight TS bundling (vanilla TS without framework overhead).
    - Migrate `map.js`, `ui.js`.
    - Organize test structure (`tests/domain`, `tests/application`, `tests/infrastructure`).
 
@@ -134,9 +147,10 @@ src/
 
 ## 4. Verification & Gates
 
-1. **Unit Test Gate:** `node --test` 70/70 passing.
+1. **Unit Test Gate:** Baseline: 70/70. Implementation gate: 70/70 + no regressions (test count may increase to cover snapshot contract and normalization).
 2. **Fixture Validation:** All 4 scenarios (`bus.json`, `walk.json`, `no-bus.json`, `search-error.json`) conform to the `ScenarioSnapshot` schema with `capturedAt`.
 3. **Browser / Playwright Verification:**
    - Verify `?scenario=bus`, `?scenario=walk`, `?scenario=no-bus`, `?scenario=search-error`.
    - In DevTools console: `window.__SCENARIO__.capturedAt` is readable and valid.
    - Standard navigation without `?scenario=` does not leak `window.__SCENARIO__`.
+
