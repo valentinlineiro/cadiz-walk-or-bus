@@ -19,6 +19,7 @@ const SHELL_URLS = [
   '/web/map.js',
   '/web/recent.js',
   '/web/scenario.js',
+  '/web/sheet-state.js',
   '/web/state.js',
   '/web/topology.js',
   '/icons/icon-192.png',

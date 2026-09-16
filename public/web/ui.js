@@ -7,6 +7,7 @@ import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
+import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -35,7 +36,7 @@ const ICON = {
   search: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
 };
 
-export let sheetState = 'IDLE';
+export let sheetState = SHEET_STATES.IDLE;
 
 export function getSheetState() {
   return sheetState;
@@ -48,8 +49,6 @@ export function setSheetState(nextState) {
   const btnChangeDest = document.getElementById('btn-change-dest');
   const destName = document.getElementById('dest-name');
   const decision = document.getElementById('decision');
-  const qInput = document.getElementById('q');
-  const clearBtn = document.getElementById('clear-search');
 
   if (nextState === 'IDLE') {
     searchTrigger?.classList.remove('hidden');
@@ -61,7 +60,6 @@ export function setSheetState(nextState) {
       decision.innerHTML = '<div class="decision-empty">Busca un destino o toca el mapa para comparar.</div>';
     }
     hideFavToggle();
-    renderQuickPicks();
   } else if (nextState === 'SEARCH') {
     searchTrigger?.classList.add('hidden');
     searchForm?.classList.remove('hidden');
@@ -71,15 +69,6 @@ export function setSheetState(nextState) {
       decision.classList.add('hidden');
     }
     hideFavToggle();
-    if (qInput) {
-      qInput.focus();
-      if (clearBtn) {
-        clearBtn.classList.toggle('hidden', qInput.value.length === 0);
-      }
-      if (!qInput.value.trim()) {
-        renderQuickPicks();
-      }
-    }
   } else if (nextState === 'VERDICT') {
     searchTrigger?.classList.add('hidden');
     searchForm?.classList.add('hidden');
@@ -94,18 +83,37 @@ export function setSheetState(nextState) {
   }
 }
 
-function cancelSearch() {
+function openSearch(selectQuery = false) {
+  setSheetState(transitionSheet(sheetState, 'OPEN_SEARCH'));
   const qInput = document.getElementById('q');
   const clearBtn = document.getElementById('clear-search');
-  if (destCoords) {
+  if (qInput) {
+    qInput.focus();
+    if (selectQuery) qInput.select();
+    if (clearBtn) {
+      clearBtn.classList.toggle('hidden', qInput.value.length === 0);
+    }
+    if (!qInput.value.trim()) {
+      renderQuickPicks();
+    }
+  }
+}
+
+function cancelSearch() {
+  closeDropdown();
+  const next = transitionSheet(sheetState, 'CANCEL', { hasDestination: Boolean(destCoords) });
+  const qInput = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+  if (next === 'VERDICT') {
     if (qInput) qInput.value = destLabel ?? '';
     if (clearBtn) clearBtn.classList.add('hidden');
-    setSheetState('VERDICT');
+    setSheetState(next);
     updateFavToggle();
   } else {
     if (qInput) qInput.value = '';
     if (clearBtn) clearBtn.classList.add('hidden');
-    setSheetState('IDLE');
+    setSheetState(next);
+    renderQuickPicks();
   }
 }
 
@@ -215,12 +223,12 @@ export function escapeHTML(str) {
     .replace(/'/g, '&#39;');
 }
 
+export function errorCardHTML(query) {
+  const q = query ? ` «${escapeHTML(query)}»` : '';
+  return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
+}
+
 export function decisionCardHTML(v, walkToStop) {
-  if (v.error || v.kind === 'error') {
-    const rawQ = v.error?.query ?? v.query ?? (typeof v.error === 'string' ? v.error : '');
-    const q = rawQ ? ` «${escapeHTML(rawQ)}»` : '';
-    return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
-  }
   if (v.kind === 'bus' && v.bus) {
     return `
       <div class="decision-card bus">
@@ -309,12 +317,13 @@ function showSearchError(query) {
   destCoords = null;
   destLabel = null;
   clearRoute();
+  setSheetState('VERDICT');
   const destNameEl = document.getElementById('dest-name');
   if (destNameEl) destNameEl.textContent = '';
   const decision = document.getElementById('decision');
   if (decision) {
     decision.classList.remove('hidden');
-    decision.innerHTML = decisionCardHTML({ kind: 'error', error: { query } });
+    decision.innerHTML = errorCardHTML(query);
   }
   hideFavToggle();
 }
@@ -456,11 +465,10 @@ async function routeToDestination(dest) {
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
 
-  setSheetState('VERDICT');
+  setSheetState(transitionSheet(sheetState, 'SELECT_DEST'));
   document.getElementById('dest-name').textContent = dest.label;
   document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
-  setState('SEARCH');
 
   // A stop's eligibility depends on the destination — a manual pin pick or
   // auto-focus from a previous search must not carry over to a new one.
@@ -631,7 +639,7 @@ export function initUI() {
 
   if (searchTrigger) {
     searchTrigger.addEventListener('click', () => {
-      setSheetState('SEARCH');
+      openSearch(false);
     });
   }
 
@@ -640,10 +648,7 @@ export function initUI() {
       if (input && destLabel) {
         input.value = destLabel;
       }
-      setSheetState('SEARCH');
-      if (input) {
-        input.select();
-      }
+      openSearch(true);
     });
   }
 

@@ -7,7 +7,7 @@ import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinu
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
-import { decisionCardHTML, escapeHTML } from './ui.js';
+import { decisionCardHTML, errorCardHTML, escapeHTML } from './ui.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -492,33 +492,25 @@ test('decisionCardHTML with walk verdict renders mode, minutes and optional bus 
   assert.ok(!htmlOnly.includes('decision-alt'));
 });
 
-test('decisionCardHTML with error verdict properly HTML-escapes raw queries preventing XSS', () => {
+test('errorCardHTML properly HTML-escapes raw queries preventing XSS', () => {
   // Script tag injection attempt
-  const vScript = {
-    kind: 'error',
-    error: { query: '<script>alert("xss")</script>' },
-  };
-  const htmlScript = decisionCardHTML(vScript);
+  const htmlScript = errorCardHTML('<script>alert("xss")</script>');
   assert.ok(htmlScript.includes('class="decision-error"'));
   assert.ok(htmlScript.includes('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'));
   assert.ok(!htmlScript.includes('<script>'));
   assert.ok(!htmlScript.includes('</script>'));
 
   // HTML markup & quotes injection attempt
-  const vTags = {
-    kind: 'error',
-    error: { query: '<b>test</b> & "hello" \'' },
-  };
-  const htmlTags = decisionCardHTML(vTags);
+  const htmlTags = errorCardHTML('<b>test</b> & "hello" \'');
   assert.ok(htmlTags.includes('&lt;b&gt;test&lt;/b&gt; &amp; &quot;hello&quot; &#39;'));
   assert.ok(!htmlTags.includes('<b>test</b>'));
 
   // Empty query string
-  const vEmpty = { kind: 'error', error: {} };
-  assert.equal(decisionCardHTML(vEmpty), '<div class="decision-error">No encontramos. Prueba con otro nombre.</div>');
+  assert.equal(errorCardHTML(''), '<div class="decision-error">No encontramos. Prueba con otro nombre.</div>');
+  assert.equal(errorCardHTML(null), '<div class="decision-error">No encontramos. Prueba con otro nombre.</div>');
+  assert.equal(errorCardHTML(undefined), '<div class="decision-error">No encontramos. Prueba con otro nombre.</div>');
 
-  // String error
-  const vString = { error: 'algo & nada' };
-  assert.equal(decisionCardHTML(vString), '<div class="decision-error">No encontramos «algo &amp; nada». Prueba con otro nombre.</div>');
+  // String error query
+  assert.equal(errorCardHTML('algo & nada'), '<div class="decision-error">No encontramos «algo &amp; nada». Prueba con otro nombre.</div>');
 });
 
