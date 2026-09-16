@@ -1,0 +1,24 @@
+{
+  "me": { "lat": 36.5290, "lon": -6.2860 },
+  "dest": { "lat": 36.5300, "lon": -6.2845, "label": "Mirador del 1812" },
+  "stops": [
+    { "stop": "1229", "name": "Plaza España", "lat": 36.5295, "lon": -6.2855, "minutes": 7 }
+  ],
+  "focusedStop": "1229",
+  "walkRoute": { "minutes": 6, "coordinates": [[36.5290, -6.2860], [36.5296, -6.2852], [36.5300, -6.2845]] },
+  "walkToStopRoute": { "minutes": 2, "coordinates": [[36.5290, -6.2860], [36.5292, -6.2857], [36.5295, -6.2855]] },
+  "busRoute": null,
+  "verdict": {
+    "kind": "walk",
+    "walkMinutes": 6,
+    "walkToStop": 2,
+    "bus": {
+      "minutes": 7,
+      "rideMinutes": 3,
+      "total": 12,
+      "line": "1",
+      "destination": "SAN FERNANDO",
+      "alight": { "stop": { "name": "Glorieta Ana Orantes", "lat": 36.5298, "lon": -6.2847 }, "distanceMeters": 90 }
+    }
+  }
+}

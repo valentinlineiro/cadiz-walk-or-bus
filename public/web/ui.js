@@ -418,6 +418,58 @@ async function onFormSubmit(query) {
   selectDestination(hits[0]);
 }
 
+// Visual-review fixtures: `?scenario=<name>` loads /scenarios/<name>.json and
+// feeds it straight into the same renderers production uses (renderSheet's
+// decisionCardHTML, showStops, showBusRoute, ...) — no reimplementation of
+// the UI, so a scenario always looks exactly like what those renderers
+// produce today. Strictly read-only: no localStorage, no favorites, no
+// geolocation, no Nominatim/api/OSRM — only the one fixture fetch. An
+// unknown or missing scenario is not an error state; the caller falls back
+// to the normal locate() flow.
+async function loadScenario(name) {
+  let fx;
+  try {
+    const res = await fetch(`/scenarios/${name}.json`);
+    if (!res.ok) return false;
+    fx = await res.json();
+  } catch {
+    return false;
+  }
+
+  if (fx.error) {
+    document.getElementById('status').textContent = '';
+    showSearchError(fx.error.query);
+    return true;
+  }
+
+  me = fx.me;
+  destCoords = { lat: fx.dest.lat, lon: fx.dest.lon };
+  destLabel = fx.dest.label;
+  focused = fx.focusedStop ?? null;
+  arrivalsByStop = new Map((fx.stops ?? []).map((s) => [s.stop, [{ minutes: s.minutes }]]));
+
+  document.getElementById('status').textContent = '';
+  document.getElementById('dest-name').textContent = destLabel;
+  hideFavToggle();
+
+  showMe(me.lat, me.lon);
+  showDestination(destCoords.lat, destCoords.lon, destLabel);
+  showStops(fx.stops ?? [], arrivalsByStop, focused);
+
+  const v = fx.verdict;
+  document.getElementById('decision').innerHTML = decisionCardHTML(v, v.walkToStop);
+  showAlightStop(v.bus?.alight?.stop ?? null);
+  showBusRoute(fx.busRoute?.coordinates ?? null);
+  showWalkRoute(v.kind === 'bus' ? fx.walkToStopRoute?.coordinates ?? null : fx.walkRoute?.coordinates ?? null);
+
+  fitRoute([
+    me,
+    destCoords,
+    v.bus?.alight?.stop ? { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon } : null,
+  ]);
+  return true;
+}
+
 export function initUI() {
   initMap(
     async (stop) => {
@@ -444,7 +496,9 @@ export function initUI() {
     }
   );
 
-  locate();
+  const scenario = new URLSearchParams(location.search).get('scenario');
+  if (scenario) loadScenario(scenario).then((ok) => { if (!ok) locate(); });
+  else locate();
 
   const searchBox = document.getElementById('search-box');
   const form = document.getElementById('search');

@@ -1,0 +1,26 @@
+{
+  "me": { "lat": 36.5271, "lon": -6.2885 },
+  "dest": { "lat": 36.5335, "lon": -6.2810, "label": "Catedral" },
+  "stops": [
+    { "stop": "1229", "name": "Plaza España", "lat": 36.5290, "lon": -6.2870, "minutes": 4 },
+    { "stop": "1450", "name": "Puerta Tierra", "lat": 36.5265, "lon": -6.2830, "minutes": 1 },
+    { "stop": "1810", "name": "San Juan", "lat": 36.5240, "lon": -6.2860, "minutes": 2 }
+  ],
+  "focusedStop": "1229",
+  "walkRoute": { "minutes": 26, "coordinates": [[36.5271, -6.2885], [36.5300, -6.2850], [36.5335, -6.2810]] },
+  "walkToStopRoute": { "minutes": 5, "coordinates": [[36.5271, -6.2885], [36.5280, -6.2878], [36.5290, -6.2870]] },
+  "busRoute": { "coordinates": [[36.5290, -6.2870], [36.5310, -6.2840], [36.5330, -6.2815]] },
+  "verdict": {
+    "kind": "bus",
+    "walkMinutes": 26,
+    "walkToStop": 5,
+    "bus": {
+      "minutes": 4,
+      "rideMinutes": 6,
+      "total": 15,
+      "line": "2",
+      "destination": "PLAZA ESPAÑA",
+      "alight": { "stop": { "name": "BDA. LORETO", "lat": 36.5330, "lon": -6.2815 }, "distanceMeters": 120 }
+    }
+  }
+}

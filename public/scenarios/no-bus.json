@@ -1,0 +1,15 @@
+{
+  "me": { "lat": 36.5310, "lon": -6.2920 },
+  "dest": { "lat": 36.5296, "lon": -6.2937, "label": "Hospital Puerta del Mar" },
+  "stops": [],
+  "focusedStop": null,
+  "walkRoute": { "minutes": 18, "coordinates": [[36.5310, -6.2920], [36.5303, -6.2928], [36.5296, -6.2937]] },
+  "walkToStopRoute": null,
+  "busRoute": null,
+  "verdict": {
+    "kind": "walk",
+    "walkMinutes": 18,
+    "walkToStop": null,
+    "bus": null
+  }
+}
