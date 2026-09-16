@@ -279,18 +279,28 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const resolveAlight = makeAlightResolver(f, destCoords);
   const arrivals = arrivalsByStop.get(focused) ?? [];
   const v = verdict(walk, walkToStop, arrivals, resolveAlight);
-  decision.innerHTML = decisionCardHTML(v, walkToStop);
+  const hasAlightPath = v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2;
+  let lastMile = null;
+  let lastMileDegraded = false;
+  if (hasAlightPath) {
+    try {
+      lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);
+    } catch {
+      lastMileDegraded = true;
+    }
+  }
+  // Fallback last-mile estimate: straight-line distance / average walking speed (80 m/min).
+  // Flagged `degraded` — decisionCardHTML renders it with a `~` prefix, never as a routed duration.
+  const lastMileMinutes = lastMile?.minutes ?? (lastMileDegraded ? Math.round(v.bus.alight.distanceMeters / 80) : null);
+
+  decision.innerHTML = decisionCardHTML(v, lastMileMinutes, lastMileDegraded);
   decision.classList.remove('hidden');
 
   showAlightStop(v.bus?.alight?.stop ?? null);
 
-  if (v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2) {
+  if (hasAlightPath) {
     const routedBus = await busRoute(fetch, v.bus.alight.path).catch(() => null);
     showBusRoute(routedBus ?? v.bus.alight.path.map((s) => [s.lat, s.lon]));
-    let lastMile = null;
-    try {
-      lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);
-    } catch {}
     const segments = [];
     if (walkToStopRouteObj?.coordinates?.length) segments.push(walkToStopRouteObj.coordinates);
     if (lastMile?.coordinates?.length) segments.push(lastMile.coordinates);
