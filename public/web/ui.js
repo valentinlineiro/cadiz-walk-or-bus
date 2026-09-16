@@ -35,11 +35,85 @@ const ICON = {
   search: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
 };
 
+export let sheetState = 'IDLE';
+
+export function getSheetState() {
+  return sheetState;
+}
+
+export function setSheetState(nextState) {
+  sheetState = nextState;
+  const searchTrigger = document.getElementById('search-trigger');
+  const searchForm = document.getElementById('search-form');
+  const btnChangeDest = document.getElementById('btn-change-dest');
+  const destName = document.getElementById('dest-name');
+  const decision = document.getElementById('decision');
+  const qInput = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+
+  if (nextState === 'IDLE') {
+    searchTrigger?.classList.remove('hidden');
+    searchForm?.classList.add('hidden');
+    btnChangeDest?.classList.add('hidden');
+    if (destName) destName.textContent = '';
+    if (decision) {
+      decision.classList.remove('hidden');
+      decision.innerHTML = '<div class="decision-empty">Busca un destino o toca el mapa para comparar.</div>';
+    }
+    hideFavToggle();
+    renderQuickPicks();
+  } else if (nextState === 'SEARCH') {
+    searchTrigger?.classList.add('hidden');
+    searchForm?.classList.remove('hidden');
+    btnChangeDest?.classList.add('hidden');
+    if (destName) destName.textContent = '';
+    if (decision) {
+      decision.classList.add('hidden');
+    }
+    hideFavToggle();
+    if (qInput) {
+      qInput.focus();
+      if (clearBtn) {
+        clearBtn.classList.toggle('hidden', qInput.value.length === 0);
+      }
+      if (!qInput.value.trim()) {
+        renderQuickPicks();
+      }
+    }
+  } else if (nextState === 'VERDICT') {
+    searchTrigger?.classList.add('hidden');
+    searchForm?.classList.add('hidden');
+    btnChangeDest?.classList.remove('hidden');
+    closeDropdown();
+    if (decision) {
+      decision.classList.remove('hidden');
+    }
+    if (destLabel && destName) {
+      destName.textContent = destLabel;
+    }
+  }
+}
+
+function cancelSearch() {
+  const qInput = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+  if (destCoords) {
+    if (qInput) qInput.value = destLabel ?? '';
+    if (clearBtn) clearBtn.classList.add('hidden');
+    setSheetState('VERDICT');
+    updateFavToggle();
+  } else {
+    if (qInput) qInput.value = '';
+    if (clearBtn) clearBtn.classList.add('hidden');
+    setSheetState('IDLE');
+  }
+}
+
 function setState(event, statusText) {
   state = event === 'LOCATING' ? 'LOCATING' : transition(state, event);
   const statusEl = document.getElementById('status');
-  if (statusEl) statusEl.textContent = statusText ?? state;
-  const form = document.getElementById('search');
+  if (statusEl && statusText !== undefined) statusEl.textContent = statusText;
+  const form = document.getElementById('search-form');
   if (form) for (const el of form.elements) el.disabled = !me;
 }
 
@@ -157,11 +231,10 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const decision = document.getElementById('decision');
   const walk = walkRouteObj?.minutes ?? null;
   if (walk == null) {
-    destNameEl.textContent = '';
-    decision.innerHTML = '<div class="decision-empty">Busca un destino o toca el mapa para comparar.</div>';
+    setSheetState('IDLE');
     showAlightStop(null);
     showBusRoute(null);
-    hideFavToggle();
+    showWalkRoute(null);
     return;
   }
   destNameEl.textContent = destLabel ?? '';
@@ -171,6 +244,7 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   const arrivals = arrivalsByStop.get(focused) ?? [];
   const v = verdict(walk, walkToStop, arrivals, resolveAlight);
   decision.innerHTML = decisionCardHTML(v, walkToStop);
+  decision.classList.remove('hidden');
 
   showAlightStop(v.bus?.alight?.stop ?? null);
 
@@ -217,13 +291,19 @@ function updateFavToggle() {
 // A failed search must not leave the previous destination's verdict on
 // screen looking current — clear the sheet instead of leaving it stale.
 function showSearchError(query) {
-  document.getElementById('dest-name').textContent = '';
+  destCoords = null;
+  destLabel = null;
+  const destNameEl = document.getElementById('dest-name');
+  if (destNameEl) destNameEl.textContent = '';
   const decision = document.getElementById('decision');
-  decision.innerHTML = '';
-  const row = document.createElement('div');
-  row.className = 'decision-error';
-  row.textContent = `No encontramos «${query}». Prueba con otro nombre.`;
-  decision.append(row);
+  if (decision) {
+    decision.classList.remove('hidden');
+    decision.innerHTML = '';
+    const row = document.createElement('div');
+    row.className = 'decision-error';
+    row.textContent = `No encontramos «${query}». Prueba con otro nombre.`;
+    decision.append(row);
+  }
   hideFavToggle();
 }
 
@@ -361,18 +441,20 @@ async function selectDestination(dest) {
 async function routeToDestination(dest) {
   if (!me) return;
   const id = ++requestId;
-  document.getElementById('decision').innerHTML = '';
-  document.getElementById('dest-name').textContent = dest.label;
-  setState('SEARCH', 'Buscando ruta…');
-  document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
-
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
+
+  setSheetState('VERDICT');
+  document.getElementById('dest-name').textContent = dest.label;
+  document.getElementById('decision').innerHTML = '';
+  document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
+  setState('SEARCH');
+
   // A stop's eligibility depends on the destination — a manual pin pick or
   // auto-focus from a previous search must not carry over to a new one.
   focused = null;
   showDestination(dest.lat, dest.lon, dest.label);
-  setState('GEOCODED', 'Calculando ruta…');
+  setState('GEOCODED');
 
   let routeRes;
   try {
@@ -389,7 +471,7 @@ async function routeToDestination(dest) {
   }
 
   lastWalkRoute = routeRes;
-  setState('ROUTED', 'Consultando llegadas…');
+  setState('ROUTED');
 
   const near = await loadNearby();
   const f = near.find((s) => s.stop === focused);
@@ -410,10 +492,15 @@ async function onFormSubmit(query) {
     return;
   }
   closeDropdown();
-  setState('SEARCH', 'Buscando destino…');
+  setSheetState('VERDICT');
+  document.getElementById('dest-name').textContent = q;
+  document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Buscando…';
+  setState('SEARCH');
   const hits = await searchDestinations(fetch, q, 1);
   if (hits.length === 0) {
+    destCoords = null;
+    destLabel = null;
     setState('FAILED', 'Destino no encontrado');
     showSearchError(q);
     return;
@@ -442,6 +529,8 @@ async function loadScenario(name) {
   const snapshot = normalizeScenario(raw);
   if (!snapshot) return false;
 
+  setSheetState('VERDICT');
+
   if (!isValidCapturedAt(snapshot.capturedAt)) {
     console.warn('[scenario] capturedAt missing or invalid');
   }
@@ -469,7 +558,11 @@ async function loadScenario(name) {
   showStops(snapshot.stops ?? [], arrivalsByStop, focused);
 
   const v = snapshot.verdict;
-  document.getElementById('decision').innerHTML = decisionCardHTML(v, v.walkToStop);
+  const decEl = document.getElementById('decision');
+  if (decEl) {
+    decEl.innerHTML = decisionCardHTML(v, v.walkToStop);
+    decEl.classList.remove('hidden');
+  }
   showAlightStop(v.bus?.alight?.stop ?? null);
   showBusRoute(snapshot.busRoute?.coordinates ?? null);
   showWalkRoute(v.kind === 'bus' ? snapshot.walkToStopRoute?.coordinates ?? null : snapshot.walkRoute?.coordinates ?? null);
@@ -512,33 +605,79 @@ export function initUI() {
   if (scenario) loadScenario(scenario).then((ok) => { if (!ok) locate(); });
   else locate();
 
-  const searchBox = document.getElementById('search-box');
-  const form = document.getElementById('search');
+  const searchTrigger = document.getElementById('search-trigger');
+  const form = document.getElementById('search-form');
   const input = document.getElementById('q');
+  const clearBtn = document.getElementById('clear-search');
+  const cancelBtn = document.getElementById('btn-cancel-search');
+  const changeDestBtn = document.getElementById('btn-change-dest');
   const dropdown = document.getElementById('dropdown');
+  const favBtn = document.getElementById('fav-toggle');
   let debounce = null;
 
-  input.addEventListener('focus', () => {
-    if (!input.value.trim()) {
-      renderQuickPicks();
-    }
-  });
+  if (searchTrigger) {
+    searchTrigger.addEventListener('click', () => {
+      setSheetState('SEARCH');
+    });
+  }
 
-  input.addEventListener('input', () => {
-    clearTimeout(debounce);
-    const q = input.value.trim();
-    if (!q) {
-      renderQuickPicks();
-      return;
-    }
-    debounce = setTimeout(async () => {
-      const hits = await searchDestinations(fetch, q, 3);
-      if (input.value.trim() === q) {
-        if (hits.length === 0) renderNoResultsHint(q);
-        else renderSuggestions(hits);
+  if (changeDestBtn) {
+    changeDestBtn.addEventListener('click', () => {
+      if (input && destLabel) {
+        input.value = destLabel;
       }
-    }, 400);
-  });
+      setSheetState('SEARCH');
+      if (input) {
+        input.select();
+      }
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      cancelSearch();
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      clearBtn.classList.add('hidden');
+      renderQuickPicks();
+    });
+  }
+
+  if (input) {
+    input.addEventListener('focus', () => {
+      if (!input.value.trim()) {
+        renderQuickPicks();
+      }
+    });
+
+    input.addEventListener('input', () => {
+      clearTimeout(debounce);
+      const q = input.value.trim();
+      if (clearBtn) {
+        clearBtn.classList.toggle('hidden', input.value.length === 0);
+      }
+      if (!q) {
+        renderQuickPicks();
+        return;
+      }
+      debounce = setTimeout(async () => {
+        const hits = await searchDestinations(fetch, q, 3);
+        if (input.value.trim() === q) {
+          if (hits.length === 0) renderNoResultsHint(q);
+          else renderSuggestions(hits);
+        }
+      }, 400);
+    });
+  }
 
   if (dropdown) {
     dropdown.addEventListener('pointerdown', (e) => {
@@ -561,7 +700,6 @@ export function initUI() {
     });
   }
 
-  const favBtn = document.getElementById('fav-toggle');
   if (favBtn) {
     favBtn.addEventListener('click', () => {
       if (!destCoords || !destLabel) return;
@@ -573,16 +711,23 @@ export function initUI() {
   }
 
   document.addEventListener('pointerdown', (e) => {
-    if (searchBox && !searchBox.contains(e.target)) {
-      closeDropdown();
+    const sheet = document.getElementById('sheet');
+    if (sheet && !sheet.contains(e.target)) {
+      if (sheetState === 'SEARCH') {
+        cancelSearch();
+      }
     }
   });
 
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    clearTimeout(debounce);
-    onFormSubmit(input.value);
-  });
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      clearTimeout(debounce);
+      if (input) {
+        onFormSubmit(input.value);
+      }
+    });
+  }
 }
 
 // Locating can hang forever (denied, stuck "prompt" permission state, no
@@ -597,7 +742,7 @@ function locate() {
     if (settled) return;
     settled = true;
     clearTimeout(autoFallbackId);
-    skipBtn.classList.add('hidden');
+    skipBtn?.classList.add('hidden');
     me = { ...CADIZ };
     setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
     showMe(me.lat, me.lon);
@@ -605,13 +750,15 @@ function locate() {
       .then(([s, l]) => {
         stops = s;
         lines = l;
-        renderSheet([], null, null);
+        setSheetState('IDLE');
       })
       .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
   };
 
-  skipBtn.classList.remove('hidden');
-  skipBtn.onclick = fallback;
+  if (skipBtn) {
+    skipBtn.classList.remove('hidden');
+    skipBtn.onclick = fallback;
+  }
   const autoFallbackId = setTimeout(fallback, 8000);
 
   navigator.geolocation.getCurrentPosition(
@@ -619,7 +766,7 @@ function locate() {
       if (settled) return;
       settled = true;
       clearTimeout(autoFallbackId);
-      skipBtn.classList.add('hidden');
+      skipBtn?.classList.add('hidden');
       me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
@@ -630,8 +777,8 @@ function locate() {
         setState('FAILED', 'No se pudieron cargar las paradas');
         return;
       }
-      setState('STOPS_LOADED', '¿A dónde vas?');
-      renderSheet([], null, null);
+      setState('STOPS_LOADED', '');
+      setSheetState('IDLE');
     },
     fallback,
   );
