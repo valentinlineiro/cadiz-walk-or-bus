@@ -420,7 +420,7 @@ test('escapeHTML escapes HTML control characters and safely handles non-string v
   assert.equal(escapeHTML('Plaza de España'), 'Plaza de España');
 });
 
-test('decisionCardHTML with bus verdict renders mode, line, wait, alight stop and walk alternative', () => {
+test('decisionCardHTML with bus verdict renders mode, door-to-door total, context line and walk alternative', () => {
   const busVerdict = {
     kind: 'bus',
     walkMinutes: 22,
@@ -428,22 +428,21 @@ test('decisionCardHTML with bus verdict renders mode, line, wait, alight stop an
     bus: {
       line: '1',
       minutes: 6,
-      total: 14,
+      rideMinutes: 5,
+      total: 15,
       destination: 'PLAZA ESPAÑA',
       alight: { stop: { name: 'Plaza de España' } },
     },
   };
-  const html = decisionCardHTML(busVerdict);
+  const html = decisionCardHTML(busVerdict, 2);
   assert.ok(html.includes('class="decision-card bus"'));
   assert.ok(html.includes('BUS'));
-  assert.ok(html.includes('L1 · PLAZA ESPAÑA'));
+  assert.ok(html.includes('L1 · Bájate en Plaza de España'));
   assert.ok(html.includes('class="decision-wait"'));
-  assert.ok(html.includes('6<span class="unit">′ espera</span>'));
-  assert.ok(html.includes('espera'));
-  assert.ok(html.includes('Bájate en Plaza de España'));
-  assert.ok(html.includes('Andar · 22′'));
+  assert.ok(html.includes('17<span class="unit">′ total</span>')); // 15 + 2
+  assert.ok(html.includes('Andar directo · 22′'));
 
-  // Without alight stop, omits alight badge
+  // Without alight stop, context line falls back to destination
   const busWithoutAlight = {
     kind: 'bus',
     walkMinutes: 18,
@@ -451,44 +450,94 @@ test('decisionCardHTML with bus verdict renders mode, line, wait, alight stop an
     bus: {
       line: '7',
       minutes: 3,
-      total: 10,
+      rideMinutes: 4,
+      total: 9,
       destination: 'CORTADURA',
       alight: null,
     },
   };
-  const htmlFallback = decisionCardHTML(busWithoutAlight);
+  const htmlFallback = decisionCardHTML(busWithoutAlight, 1);
   assert.ok(htmlFallback.includes('L7 · CORTADURA'));
-  assert.ok(htmlFallback.includes('class="decision-wait"'));
-  assert.ok(htmlFallback.includes('3<span class="unit">′ espera</span>'));
+  assert.ok(htmlFallback.includes('10<span class="unit">′ total</span>')); // 9 + 1
   assert.ok(!htmlFallback.includes('decision-sub'));
   assert.ok(!htmlFallback.includes('Bájate en'));
 });
 
-test('decisionCardHTML with walk verdict renders mode, minutes and optional bus alternative', () => {
+test('decisionCardHTML BUS card renders all four journey timeline segments with correct minutes', () => {
+  const v = {
+    kind: 'bus',
+    walkMinutes: 18,
+    walkToStop: 3,
+    bus: {
+      line: '2',
+      minutes: 4,
+      rideMinutes: 6,
+      total: 13,
+      destination: 'PLAZA ESPAÑA',
+      alight: { stop: { name: 'Plaza de España' } },
+    },
+  };
+  const html = decisionCardHTML(v, 2);
+  assert.ok(html.includes('class="journey-timeline"'));
+  const segments = [...html.matchAll(/class="segment[^"]*">(.*?)<\/span>/gs)];
+  assert.equal(segments.length, 4);
+  assert.ok(html.includes('>3′<'));
+  assert.ok(html.includes('>4′<'));
+  assert.ok(html.includes('>6′<'));
+  assert.ok(html.includes('>2′<'));
+});
+
+test('decisionCardHTML BUS card handles null lastMileMinutes without throwing', () => {
+  const v = {
+    kind: 'bus',
+    walkMinutes: 18,
+    walkToStop: 3,
+    bus: { line: '2', minutes: 4, rideMinutes: 6, total: 13, destination: 'X', alight: null },
+  };
+  const html = decisionCardHTML(v, null);
+  assert.ok(html.includes('>?′<'));
+  assert.ok(html.includes('13<span class="unit">′ total</span>')); // 13 + 0
+});
+
+test('decisionCardHTML BUS card marks a degraded (fallback) last-mile estimate visibly, not as a routed duration', () => {
+  const v = {
+    kind: 'bus',
+    walkMinutes: 18,
+    walkToStop: 3,
+    bus: { line: '2', minutes: 4, rideMinutes: 6, total: 13, destination: 'X', alight: null },
+  };
+  const routed = decisionCardHTML(v, 2, false);
+  const degraded = decisionCardHTML(v, 2, true);
+  assert.ok(routed.includes('>2′<'));
+  assert.ok(!routed.includes('>~2′<'));
+  assert.ok(degraded.includes('>~2′<'));
+  assert.notEqual(routed, degraded);
+});
+
+test('decisionCardHTML with walk verdict renders subtitle and bus alternative door-to-door total', () => {
   const walkVerdictWithAlt = {
     kind: 'walk',
     walkMinutes: 12,
     walkToStop: 3,
-    bus: {
-      line: '2',
-      total: 15,
-    },
+    bus: { line: '2', minutes: 4, rideMinutes: 6, total: 15, destination: 'X', alight: null },
   };
-  const htmlAlt = decisionCardHTML(walkVerdictWithAlt);
+  const htmlAlt = decisionCardHTML(walkVerdictWithAlt, null);
   assert.ok(htmlAlt.includes('class="decision-card walk"'));
   assert.ok(htmlAlt.includes('ANDAR'));
   assert.ok(htmlAlt.includes('12<span class="unit">′</span>'));
-  assert.ok(htmlAlt.includes('Bus L2 · 15′ total'));
+  assert.ok(htmlAlt.includes('Ruta directa a pie'));
+  assert.ok(htmlAlt.includes('Bus L2 · 15′ total (espera 4′)'));
 
   const walkVerdictOnly = {
     kind: 'walk',
     walkMinutes: 7,
     bus: null,
   };
-  const htmlOnly = decisionCardHTML(walkVerdictOnly);
+  const htmlOnly = decisionCardHTML(walkVerdictOnly, null);
   assert.ok(htmlOnly.includes('class="decision-card walk"'));
   assert.ok(htmlOnly.includes('ANDAR'));
   assert.ok(htmlOnly.includes('7<span class="unit">′</span>'));
+  assert.ok(htmlOnly.includes('Ruta directa a pie'));
   assert.ok(!htmlOnly.includes('decision-alt'));
 });
 

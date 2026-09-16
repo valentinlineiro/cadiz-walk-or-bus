@@ -27,6 +27,7 @@ const CADIZ = { lat: 36.5271, lon: -6.2885 };
 const ICON = {
   walk: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><circle cx="13.5" cy="4" r="2"/><path d="M15.5 8.2l-3.6 1.4-.9 4.8 2.4 7.6 2-.6-2-6.5 1.8-1 2.3 4.2 1.9-1-3.2-6.1c-.2-.4-.5-.7-.9-.8z"/><path d="M10.6 12.4l-3 1-1.9 6.3 2 .6 1.7-5.5 2.3-.8z"/></svg>',
   bus: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="3" y="4" width="18" height="13" rx="3"/><rect x="5.5" y="6.5" width="5.5" height="4.5" rx="1" fill="#fff"/><rect x="13" y="6.5" width="5.5" height="4.5" rx="1" fill="#fff"/><circle cx="7.5" cy="19" r="1.7"/><circle cx="16.5" cy="19" r="1.7"/></svg>',
+  wait: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',
   pin: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C7.6 2 4 5.6 4 10c0 6 8 12 8 12s8-6 8-12c0-4.4-3.6-8-8-8zm0 11a3 3 0 110-6 3 3 0 010 6z"/></svg>',
   history: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>',
   flag: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 3v18h2v-6h9l-2.5-4L17 7H8V3z"/></svg>',
@@ -228,24 +229,36 @@ export function errorCardHTML(query) {
   return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
 }
 
-export function decisionCardHTML(v, walkToStop) {
+export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = false) {
   if (v.kind === 'bus' && v.bus) {
+    const doorToDoorTotal = v.bus.total + (lastMileMinutes ?? 0);
+    const contextLine = v.bus.alight?.stop
+      ? `L${escapeHTML(v.bus.line)} · Bájate en ${escapeHTML(v.bus.alight.stop.name)}`
+      : `L${escapeHTML(v.bus.line)} · ${escapeHTML(v.bus.destination)}`;
+    const lastMileLabel = lastMileMinutes == null ? '?' : `${lastMileDegraded ? '~' : ''}${lastMileMinutes}`;
     return `
       <div class="decision-card bus">
         <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
-        <div class="decision-line">L${escapeHTML(v.bus.line)} · ${escapeHTML(v.bus.destination)}</div>
-        <div class="decision-wait">${v.bus.minutes}<span class="unit">′ espera</span></div>
-        ${v.bus.alight?.stop ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${escapeHTML(v.bus.alight.stop.name)}</div>` : ''}
+        <div class="decision-wait">${doorToDoorTotal}<span class="unit">′ total</span></div>
+        <div class="decision-line">${contextLine}</div>
+        <div class="journey-timeline">
+          <span class="segment walk"><span class="icon">${ICON.walk}</span>${v.walkToStop}′</span>
+          <span class="segment wait"><span class="icon">${ICON.wait}</span>${v.bus.minutes}′</span>
+          <span class="segment bus"><span class="icon">${ICON.bus}</span>${v.bus.rideMinutes}′</span>
+          <span class="segment walk"><span class="icon">${ICON.walk}</span>${lastMileLabel}′</span>
+        </div>
       </div>
-      <div class="decision-alt"><span class="icon">${ICON.walk}</span>Andar · ${v.walkMinutes}′</div>
+      <div class="decision-alt"><span class="icon">${ICON.walk}</span>Andar directo · ${v.walkMinutes}′</div>
     `;
   }
+  const doorToDoorTotal = v.bus ? v.bus.total + (lastMileMinutes ?? 0) : null;
   return `
     <div class="decision-card walk">
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
       <div class="decision-wait">${v.walkMinutes}<span class="unit">′</span></div>
+      <div class="decision-line">Ruta directa a pie</div>
     </div>
-    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${escapeHTML(v.bus.line)} · ${v.bus.total}′ total</div>` : ''}
+    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${escapeHTML(v.bus.line)} · ${doorToDoorTotal}′ total (espera ${v.bus.minutes}′)</div>` : ''}
   `;
 }
 
