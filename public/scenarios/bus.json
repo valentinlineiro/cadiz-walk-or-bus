@@ -1,6 +1,7 @@
 {
-  "me": { "lat": 36.5271, "lon": -6.2885 },
-  "dest": { "lat": 36.5335, "lon": -6.2810, "label": "Catedral" },
+  "capturedAt": "2026-09-16T08:32:00+02:00",
+  "origin": { "lat": 36.5271, "lon": -6.2885 },
+  "destination": { "lat": 36.5335, "lon": -6.2810, "label": "Catedral" },
   "stops": [
     { "stop": "1229", "name": "Plaza España", "lat": 36.5290, "lon": -6.2870, "minutes": 4 },
     { "stop": "1450", "name": "Puerta Tierra", "lat": 36.5265, "lon": -6.2830, "minutes": 1 },
