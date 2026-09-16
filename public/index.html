@@ -276,19 +276,6 @@
     letter-spacing: -0.03em;
   }
   .decision-wait .unit { font-size: 18px; font-weight: 700; color: var(--ink-soft); margin-left: 2px; }
-  .decision-sub {
-    margin-top: 10px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--ink);
-    background: rgba(255,255,255,0.7);
-    padding: 8px 12px;
-    border-radius: var(--radius-sm);
-  }
-  .decision-sub .icon { color: var(--bus); }
 
   .decision-alt {
     margin-top: 10px;
@@ -304,6 +291,27 @@
     border: 1px solid var(--line);
   }
   .decision-alt .icon { color: var(--muted); }
+
+  .journey-timeline {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow-x: auto;
+  }
+  .journey-timeline .segment {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .journey-timeline .segment:not(:first-child) { padding-left: 10px; border-left: 1px solid var(--line); }
+  .journey-timeline .segment.walk .icon { color: var(--walk); }
+  .journey-timeline .segment.wait .icon { color: var(--bus-wait); }
+  .journey-timeline .segment.bus .icon { color: var(--bus); }
 
   .decision-empty { padding: 18px 4px; color: var(--ink-soft); font-size: 15px; }
   .decision-error { padding: 16px 18px; background: var(--danger-soft); color: #991b1b; border-radius: var(--radius-md); font-size: 14px; font-weight: 500; }
