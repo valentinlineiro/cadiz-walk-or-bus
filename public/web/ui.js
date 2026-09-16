@@ -613,7 +613,7 @@ export async function loadScenario(name) {
   const v = snapshot.verdict;
   const decEl = document.getElementById('decision');
   if (decEl) {
-    decEl.innerHTML = decisionCardHTML(v, v.walkToStop);
+    decEl.innerHTML = decisionCardHTML(v, null);
     decEl.classList.remove('hidden');
   }
   showAlightStop(v.bus?.alight?.stop ?? null);
