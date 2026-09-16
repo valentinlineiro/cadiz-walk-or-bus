@@ -108,9 +108,11 @@
     gap: 6px;
   }
   #btn-change-dest:hover { background: var(--line); }
+  #btn-change-dest:focus-visible { outline: 2px solid var(--walk); outline-offset: 2px; }
 
   #status { font-size: 14px; color: var(--ink-soft); padding: 2px 0 6px; min-height: 24px; }
   #skip-locate { display: inline-block; margin: 4px 0 6px; border: none; background: none; color: var(--bus); font-size: 14px; font-weight: 600; cursor: pointer; padding: 10px 0; min-height: 44px; }
+  #skip-locate:focus-visible { outline: 2px solid var(--walk); outline-offset: 2px; }
 
   /* Integrated Search Input within Sheet / Expanded */
   #search-container { margin: 6px 0 10px; position: relative; }
@@ -172,6 +174,7 @@
     color: var(--muted);
     cursor: pointer;
   }
+  #clear-search:focus-visible { outline: 2px solid var(--walk); outline-offset: 2px; }
   #btn-cancel-search {
     border: none;
     background: none;
@@ -183,6 +186,7 @@
     padding: 0 8px;
     white-space: nowrap;
   }
+  #btn-cancel-search:focus-visible { outline: 2px solid var(--walk); outline-offset: 2px; }
 
   /* Dropdown & Quick Picks */
   #dropdown {
@@ -322,7 +326,7 @@
 <div id="map"></div>
 
 <div id="sheet" aria-label="Panel de ruta">
-  <div id="sheet-handle"></div>
+  <div id="sheet-handle" aria-hidden="true"></div>
   <div id="sheet-header">
     <div id="dest-name"></div>
     <div class="header-actions">
@@ -331,7 +335,7 @@
     </div>
   </div>
 
-  <div id="status">Localizando…</div>
+  <div id="status" role="status" aria-live="polite">Localizando…</div>
   <button id="skip-locate" type="button" class="hidden">Seguir sin ubicación</button>
 
   <div id="search-container">
@@ -349,7 +353,7 @@
       </div>
       <button id="btn-cancel-search" type="button">Cancelar</button>
     </form>
-    <div id="dropdown" class="hidden"></div>
+    <div id="dropdown" class="hidden" role="region" aria-label="Sugerencias de destino"></div>
   </div>
 
   <div id="decision"></div>

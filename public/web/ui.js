@@ -1,7 +1,7 @@
 import { nearestStops } from './geo.js';
 import { verdict, filterCandidates } from './decision.js';
 import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRoute } from './api.js';
-import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute } from './map.js';
+import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
@@ -308,6 +308,7 @@ function updateFavToggle() {
 function showSearchError(query) {
   destCoords = null;
   destLabel = null;
+  clearRoute();
   const destNameEl = document.getElementById('dest-name');
   if (destNameEl) destNameEl.textContent = '';
   const decision = document.getElementById('decision');
@@ -527,7 +528,7 @@ async function onFormSubmit(query) {
 // geolocation, no Nominatim/api/OSRM — only the one fixture fetch. An
 // unknown or missing scenario is not an error state; the caller falls back
 // to the normal locate() flow.
-async function loadScenario(name) {
+export async function loadScenario(name) {
   let raw;
   try {
     const res = await fetch(`/scenarios/${name}.json`);
@@ -540,8 +541,6 @@ async function loadScenario(name) {
   const snapshot = normalizeScenario(raw);
   if (!snapshot) return false;
 
-  setSheetState('VERDICT');
-
   if (!isValidCapturedAt(snapshot.capturedAt)) {
     console.warn('[scenario] capturedAt missing or invalid');
   }
@@ -549,6 +548,9 @@ async function loadScenario(name) {
   window.__SCENARIO__ = snapshot;
 
   if (snapshot.error) {
+    destCoords = null;
+    destLabel = null;
+    setSheetState('VERDICT');
     document.getElementById('status').textContent = '';
     showSearchError(snapshot.error.query);
     return true;
@@ -557,6 +559,7 @@ async function loadScenario(name) {
   me = snapshot.origin;
   destCoords = { lat: snapshot.destination.lat, lon: snapshot.destination.lon };
   destLabel = snapshot.destination.label;
+  setSheetState('VERDICT');
   focused = snapshot.focusedStop ?? null;
   arrivalsByStop = new Map((snapshot.stops ?? []).map((s) => [s.stop, [{ minutes: s.minutes }]]));
 
