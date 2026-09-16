@@ -6,7 +6,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
     "dev": "wrangler dev"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
 }
