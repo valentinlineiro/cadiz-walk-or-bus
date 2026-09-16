@@ -7,6 +7,7 @@ import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinu
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
+import { decisionCardHTML, escapeHTML } from './ui.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -408,5 +409,109 @@ test('favorites: add, isFavorite, remove, dedupe by coords, and survives errors'
   };
   assert.doesNotThrow(() => addFavorite({ label: 'Fail', lat: 36.5, lon: -6.2 }, throwingStorage));
   assert.doesNotThrow(() => getFavorites(throwingStorage));
+});
+
+test('escapeHTML escapes HTML control characters and safely handles non-string values', () => {
+  assert.equal(escapeHTML('foo & bar <baz> "qux" \'123\''), 'foo &amp; bar &lt;baz&gt; &quot;qux&quot; &#39;123&#39;');
+  assert.equal(escapeHTML(null), '');
+  assert.equal(escapeHTML(undefined), '');
+  assert.equal(escapeHTML(42), '42');
+  assert.equal(escapeHTML(''), '');
+  assert.equal(escapeHTML('Plaza de España'), 'Plaza de España');
+});
+
+test('decisionCardHTML with bus verdict renders mode, line, wait, alight stop and walk alternative', () => {
+  const busVerdict = {
+    kind: 'bus',
+    walkMinutes: 22,
+    walkToStop: 4,
+    bus: {
+      line: '1',
+      minutes: 6,
+      total: 14,
+      destination: 'PLAZA ESPAÑA',
+      alight: { stop: { name: 'Plaza de España' } },
+    },
+  };
+  const html = decisionCardHTML(busVerdict);
+  assert.ok(html.includes('class="decision-card bus"'));
+  assert.ok(html.includes('BUS'));
+  assert.ok(html.includes('L1 · 6′ de espera'));
+  assert.ok(html.includes('Bájate en Plaza de España'));
+  assert.ok(html.includes('Andar · 22′'));
+
+  // Without alight stop, falls back to destination
+  const busWithoutAlight = {
+    kind: 'bus',
+    walkMinutes: 18,
+    walkToStop: 2,
+    bus: {
+      line: '7',
+      minutes: 3,
+      total: 10,
+      destination: 'CORTADURA',
+      alight: null,
+    },
+  };
+  const htmlFallback = decisionCardHTML(busWithoutAlight);
+  assert.ok(htmlFallback.includes('Bájate en CORTADURA'));
+});
+
+test('decisionCardHTML with walk verdict renders mode, minutes and optional bus alternative', () => {
+  const walkVerdictWithAlt = {
+    kind: 'walk',
+    walkMinutes: 12,
+    walkToStop: 3,
+    bus: {
+      line: '2',
+      total: 15,
+    },
+  };
+  const htmlAlt = decisionCardHTML(walkVerdictWithAlt);
+  assert.ok(htmlAlt.includes('class="decision-card walk"'));
+  assert.ok(htmlAlt.includes('ANDAR'));
+  assert.ok(htmlAlt.includes('12<span class="unit">′</span>'));
+  assert.ok(htmlAlt.includes('Bus L2 · 15′ total'));
+
+  const walkVerdictOnly = {
+    kind: 'walk',
+    walkMinutes: 7,
+    bus: null,
+  };
+  const htmlOnly = decisionCardHTML(walkVerdictOnly);
+  assert.ok(htmlOnly.includes('class="decision-card walk"'));
+  assert.ok(htmlOnly.includes('ANDAR'));
+  assert.ok(htmlOnly.includes('7<span class="unit">′</span>'));
+  assert.ok(!htmlOnly.includes('decision-alt'));
+});
+
+test('decisionCardHTML with error verdict properly HTML-escapes raw queries preventing XSS', () => {
+  // Script tag injection attempt
+  const vScript = {
+    kind: 'error',
+    error: { query: '<script>alert("xss")</script>' },
+  };
+  const htmlScript = decisionCardHTML(vScript);
+  assert.ok(htmlScript.includes('class="decision-error"'));
+  assert.ok(htmlScript.includes('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'));
+  assert.ok(!htmlScript.includes('<script>'));
+  assert.ok(!htmlScript.includes('</script>'));
+
+  // HTML markup & quotes injection attempt
+  const vTags = {
+    kind: 'error',
+    error: { query: '<b>test</b> & "hello" \'' },
+  };
+  const htmlTags = decisionCardHTML(vTags);
+  assert.ok(htmlTags.includes('&lt;b&gt;test&lt;/b&gt; &amp; &quot;hello&quot; &#39;'));
+  assert.ok(!htmlTags.includes('<b>test</b>'));
+
+  // Empty query string
+  const vEmpty = { kind: 'error', error: {} };
+  assert.equal(decisionCardHTML(vEmpty), '<div class="decision-error">No encontramos. Prueba con otro nombre.</div>');
+
+  // String error
+  const vString = { error: 'algo & nada' };
+  assert.equal(decisionCardHTML(vString), '<div class="decision-error">No encontramos «algo &amp; nada». Prueba con otro nombre.</div>');
 });
 

@@ -205,18 +205,29 @@ function makeAlightResolver(boardingStop, destinationCoords) {
     });
 }
 
+export function escapeHTML(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function decisionCardHTML(v, walkToStop) {
   if (v.error || v.kind === 'error') {
-    const q = v.error?.query ?? v.query ?? (typeof v.error === 'string' ? v.error : '');
-    return `<div class="decision-error">No encontramos «${q}». Prueba con otro nombre.</div>`;
+    const rawQ = v.error?.query ?? v.query ?? (typeof v.error === 'string' ? v.error : '');
+    const q = rawQ ? ` «${escapeHTML(rawQ)}»` : '';
+    return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
   }
   if (v.kind === 'bus' && v.bus) {
     const alightName = v.bus.alight?.stop?.name ?? v.bus.destination ?? null;
     return `
       <div class="decision-card bus">
         <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
-        <div class="decision-line">L${v.bus.line} · ${v.bus.minutes}′ de espera</div>
-        ${alightName ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${alightName}</div>` : ''}
+        <div class="decision-line">L${escapeHTML(v.bus.line)} · ${v.bus.minutes}′ de espera</div>
+        ${alightName ? `<div class="decision-sub"><span class="icon">${ICON.flag}</span>Bájate en ${escapeHTML(alightName)}</div>` : ''}
       </div>
       <div class="decision-alt"><span class="icon">${ICON.walk}</span>Andar · ${v.walkMinutes}′</div>
     `;
@@ -226,7 +237,7 @@ export function decisionCardHTML(v, walkToStop) {
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
       <div class="decision-wait">${v.walkMinutes}<span class="unit">′</span></div>
     </div>
-    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${v.bus.line} · ${v.bus.total}′ total</div>` : ''}
+    ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${escapeHTML(v.bus.line)} · ${v.bus.total}′ total</div>` : ''}
   `;
 }
 
