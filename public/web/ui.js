@@ -6,6 +6,7 @@ import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { findAlightStop, diversifyByLine } from './topology.js';
+import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -427,26 +428,35 @@ async function onFormSubmit(query) {
 // unknown or missing scenario is not an error state; the caller falls back
 // to the normal locate() flow.
 async function loadScenario(name) {
-  let fx;
+  let raw;
   try {
     const res = await fetch(`/scenarios/${name}.json`);
     if (!res.ok) return false;
-    fx = await res.json();
+    raw = await res.json();
   } catch {
     return false;
   }
 
-  if (fx.error) {
+  const snapshot = normalizeScenario(raw);
+  if (!snapshot) return false;
+
+  if (!isValidCapturedAt(snapshot.capturedAt)) {
+    console.warn('[scenario] capturedAt missing or invalid');
+  }
+
+  window.__SCENARIO__ = snapshot;
+
+  if (snapshot.error) {
     document.getElementById('status').textContent = '';
-    showSearchError(fx.error.query);
+    showSearchError(snapshot.error.query);
     return true;
   }
 
-  me = fx.me;
-  destCoords = { lat: fx.dest.lat, lon: fx.dest.lon };
-  destLabel = fx.dest.label;
-  focused = fx.focusedStop ?? null;
-  arrivalsByStop = new Map((fx.stops ?? []).map((s) => [s.stop, [{ minutes: s.minutes }]]));
+  me = snapshot.origin;
+  destCoords = { lat: snapshot.destination.lat, lon: snapshot.destination.lon };
+  destLabel = snapshot.destination.label;
+  focused = snapshot.focusedStop ?? null;
+  arrivalsByStop = new Map((snapshot.stops ?? []).map((s) => [s.stop, [{ minutes: s.minutes }]]));
 
   document.getElementById('status').textContent = '';
   document.getElementById('dest-name').textContent = destLabel;
@@ -454,13 +464,13 @@ async function loadScenario(name) {
 
   showMe(me.lat, me.lon);
   showDestination(destCoords.lat, destCoords.lon, destLabel);
-  showStops(fx.stops ?? [], arrivalsByStop, focused);
+  showStops(snapshot.stops ?? [], arrivalsByStop, focused);
 
-  const v = fx.verdict;
+  const v = snapshot.verdict;
   document.getElementById('decision').innerHTML = decisionCardHTML(v, v.walkToStop);
   showAlightStop(v.bus?.alight?.stop ?? null);
-  showBusRoute(fx.busRoute?.coordinates ?? null);
-  showWalkRoute(v.kind === 'bus' ? fx.walkToStopRoute?.coordinates ?? null : fx.walkRoute?.coordinates ?? null);
+  showBusRoute(snapshot.busRoute?.coordinates ?? null);
+  showWalkRoute(v.kind === 'bus' ? snapshot.walkToStopRoute?.coordinates ?? null : snapshot.walkRoute?.coordinates ?? null);
 
   fitRoute([
     me,
