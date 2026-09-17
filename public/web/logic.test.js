@@ -208,6 +208,10 @@ test('transition follows the locating→ready→deciding flow', () => {
   assert.equal(transition('ROUTING', 'FAILED'), 'ERROR');
 });
 
+test('transition: OUT_OF_CADIZ from LOCATING goes to READY', () => {
+  assert.equal(transition('LOCATING', 'OUT_OF_CADIZ'), 'READY');
+});
+
 test('getArrivals returns [] on panel outage', async () => {
   const f = async () => ({ ok: false, status: 502 });
   assert.deepEqual(await getArrivals(f, '9905'), []);
