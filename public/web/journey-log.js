@@ -1,4 +1,7 @@
 import { parseIdentity, isSameIdentity } from './identity.js';
+import { classifyDivergence } from './diversity.js';
+
+export { classifyDivergence };
 
 const STORAGE_KEY = 'cadiz_journey_log';
 export const MAX_LOG = 200;
@@ -36,43 +39,6 @@ export function formatRecommendationSub(rec) {
     return `última vez: ANDAR · ${mins}`.trim();
   }
   return null;
-}
-
-export function classifyDivergence(choice, recommendation) {
-  if (!choice || !recommendation) return 'none';
-  const choiceId = choice.identity || '';
-  const recId = recommendation.identity || '';
-  if (choiceId && recId && isSameIdentity(choiceId, recId)) return 'none';
-
-  const choiceParts = parseIdentity(choiceId);
-  const recParts = parseIdentity(recId);
-
-  const choiceMode = choice.mode || (choiceParts.mode !== 'unknown' ? choiceParts.mode : null);
-  const recMode = recommendation.kind || recommendation.mode || (recParts.mode !== 'unknown' ? recParts.mode : null);
-
-  if (choiceMode && recMode && choiceMode !== recMode) {
-    return 'mode';
-  }
-
-  if (choiceMode === 'bus' && recMode === 'bus') {
-    const choiceLine = choice.busLine != null ? String(choice.busLine) : (choiceParts.mode === 'bus' ? choiceParts.line || null : null);
-    const recLine = recommendation.busLine != null ? String(recommendation.busLine) : (recParts.mode === 'bus' ? recParts.line || null : null);
-
-    if (choiceLine && recLine && choiceLine !== recLine) {
-      return 'line';
-    }
-
-    const choiceBoard = choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts.mode === 'bus' ? choiceParts.boardingStopId || null : null);
-    const recBoard = recommendation.boardingStopId != null ? String(recommendation.boardingStopId) : (recParts.mode === 'bus' ? recParts.boardingStopId || null : null);
-    const choiceAlight = choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts.mode === 'bus' ? choiceParts.alightStopId || null : null);
-    const recAlight = recommendation.alightStopId != null ? String(recommendation.alightStopId) : (recParts.mode === 'bus' ? recParts.alightStopId || null : null);
-
-    if ((choiceBoard && recBoard && choiceBoard !== recBoard) || (choiceAlight && recAlight && choiceAlight !== recAlight)) {
-      return 'access';
-    }
-  }
-
-  return 'none';
 }
 
 function normalizeEntryOnRead(item) {

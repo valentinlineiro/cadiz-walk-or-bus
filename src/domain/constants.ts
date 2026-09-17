@@ -6,14 +6,26 @@ export const WALK_METERS_PER_MINUTE = 80;
 export const BUS_METERS_PER_MINUTE = 250;
 
 // Hard planning budget and temporal similarity thresholds
-export const DEFAULT_PLANNING_POLICY = {
+export interface PlanningPolicy {
+  maxCandidates?: number;
+  maxAlternatives?: number;
+  similarityMaxDeltaMinutes?: number;
+}
+
+export const DEFAULT_PLANNING_POLICY: PlanningPolicy = {
   maxCandidates: 3,
   maxAlternatives: 2,
   similarityMaxDeltaMinutes: 5,
-} as const;
+};
 
 // Structural diversity thresholds
-export const DEFAULT_DIVERSITY_THRESHOLDS = {
+export interface DiversityThresholds {
+  accessWalkMinutes?: number;
+  alightDistanceMeters?: number;
+}
+
+export const DEFAULT_DIVERSITY_THRESHOLDS: DiversityThresholds = {
   accessWalkMinutes: 3,
   alightDistanceMeters: 250,
-} as const;
+};
+
