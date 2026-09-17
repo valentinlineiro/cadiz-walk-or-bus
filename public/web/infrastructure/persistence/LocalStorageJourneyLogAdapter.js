@@ -2,6 +2,15 @@ export const STORAGE_KEY = 'cadiz_journey_log';
 export const DEDUPE_WINDOW_MS = 300000; // 5 minutes
 export const DEDUPE_COORD_EPSILON = 0.0002;
 export const MAX_ENTRIES = 200;
+export function formatRecommendationSub(rec) {
+    if (!rec)
+        return '';
+    const isBus = rec.mode === 'bus' || rec.kind === 'bus';
+    const line = rec.line ?? rec.busLine ?? '';
+    const mode = isBus ? `BUS ${line}`.trim() : 'ANDAR';
+    const time = rec.totalMinutes ? ` · ${rec.totalMinutes}′` : '';
+    return `última vez: ${mode}${time}`;
+}
 function sameDestination(d1, d2) {
     if (!d1 || !d2)
         return false;
@@ -22,7 +31,13 @@ export class LocalStorageJourneyLogAdapter {
             const parsed = JSON.parse(raw);
             if (!Array.isArray(parsed))
                 return [];
-            return parsed.filter((item) => item && typeof item === 'object' && item.id && item.timestamp && item.destination && item.recommendation);
+            return parsed.filter((item) => item &&
+                typeof item === 'object' &&
+                (item.id == null || typeof item.id === 'string') &&
+                typeof item.timestamp === 'number' &&
+                item.destination &&
+                typeof item.destination.lat === 'number' &&
+                typeof item.destination.lon === 'number');
         }
         catch {
             return [];
@@ -37,13 +52,11 @@ export class LocalStorageJourneyLogAdapter {
             const existingIdx = log.findIndex((entry) => sameDestination(entry.destination, record.destination) &&
                 Math.abs(record.timestamp - entry.timestamp) <= DEDUPE_WINDOW_MS);
             if (existingIdx !== -1) {
-                log[existingIdx] = record;
+                log.splice(existingIdx, 1);
             }
-            else {
-                log.unshift(record);
-                if (log.length > MAX_ENTRIES) {
-                    log.length = MAX_ENTRIES;
-                }
+            log.unshift(record);
+            if (log.length > MAX_ENTRIES) {
+                log.length = MAX_ENTRIES;
             }
             this.storageImpl.setItem(STORAGE_KEY, JSON.stringify(log));
         }
@@ -51,55 +64,50 @@ export class LocalStorageJourneyLogAdapter {
             // Ignore QuotaExceededError or security exceptions silently
         }
     }
-    getRecentDestinations(n = 5) {
-        const log = this.getLog();
-        const result = [];
-        for (const entry of log) {
-            if (!entry.destination)
-                continue;
-            const alreadyIn = result.some((r) => sameDestination(r, entry.destination));
-            if (!alreadyIn) {
-                result.push({
-                    ...entry.destination,
-                    lastTimestamp: entry.timestamp,
-                });
-                if (result.length >= n)
-                    break;
-            }
-        }
-        return result;
-    }
-    getTopDestinations(n = 5) {
+    getGroupedDestinations() {
         const log = this.getLog();
         const groups = [];
         for (const entry of log) {
             if (!entry.destination)
                 continue;
-            const existing = groups.find((g) => sameDestination(g.destination, entry.destination));
+            const existing = groups.find((g) => sameDestination(g, entry.destination));
             if (existing) {
                 existing.count++;
                 if (entry.timestamp > existing.lastTimestamp) {
                     existing.lastTimestamp = entry.timestamp;
-                    existing.destination = entry.destination;
+                    existing.label = entry.destination.label ?? existing.label;
+                    existing.lat = entry.destination.lat;
+                    existing.lon = entry.destination.lon;
+                    existing.lastRecommendation = entry.recommendation;
+                    existing.sub = formatRecommendationSub(entry.recommendation);
                 }
             }
             else {
                 groups.push({
-                    destination: entry.destination,
+                    label: entry.destination.label ?? '',
+                    lat: entry.destination.lat,
+                    lon: entry.destination.lon,
                     count: 1,
                     lastTimestamp: entry.timestamp,
+                    lastRecommendation: entry.recommendation,
+                    sub: formatRecommendationSub(entry.recommendation),
                 });
             }
         }
+        return groups;
+    }
+    getRecentDestinations(n = 5) {
+        const groups = this.getGroupedDestinations();
+        groups.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+        return groups.slice(0, n);
+    }
+    getTopDestinations(n = 5) {
+        const groups = this.getGroupedDestinations();
         groups.sort((a, b) => {
             if (b.count !== a.count)
                 return b.count - a.count;
             return b.lastTimestamp - a.lastTimestamp;
         });
-        return groups.slice(0, n).map((g) => ({
-            ...g.destination,
-            count: g.count,
-            lastTimestamp: g.lastTimestamp,
-        }));
+        return groups.slice(0, n);
     }
 }

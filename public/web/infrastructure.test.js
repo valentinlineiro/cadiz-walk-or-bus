@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.js';
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
-import { LocalStorageJourneyLogAdapter } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
+import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
 
 
 test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
@@ -404,5 +404,101 @@ test('LocalStorageJourneyLogAdapter: getTopDestinations groups by coords and ran
   assert.equal(top[0].count, 2);
   assert.equal(top[1].label, 'Dest A');
   assert.equal(top[1].count, 1);
+});
+
+test('LocalStorageJourneyLogAdapter: deduplication moves updated entry to the head of the log (strict LIFO)', () => {
+  const storage = new MockStorage();
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+
+  const destA = { label: 'Dest A', lat: 36.50, lon: -6.28 };
+  const destB = { label: 'Dest B', lat: 36.52, lon: -6.29 };
+
+  adapter.append({
+    id: 'a1',
+    timestamp: 10000,
+    destination: destA,
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
+    choice: null,
+  });
+  adapter.append({
+    id: 'b1',
+    timestamp: 20000,
+    destination: destB,
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 12 },
+    choice: null,
+  });
+
+  // Current order: [b1, a1]
+  // Update destA within dedupe window (25000 is within 300000ms of 10000)
+  adapter.append({
+    id: 'a2',
+    timestamp: 25000,
+    destination: destA,
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
+    choice: null,
+  });
+
+  const log = adapter.getLog();
+  assert.equal(log.length, 2);
+  assert.equal(log[0].id, 'a2'); // moved to front (strict LIFO)
+  assert.equal(log[1].id, 'b1');
+});
+
+test('LocalStorageJourneyLogAdapter: getLog accepts entries with optional id and validates schema', () => {
+  const storage = new MockStorage();
+  const validNoId = {
+    timestamp: 1000,
+    destination: { label: 'Dest A', lat: 36.50, lon: -6.28 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
+  };
+  const invalidTimestamp = {
+    timestamp: 'not-a-number',
+    destination: { label: 'Dest B', lat: 36.50, lon: -6.28 },
+  };
+  const invalidCoords = {
+    timestamp: 2000,
+    destination: { label: 'Dest C', lat: 'invalid', lon: -6.28 },
+  };
+
+  storage.setItem('cadiz_journey_log', JSON.stringify([validNoId, invalidTimestamp, invalidCoords]));
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const log = adapter.getLog();
+
+  assert.equal(log.length, 1);
+  assert.equal(log[0].destination.label, 'Dest A');
+  assert.equal(log[0].id, undefined);
+});
+
+test('LocalStorageJourneyLogAdapter: getRecentDestinations and getTopDestinations include count, lastRecommendation, and sub', () => {
+  const storage = new MockStorage();
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+
+  adapter.append({
+    timestamp: 1000,
+    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
+    recommendation: { identity: 'bus:1', kind: 'bus', busLine: '1', totalMinutes: 14 },
+    choice: null,
+  });
+
+  const recent = adapter.getRecentDestinations(1);
+  assert.equal(recent.length, 1);
+  assert.equal(recent[0].count, 1);
+  assert.equal(recent[0].sub, 'última vez: BUS 1 · 14′');
+  assert.ok(recent[0].lastRecommendation);
+
+  const top = adapter.getTopDestinations(1);
+  assert.equal(top.length, 1);
+  assert.equal(top[0].count, 1);
+  assert.equal(top[0].sub, 'última vez: BUS 1 · 14′');
+  assert.ok(top[0].lastRecommendation);
+});
+
+test('formatRecommendationSub: formats walk and bus recommendations correctly', () => {
+  assert.equal(formatRecommendationSub(null), '');
+  assert.equal(formatRecommendationSub({ mode: 'walk', totalMinutes: 15 }), 'última vez: ANDAR · 15′');
+  assert.equal(formatRecommendationSub({ kind: 'walk', totalMinutes: 20 }), 'última vez: ANDAR · 20′');
+  assert.equal(formatRecommendationSub({ mode: 'bus', line: '1', totalMinutes: 12 }), 'última vez: BUS 1 · 12′');
+  assert.equal(formatRecommendationSub({ kind: 'bus', busLine: '2', totalMinutes: 10 }), 'última vez: BUS 2 · 10′');
+  assert.equal(formatRecommendationSub({ mode: 'bus' }), 'última vez: BUS');
 });
 
