@@ -88,7 +88,7 @@ export interface CandidateEstimate {
  */
 export interface CandidateMetadata {
   line?: string;
-  destination?: string;
+  destination?: string | (Coordinates & { label?: string });
   boardingStop?: Stop;
   alightStop?: Stop;
   alightDistanceMeters?: number;

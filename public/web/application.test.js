@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RecordUserChoiceUseCase } from './application/index.js';
+import { RecordUserChoiceUseCase, FindBestJourneysUseCase } from './application/index.js';
 import { createWalkIdentity, createBusIdentity } from './identity.js';
 
 class FakeJourneyLog {
@@ -208,3 +208,234 @@ test('RecordUserChoiceUseCase: bus recommendation extracts line and stops from m
   assert.equal(record.choice.divergenceType, 'line');
   assert.equal(record.choice.totalMinutes, 17);
 });
+
+test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 candidates routed)', async () => {
+  let walkingRouteCalls = 0;
+  let busRouteCalls = 0;
+
+  const fakeRouting = {
+    routeWalking: async () => {
+      walkingRouteCalls++;
+      return { minutes: 15, coordinates: [] };
+    },
+    routeBus: async () => {
+      busRouteCalls++;
+      return { minutes: 8, coordinates: [] };
+    },
+  };
+
+  const fakeTransit = {
+    getStops: async () => [
+      { stop: '101', name: 'Stop 101', lat: 36.520, lon: -6.280 },
+      { stop: '102', name: 'Stop 102', lat: 36.521, lon: -6.281 },
+      { stop: '103', name: 'Stop 103', lat: 36.522, lon: -6.282 },
+      { stop: '201', name: 'Stop 201', lat: 36.535, lon: -6.295 },
+    ],
+    getLines: async () => ({
+      lines: {
+        '1': { 'Centro': ['101', '201'] },
+        '2': { 'Centro': ['102', '201'] },
+        '3': { 'Centro': ['103', '201'] },
+        '4': { 'Centro': ['101', '201'] },
+        '5': { 'Centro': ['102', '201'] },
+      },
+    }),
+    getArrivals: async (stopId) => {
+      if (stopId === '101') {
+        return [
+          { line: '1', destination: 'Centro', minutes: 2 },
+          { line: '1', destination: 'Centro', minutes: 7 },
+          { line: '4', destination: 'Centro', minutes: 3 },
+          { line: '4', destination: 'Centro', minutes: 8 },
+        ];
+      }
+      if (stopId === '102') {
+        return [
+          { line: '2', destination: 'Centro', minutes: 4 },
+          { line: '2', destination: 'Centro', minutes: 9 },
+          { line: '5', destination: 'Centro', minutes: 5 },
+          { line: '5', destination: 'Centro', minutes: 10 },
+        ];
+      }
+      if (stopId === '103') {
+        return [
+          { line: '3', destination: 'Centro', minutes: 3 },
+          { line: '3', destination: 'Centro', minutes: 6 },
+        ];
+      }
+      return [];
+    },
+  };
+
+  const useCase = new FindBestJourneysUseCase({
+    routing: fakeRouting,
+    transit: fakeTransit,
+  });
+
+  const origin = { lat: 36.520, lon: -6.280 };
+  const destination = { lat: 36.535, lon: -6.295, label: 'Plaza San Antonio' };
+
+  const decision = await useCase.execute({ origin, destination });
+
+  assert.ok(decision.hero);
+  assert.ok(Array.isArray(decision.alternatives));
+  // Total exact routing operations bounded by admitted candidates (at most 3)
+  assert.ok(walkingRouteCalls <= 6, `Expected walking calls <= 6, got ${walkingRouteCalls}`);
+  assert.ok(busRouteCalls <= 3, `Expected bus calls <= 3, got ${busRouteCalls}`);
+  assert.ok(decision.alternatives.length <= 2);
+});
+
+test('FindBestJourneysUseCase: exact re-ranking promotes post-routing fastest candidate to Hero', async () => {
+  const origin = { lat: 36.5200, lon: -6.2800 };
+  const destination = { lat: 36.5240, lon: -6.2800, label: 'Plaza Central' };
+
+  const fakeRouting = {
+    routeWalking: async (from, to) => {
+      // Direct walk has urban pedestrian detours
+      if (from.lat === origin.lat && to.lat === destination.lat) {
+        return { minutes: 11, coordinates: [] };
+      }
+      // Walk to stop or last mile
+      return { minutes: 1, coordinates: [] };
+    },
+    routeBus: async () => {
+      return { minutes: 2, coordinates: [] };
+    },
+  };
+
+  const fakeTransit = {
+    getStops: async () => [
+      { stop: '101', name: 'Stop A', lat: 36.5205, lon: -6.2800 },
+      { stop: '201', name: 'Stop B', lat: 36.5235, lon: -6.2800 },
+    ],
+    getLines: async () => ({
+      lines: {
+        '1': { 'Centro': ['101', '201'] },
+      },
+    }),
+    getArrivals: async () => [
+      { line: '1', destination: 'Centro', minutes: 4 },
+    ],
+  };
+
+  const useCase = new FindBestJourneysUseCase({
+    routing: fakeRouting,
+    transit: fakeTransit,
+  });
+
+  const decision = await useCase.execute({ origin, destination });
+
+  assert.equal(decision.hero.mode, 'bus');
+  assert.ok(decision.hero.totalMinutes < 11);
+  assert.equal(decision.alternatives.length, 1);
+  assert.equal(decision.alternatives[0].journey.mode, 'walk');
+  assert.equal(decision.alternatives[0].journey.totalMinutes, 11);
+  assert.equal(decision.alternatives[0].divergenceType, 'mode');
+  assert.ok(decision.alternatives[0].deltaMinutes > 0);
+});
+
+test('FindBestJourneysUseCase: structural diversity prunes redundant same-line bus alternatives against final Hero', async () => {
+  const origin = { lat: 36.520, lon: -6.280 };
+  const destination = { lat: 36.528, lon: -6.285, label: 'Hospital' };
+
+  const fakeRouting = {
+    routeWalking: async (from, to) => {
+      if (from.lat === origin.lat && to.lat === destination.lat) {
+        // Direct walk within similarity delta of hero (8m + 3m = 11m <= 13m)
+        return { minutes: 11, coordinates: [] };
+      }
+      if (to.lat === 36.521) {
+        return { minutes: 1, coordinates: [] };
+      }
+      return { minutes: 2, coordinates: [] };
+    },
+    routeBus: async () => {
+      return { minutes: 5, coordinates: [] };
+    },
+  };
+
+  const fakeTransit = {
+    getStops: async () => [
+      { stop: '101', name: 'Stop A', lat: 36.521, lon: -6.280 },
+      { stop: '201', name: 'Stop B', lat: 36.527, lon: -6.285 },
+    ],
+    getLines: async () => ({
+      lines: {
+        '1': { 'Hospital': ['101', '201'] },
+      },
+    }),
+    getArrivals: async () => [
+      { line: '1', destination: 'Hospital', minutes: 2 },
+      { line: '1', destination: 'Hospital', minutes: 4 },
+    ],
+  };
+
+  const useCase = new FindBestJourneysUseCase({
+    routing: fakeRouting,
+    transit: fakeTransit,
+  });
+
+  const decision = await useCase.execute({ origin, destination });
+
+  assert.equal(decision.hero.mode, 'bus');
+  assert.equal(decision.hero.metadata.line, '1');
+  assert.equal(decision.hero.totalMinutes, 8);
+
+  // Redundant Line 1 must NOT be included in alternatives
+  const altLines = decision.alternatives.map((a) => a.journey.metadata?.line).filter(Boolean);
+  assert.deepEqual(altLines, [], 'Same-line redundant bus must be pruned by diversity filter');
+
+  // Walk candidate (mode diversity) should be preserved
+  const walkAlt = decision.alternatives.find((a) => a.journey.mode === 'walk');
+  assert.ok(walkAlt);
+  assert.equal(walkAlt.divergenceType, 'mode');
+  assert.equal(walkAlt.deltaMinutes, 3);
+});
+
+test('FindBestJourneysUseCase: flags degraded last-mile when pedestrian routing fails', async () => {
+  const origin = { lat: 36.520, lon: -6.280 };
+  const destination = { lat: 36.528, lon: -6.285, label: 'Hospital' };
+
+  const fakeRouting = {
+    routeWalking: async (from, to) => {
+      if (from.lat === origin.lat && to.lat === destination.lat) {
+        return { minutes: 30, coordinates: [] };
+      }
+      if (to.lat === 36.521) {
+        return { minutes: 2, coordinates: [] };
+      }
+      return null;
+    },
+    routeBus: async () => {
+      return { minutes: 5, coordinates: [] };
+    },
+  };
+
+  const fakeTransit = {
+    getStops: async () => [
+      { stop: '101', name: 'Stop A', lat: 36.521, lon: -6.280 },
+      { stop: '201', name: 'Stop B', lat: 36.527, lon: -6.285 },
+    ],
+    getLines: async () => ({
+      lines: {
+        '1': { 'Hospital': ['101', '201'] },
+      },
+    }),
+    getArrivals: async () => [
+      { line: '1', destination: 'Hospital', minutes: 2 },
+    ],
+  };
+
+  const useCase = new FindBestJourneysUseCase({
+    routing: fakeRouting,
+    transit: fakeTransit,
+  });
+
+  const decision = await useCase.execute({ origin, destination });
+
+  assert.equal(decision.hero.mode, 'bus');
+  assert.equal(decision.hero.dataQuality, 'degraded');
+  assert.equal(decision.hero.breakdown.lastMileDegraded, true);
+  assert.ok(decision.hero.breakdown.lastMileMinutes > 0);
+});
+
