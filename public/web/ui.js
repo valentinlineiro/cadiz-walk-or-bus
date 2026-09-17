@@ -719,10 +719,19 @@ async function routeToDestination(dest) {
   );
   if (id !== requestId) return;
 
-  // Boarding stops of selected bus candidates for map pins
+  // 5. Update estimatedMinutes with exact journey minutes and re-rank with selectCandidates
+  for (const cand of selected) {
+    if (cand.exactJourney && typeof cand.exactJourney.totalMinutes === 'number') {
+      cand.estimatedMinutes = cand.exactJourney.totalMinutes;
+    }
+  }
+  const { primary: exactPrimary, alternatives: exactAlternatives } = selectCandidates(selected);
+  const finalSelected = exactPrimary ? [exactPrimary, ...exactAlternatives] : selected;
+
+  // Boarding stops of final selected bus candidates for map pins
   const nearStops = [];
   const seenStops = new Set();
-  for (const c of selected) {
+  for (const c of finalSelected) {
     if (c.mode === 'bus' && c.metadata?.boardingStop) {
       const sId = c.metadata.boardingStop.stop;
       if (!seenStops.has(sId)) {
@@ -755,33 +764,33 @@ async function routeToDestination(dest) {
   };
 
   const promote = (cand) => {
-    const idx = selected.findIndex((c) => c.identity === cand.identity);
+    const idx = finalSelected.findIndex((c) => c.identity === cand.identity);
     if (idx !== -1) {
-      renderDecisionWithAlternatives(selected, idx, onPromote);
-      onPromote(selected[idx]);
+      renderDecisionWithAlternatives(finalSelected, idx, onPromote);
+      onPromote(finalSelected[idx]);
     }
   };
 
   currentPlanningSession = {
-    selected,
+    selected: finalSelected,
     onPromote: promote,
   };
 
-  // 5. Render Hero primary and alternatives
-  renderDecisionWithAlternatives(selected, 0, onPromote);
-  applyCandidateToMap(selected[0]);
+  // 6. Render Hero primary and alternatives
+  renderDecisionWithAlternatives(finalSelected, 0, onPromote);
+  applyCandidateToMap(finalSelected[0]);
 
-  if (selected[0] && destCoords && destLabel) {
+  if (finalSelected[0] && destCoords && destLabel) {
     try {
       appendEntry({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: Date.now(),
         destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
         recommendation: {
-          kind: selected[0].mode,
+          kind: finalSelected[0].mode,
           walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
-          busLine: selected[0].mode === 'bus' ? (selected[0].metadata?.line ?? null) : null,
-          totalMinutes: selected[0].exactJourney?.totalMinutes ?? selected[0].estimatedMinutes,
+          busLine: finalSelected[0].mode === 'bus' ? (finalSelected[0].metadata?.line ?? null) : null,
+          totalMinutes: finalSelected[0].exactJourney?.totalMinutes ?? finalSelected[0].estimatedMinutes,
         },
         choice: null,
       });

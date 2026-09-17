@@ -912,6 +912,48 @@ test('planner: selectCandidates enforces maxCandidates as a hard budget on total
   assert.deepEqual(res0.alternatives, []);
 });
 
+test('planner: two-stage selection re-ranks candidates after exact routing refinement', () => {
+  // Stage 1 (cheap pre-ranking):
+  // Bus L1 is estimated at 15m (primary), Bus L2 at 16m, Walk at 18m
+  const bus1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 15 };
+  const bus2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 16 };
+  const walk = { identity: 'walk', mode: 'walk', estimatedMinutes: 18 };
+
+  const cheapSelection = selectCandidates([bus1, bus2, walk]);
+  assert.equal(cheapSelection.primary.identity, 'bus:1');
+  assert.equal(cheapSelection.alternatives.length, 2);
+
+  // Stage 2 (exact OSRM refinement):
+  // Bus L1 exact routing reveals longer walk-to-stop + last-mile (19m)
+  // Bus L2 exact routing stays 16m
+  // Walk exact routing is 18m
+  bus1.exactJourney = { totalMinutes: 19 };
+  bus1.estimatedMinutes = bus1.exactJourney.totalMinutes;
+
+  bus2.exactJourney = { totalMinutes: 16 };
+  bus2.estimatedMinutes = bus2.exactJourney.totalMinutes;
+
+  walk.exactJourney = { totalMinutes: 18 };
+  walk.estimatedMinutes = walk.exactJourney.totalMinutes;
+
+  const exactSelection = selectCandidates([bus1, bus2, walk]);
+  // Bus L2 is now the true fastest option (Hero)
+  assert.equal(exactSelection.primary.identity, 'bus:2');
+  assert.equal(exactSelection.primary.estimatedMinutes, 16);
+
+  // Walk (+2m) and Bus L1 (+3m) are competitive alternatives within 5m
+  assert.equal(exactSelection.alternatives.length, 2);
+  assert.equal(exactSelection.alternatives[0].identity, 'walk');
+  assert.equal(exactSelection.alternatives[1].identity, 'bus:1');
+
+  // If Bus L1 exact was 23m (> 16 + 5 = 21m), it is pruned from alternatives
+  bus1.estimatedMinutes = 23;
+  const prunedSelection = selectCandidates([bus1, bus2, walk]);
+  assert.equal(prunedSelection.primary.identity, 'bus:2');
+  assert.equal(prunedSelection.alternatives.length, 1);
+  assert.equal(prunedSelection.alternatives[0].identity, 'walk');
+});
+
 test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
   const primary = {
     identity: 'bus:1:1106:1204',
