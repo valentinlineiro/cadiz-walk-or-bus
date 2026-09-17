@@ -9,6 +9,13 @@ import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { appendEntry, getRecentDestinations } from './journey-log.js';
+import {
+  createWalkCandidate,
+  createBusCandidates,
+  selectCandidates,
+  formatAlternativeDiff,
+  cheapWalkToStop,
+} from './planner.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -22,6 +29,7 @@ let destLabel = null;
 let lastWalkRoute = null;
 let walkToStopCache = new Map();
 let lastNear = [];
+let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 // Inline SVG glyphs — no emoji as primary iconography.
@@ -231,7 +239,126 @@ export function errorCardHTML(query) {
   return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
 }
 
+export function buildAlternativeCardHTML(alt, primary) {
+  const diff = formatAlternativeDiff(alt, primary);
+  const deltaMins = alt.exactJourney?.totalMinutes != null && primary?.exactJourney?.totalMinutes != null
+    ? alt.exactJourney.totalMinutes - primary.exactJourney.totalMinutes
+    : alt.estimatedMinutes - (primary?.estimatedMinutes ?? 0);
+  const deltaStr = deltaMins > 0 ? `+${deltaMins}′` : `${deltaMins}′`;
+  const totalMins = alt.exactJourney?.totalMinutes ?? alt.estimatedMinutes;
+  const modeIcon = alt.mode === 'bus' ? ICON.bus : ICON.walk;
+  const modeTitle = alt.mode === 'bus'
+    ? (alt.metadata?.line ? `Bus L${escapeHTML(alt.metadata.line)}` : 'Bus')
+    : 'Andar';
+  const degradedMark = alt.exactJourney?.lastMileDegraded ? '~' : '';
+
+  return `
+    <button type="button" class="alternative-card" data-identity="${escapeHTML(alt.identity)}">
+      <div class="alt-left">
+        <div class="alt-title"><span class="icon">${modeIcon}</span>${escapeHTML(modeTitle)}</div>
+        <div class="alt-desc">${escapeHTML(diff)}</div>
+      </div>
+      <div class="alt-right">
+        <div class="alt-time">${degradedMark}${totalMins}′</div>
+        <div class="alt-delta">${deltaStr}</div>
+      </div>
+    </button>
+  `;
+}
+
+export function heroCardHTML(cand) {
+  if (!cand) return '';
+  if (cand.mode === 'bus') {
+    const totalMins = cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
+    const line = cand.metadata?.line ?? '';
+    const alightName = cand.metadata?.alightStop?.name;
+    const destName = cand.metadata?.destination;
+    const contextLine = alightName
+      ? `L${escapeHTML(line)} · Bájate en ${escapeHTML(alightName)}`
+      : (destName ? `L${escapeHTML(line)} · ${escapeHTML(destName)}` : `L${escapeHTML(line)}`);
+
+    const walkToStop = cand.exactJourney?.walkToStopRoute?.minutes ?? cand.estimate?.walkToStopMinutes ?? '?';
+    const waitMins = cand.estimate?.waitMinutes ?? 0;
+    const rideMins = cand.estimate?.rideMinutes ?? 0;
+    const lastMileMins = cand.exactJourney?.lastMileMinutes ?? cand.estimate?.lastMileMinutes;
+    const lastMileDegraded = cand.exactJourney?.lastMileDegraded ?? false;
+    const lastMileLabel = lastMileMins == null ? '?' : `${lastMileDegraded ? '~' : ''}${lastMileMins}`;
+
+    return `
+      <div class="decision-card bus">
+        <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
+        <div class="decision-wait">${totalMins}<span class="unit">′ total</span></div>
+        <div class="decision-line">${contextLine}</div>
+        <div class="journey-timeline">
+          <span class="segment walk"><span class="icon">${ICON.walk}</span>${walkToStop}′</span>
+          <span class="segment wait"><span class="icon">${ICON.wait}</span>${waitMins}′</span>
+          <span class="segment bus"><span class="icon">${ICON.bus}</span>${rideMins}′</span>
+          <span class="segment walk"><span class="icon">${ICON.walk}</span>${lastMileLabel}′</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const totalMins = cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
+  return `
+    <div class="decision-card walk">
+      <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
+      <div class="decision-wait">${totalMins}<span class="unit">′</span></div>
+      <div class="decision-line">Ruta directa a pie</div>
+    </div>
+  `;
+}
+
+export function planningCardsHTML(selectedCandidates, activeIndex = 0) {
+  if (!Array.isArray(selectedCandidates) || selectedCandidates.length === 0) {
+    return '';
+  }
+  const heroIndex = selectedCandidates[activeIndex] ? activeIndex : 0;
+  const hero = selectedCandidates[heroIndex];
+  const heroHTML = decisionCardHTML(hero);
+  const alternatives = selectedCandidates.filter((_, i) => i !== heroIndex);
+  if (alternatives.length === 0) {
+    return heroHTML;
+  }
+  const altsHTML = `
+    <div class="alternatives-container">
+      <div class="alternatives-heading">Otras opciones competitivas</div>
+      ${alternatives.map((alt) => buildAlternativeCardHTML(alt, hero)).join('')}
+    </div>
+  `;
+  return `${heroHTML}\n${altsHTML}`;
+}
+
+export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null) {
+  const html = planningCardsHTML(selectedCandidates, activeIndex);
+  if (typeof document !== 'undefined') {
+    const decision = document.getElementById('decision');
+    if (decision) {
+      decision.innerHTML = html;
+      decision.classList.remove('hidden');
+      const buttons = decision.querySelectorAll('.alternative-card');
+      buttons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const identity = btn.getAttribute('data-identity');
+          const nextIndex = selectedCandidates.findIndex((c) => c.identity === identity);
+          if (nextIndex !== -1) {
+            renderDecisionWithAlternatives(selectedCandidates, nextIndex, onPromote);
+            if (typeof onPromote === 'function') {
+              onPromote(selectedCandidates[nextIndex], nextIndex);
+            }
+          }
+        });
+      });
+    }
+  }
+  return html;
+}
+
 export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = false) {
+  if (!v) return '';
+  if (v.mode) {
+    return heroCardHTML(v);
+  }
   if (v.kind === 'bus' && v.bus) {
     const doorToDoorTotal = v.bus.total + (lastMileMinutes ?? 0);
     const contextLine = v.bus.alight?.stop
@@ -272,65 +399,7 @@ export function computeLastMile(lastMile, distanceMeters) {
   return { lastMileMinutes: Math.round(distanceMeters / 80), lastMileDegraded: true };
 }
 
-async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
-  const destNameEl = document.getElementById('dest-name');
-  const decision = document.getElementById('decision');
-  const walk = walkRouteObj?.minutes ?? null;
-  if (walk == null) {
-    setSheetState('IDLE');
-    showAlightStop(null);
-    showBusRoute(null);
-    showWalkRoute(null);
-    return;
-  }
-  destNameEl.textContent = destLabel ?? '';
-  const walkToStop = walkToStopRouteObj?.minutes ?? null;
-  const f = near.find((s) => s.stop === focused);
-  const resolveAlight = makeAlightResolver(f, destCoords);
-  const arrivals = arrivalsByStop.get(focused) ?? [];
-  const v = verdict(walk, walkToStop, arrivals, resolveAlight);
-  const hasAlightPath = v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2;
-  let lastMile = null;
-  let lastMileMinutes = null;
-  let lastMileDegraded = false;
-  if (hasAlightPath) {
-    try {
-      lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);
-    } catch {
-      lastMile = null;
-    }
-    // Fallback last-mile estimate: straight-line distance / average walking speed (80 m/min).
-    // Flagged `degraded` — decisionCardHTML renders it with a `~` prefix, never as a routed duration.
-    ({ lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, v.bus.alight.distanceMeters));
-  }
 
-  decision.innerHTML = decisionCardHTML(v, lastMileMinutes, lastMileDegraded);
-  decision.classList.remove('hidden');
-
-  showAlightStop(v.bus?.alight?.stop ?? null);
-
-  if (hasAlightPath) {
-    const routedBus = await busRoute(fetch, v.bus.alight.path).catch(() => null);
-    showBusRoute(routedBus ?? v.bus.alight.path.map((s) => [s.lat, s.lon]));
-    const segments = [];
-    if (walkToStopRouteObj?.coordinates?.length) segments.push(walkToStopRouteObj.coordinates);
-    if (lastMile?.coordinates?.length) segments.push(lastMile.coordinates);
-    showWalkRoute(segments);
-  } else {
-    showBusRoute(null);
-    showWalkRoute(walkRouteObj?.coordinates ?? null);
-  }
-
-  fitRoute([
-    me,
-    destCoords,
-    f ? { lat: f.lat, lon: f.lon } : null,
-    v.bus?.alight?.stop ? { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon } : null,
-  ]);
-
-  updateFavToggle();
-  return v;
-}
 
 function hideFavToggle() {
   document.getElementById('fav-toggle')?.classList.add('hidden');
@@ -501,6 +570,38 @@ async function selectDestination(dest) {
   await routeToDestination(dest);
 }
 
+function applyCandidateToMap(cand) {
+  if (!cand || !destCoords) return;
+  showDestination(destCoords.lat, destCoords.lon, destLabel);
+  if (cand.mode === 'bus') {
+    focused = cand.metadata?.boardingStop?.stop ?? null;
+    showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
+    showAlightStop(cand.metadata?.alightStop ?? null);
+    showBusRoute(cand.exactJourney?.busRoute ?? cand.metadata?.path?.map((s) => [s.lat, s.lon]) ?? null);
+    const segments = [];
+    if (cand.exactJourney?.walkToStopRoute?.coordinates?.length) {
+      segments.push(cand.exactJourney.walkToStopRoute.coordinates);
+    }
+    if (cand.exactJourney?.lastMileRoute?.coordinates?.length) {
+      segments.push(cand.exactJourney.lastMileRoute.coordinates);
+    }
+    showWalkRoute(segments);
+    fitRoute([
+      me,
+      destCoords,
+      cand.metadata?.boardingStop ? { lat: cand.metadata.boardingStop.lat, lon: cand.metadata.boardingStop.lon } : null,
+      cand.metadata?.alightStop ? { lat: cand.metadata.alightStop.lat, lon: cand.metadata.alightStop.lon } : null,
+    ]);
+  } else {
+    focused = null;
+    showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
+    showAlightStop(null);
+    showBusRoute(null);
+    showWalkRoute(cand.exactJourney?.walkRoute?.coordinates ?? lastWalkRoute?.coordinates ?? null);
+    fitRoute([me, destCoords]);
+  }
+}
+
 async function routeToDestination(dest) {
   if (!me) return;
   if (!isInCadiz(dest.lat, dest.lon)) {
@@ -540,28 +641,163 @@ async function routeToDestination(dest) {
   lastWalkRoute = routeRes;
   setState('ROUTED');
 
-  const near = await loadNearby();
-  const f = near.find((s) => s.stop === focused);
-  const walkToStopRoute = f ? await getWalkToStopRoute(f) : null;
+  // 1. Generate walk candidate
+  const walkCandidate = createWalkCandidate({
+    walkMinutes: lastWalkRoute?.minutes,
+    origin: me,
+    destination: destCoords,
+  });
+  walkCandidate.exactJourney = {
+    totalMinutes: walkCandidate.estimatedMinutes,
+    walkRoute: lastWalkRoute,
+    lastMileMinutes: walkCandidate.estimatedMinutes,
+    lastMileDegraded: false,
+  };
+
+  // 2. Fetch arrivals for nearby pool and build bus candidates using cheap pre-ranking
+  const pool = nearbyDiverseStops(8);
+  arrivalsByStop = new Map();
+  await Promise.all(
+    pool.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
+  );
   if (id !== requestId) return;
 
-  const v = await renderSheet(near, lastWalkRoute, walkToStopRoute);
-  if (v && destCoords && destLabel) {
+  const allBusCandidates = [];
+  for (const s of pool) {
+    const arrivals = arrivalsByStop.get(s.stop) ?? [];
+    const walkToStopMinutes = cheapWalkToStop(me, s, walkToStopCache);
+    const resolveAlight = makeAlightResolver(s, destCoords);
+    const busCandidates = createBusCandidates({
+      arrivals,
+      stop: s,
+      destCoords,
+      walkToStopMinutes,
+      resolveAlight,
+    });
+    allBusCandidates.push(...busCandidates);
+  }
+
+  // 3. Mode-agnostic candidate selection
+  const { primary, alternatives } = selectCandidates([walkCandidate, ...allBusCandidates]);
+  const selected = primary ? [primary, ...alternatives] : [walkCandidate];
+
+  // 4. Exact OSRM routing concurrently ONLY for selected 1..3 candidates
+  await Promise.all(
+    selected.map(async (cand) => {
+      if (cand.mode === 'bus') {
+        const boardStop = cand.metadata?.boardingStop;
+        const alightStop = cand.metadata?.alightStop;
+
+        const [walkToStopRoute, lastMile, routedBus] = await Promise.all([
+          boardStop ? getWalkToStopRoute(boardStop) : Promise.resolve(null),
+          alightStop
+            ? walkRoute(fetch, { lat: alightStop.lat, lon: alightStop.lon }, destCoords).catch(() => null)
+            : Promise.resolve(null),
+          cand.metadata?.path?.length >= 2
+            ? busRoute(fetch, cand.metadata.path).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        const { lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, cand.metadata?.alightDistanceMeters ?? 0);
+        const walkToStopMinutes = walkToStopRoute?.minutes ?? cand.estimate.walkToStopMinutes;
+        const totalMinutes = walkToStopMinutes + cand.estimate.waitMinutes + cand.estimate.rideMinutes + lastMileMinutes;
+
+        if (lastMileDegraded) {
+          cand.dataQuality = 'degraded';
+        }
+
+        cand.exactJourney = {
+          totalMinutes,
+          walkToStopRoute,
+          busRoute: routedBus ?? cand.metadata?.path?.map((s) => [s.lat, s.lon]) ?? null,
+          lastMileRoute: lastMile,
+          lastMileMinutes,
+          lastMileDegraded,
+        };
+      }
+    })
+  );
+  if (id !== requestId) return;
+
+  // 5. Update estimatedMinutes with exact journey minutes and re-rank with selectCandidates
+  for (const cand of selected) {
+    if (cand.exactJourney && typeof cand.exactJourney.totalMinutes === 'number') {
+      cand.estimatedMinutes = cand.exactJourney.totalMinutes;
+    }
+  }
+  const { primary: exactPrimary, alternatives: exactAlternatives } = selectCandidates(selected);
+  const finalSelected = exactPrimary ? [exactPrimary, ...exactAlternatives] : selected;
+
+  // Boarding stops of final selected bus candidates for map pins
+  const nearStops = [];
+  const seenStops = new Set();
+  for (const c of finalSelected) {
+    if (c.mode === 'bus' && c.metadata?.boardingStop) {
+      const sId = c.metadata.boardingStop.stop;
+      if (!seenStops.has(sId)) {
+        seenStops.add(sId);
+        nearStops.push(c.metadata.boardingStop);
+      }
+    }
+  }
+  lastNear = nearStops;
+
+  const onPromote = (promoted) => {
+    applyCandidateToMap(promoted);
+    if (destCoords && destLabel) {
+      try {
+        appendEntry({
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          timestamp: Date.now(),
+          destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
+          recommendation: {
+            kind: promoted.mode,
+            walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
+            busLine: promoted.mode === 'bus' ? (promoted.metadata?.line ?? null) : null,
+            totalMinutes: promoted.exactJourney?.totalMinutes ?? promoted.estimatedMinutes,
+          },
+          choice: promoted.identity,
+        });
+      } catch {}
+    }
+    updateFavToggle();
+  };
+
+  const promote = (cand) => {
+    const idx = finalSelected.findIndex((c) => c.identity === cand.identity);
+    if (idx !== -1) {
+      renderDecisionWithAlternatives(finalSelected, idx, onPromote);
+      onPromote(finalSelected[idx]);
+    }
+  };
+
+  currentPlanningSession = {
+    selected: finalSelected,
+    onPromote: promote,
+  };
+
+  // 6. Render Hero primary and alternatives
+  renderDecisionWithAlternatives(finalSelected, 0, onPromote);
+  applyCandidateToMap(finalSelected[0]);
+
+  if (finalSelected[0] && destCoords && destLabel) {
     try {
       appendEntry({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: Date.now(),
         destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
         recommendation: {
-          kind: v.kind,
-          walkMinutes: v.walkMinutes,
-          busLine: v.kind === 'bus' ? (v.bus?.line ?? null) : null,
-          totalMinutes: v.kind === 'bus' ? (v.bus?.total ?? null) : v.walkMinutes,
+          kind: finalSelected[0].mode,
+          walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
+          busLine: finalSelected[0].mode === 'bus' ? (finalSelected[0].metadata?.line ?? null) : null,
+          totalMinutes: finalSelected[0].exactJourney?.totalMinutes ?? finalSelected[0].estimatedMinutes,
         },
         choice: null,
       });
     } catch {}
   }
+
+  updateFavToggle();
   setState('DONE', '');
 }
 
@@ -663,14 +899,18 @@ export async function loadScenario(name) {
 export function initUI() {
   initMap(
     async (stop) => {
-      // Only stops already offered (eligible direction, beats walking) have
-      // a pin to tap, so switch focus among lastNear rather than recompute.
+      if (currentPlanningSession && destCoords) {
+        const match = currentPlanningSession.selected.find(
+          (c) => c.mode === 'bus' && c.metadata?.boardingStop?.stop === stop
+        );
+        if (match) {
+          currentPlanningSession.onPromote(match);
+          return;
+        }
+      }
       focused = stop;
       if (!destCoords) return;
       showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
-      const f = lastNear.find((s) => s.stop === focused);
-      const walkToStopRoute = f ? await getWalkToStopRoute(f) : null;
-      await renderSheet(lastNear, lastWalkRoute, walkToStopRoute);
     },
     async (coords) => {
       if (!me) return;
@@ -852,6 +1092,7 @@ function locate() {
       const { latitude, longitude } = pos.coords;
       if (!isInCadiz(latitude, longitude)) {
         me = { lat: latitude, lon: longitude };
+        walkToStopCache = new Map();
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(me.lat, me.lon);
         Promise.all([getStops(fetch), getLines(fetch)])
@@ -864,6 +1105,7 @@ function locate() {
         return;
       }
       me = { lat: latitude, lon: longitude };
+      walkToStopCache = new Map();
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
       try {

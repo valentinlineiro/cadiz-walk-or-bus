@@ -7,10 +7,27 @@ import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinu
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
-import { decisionCardHTML, errorCardHTML, escapeHTML, computeLastMile } from './ui.js';
+import {
+  decisionCardHTML,
+  errorCardHTML,
+  escapeHTML,
+  computeLastMile,
+  buildAlternativeCardHTML,
+  heroCardHTML,
+  planningCardsHTML,
+  renderDecisionWithAlternatives,
+} from './ui.js';
 import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
+import {
+  DEFAULT_PLANNING_POLICY,
+  createWalkCandidate,
+  createBusCandidates,
+  selectCandidates,
+  formatAlternativeDiff,
+  cheapWalkToStop,
+} from './planner.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
 
@@ -671,13 +688,14 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
     timestamp: baseTime + 120000,
     destination: { label: 'Plaza Mina', lat: 36.53405, lon: -6.29705 },
     recommendation: { kind: 'bus', walkMinutes: 12, busLine: '1', totalMinutes: 14 },
-    choice: null,
+    choice: 'bus:1:1106:1204',
   };
   appendEntry(entry1Updated, mockStorage);
   log = getLog(mockStorage);
   assert.equal(log.length, 1);
   assert.equal(log[0].timestamp, baseTime + 120000);
   assert.equal(log[0].recommendation.kind, 'bus');
+  assert.equal(log[0].choice, 'bus:1:1106:1204');
 
   // Same destination after 6 minutes (> 5 min window) -> appends new entry (LIFO)
   const entry1Later = {
@@ -803,3 +821,380 @@ test('journey-log: getRecentDestinations groups by destination and ranks by rece
   assert.equal(recent2[1].label, 'Destino A');
 });
 
+test('planner: createWalkCandidate produces normalized candidate', () => {
+  const walk = createWalkCandidate({
+    walkMinutes: 18,
+    origin: { lat: 36.52, lon: -6.28 },
+    destination: { lat: 36.53, lon: -6.29, label: 'Plaza Mina' },
+  });
+  assert.equal(walk.mode, 'walk');
+  assert.equal(walk.identity, 'walk:direct');
+  assert.equal(walk.estimatedMinutes, 18);
+  assert.equal(walk.dataQuality, 'live');
+  assert.deepEqual(walk.estimate, { walkToStopMinutes: 0, waitMinutes: 0, rideMinutes: 0, lastMileMinutes: 18 });
+});
+
+test('planner: selectCandidates is mode-agnostic: selects minimum as primary and alternatives within similarity delta', () => {
+  // Case 1: Bus is primary (14m), Walk (18m) and another Bus (16m) are alternatives within 5m
+  const c1 = { identity: 'bus:1:A:X', mode: 'bus', estimatedMinutes: 14 };
+  const c2 = { identity: 'bus:2:B:Y', mode: 'bus', estimatedMinutes: 16 };
+  const c3 = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 18 };
+  const c4 = { identity: 'bus:5:A:Z', mode: 'bus', estimatedMinutes: 22 }; // > 14 + 5 -> pruned
+
+  const res1 = selectCandidates([c4, c2, c3, c1]);
+  assert.equal(res1.primary.identity, 'bus:1:A:X');
+  assert.equal(res1.alternatives.length, 2);
+  assert.equal(res1.alternatives[0].identity, 'bus:2:B:Y'); // +2m
+  assert.equal(res1.alternatives[1].identity, 'walk:direct'); // +4m
+
+  // Case 2: Walk is primary (15m), Bus (19m) is competitive alternative
+  const w1 = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 15 };
+  const b1 = { identity: 'bus:1:A:X', mode: 'bus', estimatedMinutes: 19 };
+  const b2 = { identity: 'bus:2:B:Y', mode: 'bus', estimatedMinutes: 23 }; // > 15 + 5 -> pruned
+
+  const res2 = selectCandidates([b2, b1, w1]);
+  assert.equal(res2.primary.identity, 'walk:direct');
+  assert.equal(res2.alternatives.length, 1);
+  assert.equal(res2.alternatives[0].identity, 'bus:1:A:X');
+});
+
+test('planner: selectCandidates deduplicates identical structural identities, keeping the fastest', () => {
+  // Two buses on same line, same boarding stop, same alight stop (e.g. 1st bus vs 2nd bus)
+  const early = { identity: 'bus:1:1106:1204', mode: 'bus', estimatedMinutes: 14 };
+  const later = { identity: 'bus:1:1106:1204', mode: 'bus', estimatedMinutes: 18 };
+  const other = { identity: 'bus:2:1106:1205', mode: 'bus', estimatedMinutes: 16 };
+
+  const res = selectCandidates([later, early, other]);
+  assert.equal(res.primary.identity, 'bus:1:1106:1204');
+  assert.equal(res.primary.estimatedMinutes, 14);
+  assert.equal(res.alternatives.length, 1);
+  assert.equal(res.alternatives[0].identity, 'bus:2:1106:1205');
+});
+
+test('planner: selectCandidates respects custom policy overrides', () => {
+  const c1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 10 };
+  const c2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 13 };
+  const c3 = { identity: 'bus:3', mode: 'bus', estimatedMinutes: 14 };
+
+  // Custom policy: similarity max delta 2m (c2 and c3 pruned)
+  const strictPolicy = { maxCandidates: 3, maxAlternatives: 2, similarityMaxDeltaMinutes: 2 };
+  const res = selectCandidates([c1, c2, c3], strictPolicy);
+  assert.equal(res.primary.identity, 'bus:1');
+  assert.equal(res.alternatives.length, 0);
+
+  // Custom policy: maxAlternatives = 1
+  const limitPolicy = { maxCandidates: 2, maxAlternatives: 1, similarityMaxDeltaMinutes: 5 };
+  const resLimit = selectCandidates([c1, c2, c3], limitPolicy);
+  assert.equal(resLimit.alternatives.length, 1);
+  assert.equal(resLimit.alternatives[0].identity, 'bus:2');
+});
+
+test('planner: selectCandidates enforces maxCandidates as a hard budget on total candidates', () => {
+  const c1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 10 };
+  const c2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 11 };
+  const c3 = { identity: 'bus:3', mode: 'bus', estimatedMinutes: 12 };
+  const c4 = { identity: 'bus:4', mode: 'bus', estimatedMinutes: 13 };
+
+  // maxCandidates = 2 with maxAlternatives = 5: allowed alternatives must be min(5, 2 - 1) = 1
+  const res2 = selectCandidates([c1, c2, c3, c4], { maxCandidates: 2, maxAlternatives: 5, similarityMaxDeltaMinutes: 5 });
+  assert.equal(res2.primary.identity, 'bus:1');
+  assert.equal(res2.alternatives.length, 1);
+  assert.equal(res2.alternatives[0].identity, 'bus:2');
+
+  // maxCandidates = 1 with maxAlternatives = 2: 0 alternatives
+  const res1 = selectCandidates([c1, c2, c3], { maxCandidates: 1, maxAlternatives: 2, similarityMaxDeltaMinutes: 5 });
+  assert.equal(res1.primary.identity, 'bus:1');
+  assert.equal(res1.alternatives.length, 0);
+
+  // maxCandidates = 0: null primary and empty alternatives
+  const res0 = selectCandidates([c1, c2], { maxCandidates: 0, maxAlternatives: 2, similarityMaxDeltaMinutes: 5 });
+  assert.equal(res0.primary, null);
+  assert.deepEqual(res0.alternatives, []);
+});
+
+test('planner: two-stage selection re-ranks candidates after exact routing refinement', () => {
+  // Stage 1 (cheap pre-ranking):
+  // Bus L1 is estimated at 15m (primary), Bus L2 at 16m, Walk at 18m
+  const bus1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 15 };
+  const bus2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 16 };
+  const walk = { identity: 'walk', mode: 'walk', estimatedMinutes: 18 };
+
+  const cheapSelection = selectCandidates([bus1, bus2, walk]);
+  assert.equal(cheapSelection.primary.identity, 'bus:1');
+  assert.equal(cheapSelection.alternatives.length, 2);
+
+  // Stage 2 (exact OSRM refinement):
+  // Bus L1 exact routing reveals longer walk-to-stop + last-mile (19m)
+  // Bus L2 exact routing stays 16m
+  // Walk exact routing is 18m
+  bus1.exactJourney = { totalMinutes: 19 };
+  bus1.estimatedMinutes = bus1.exactJourney.totalMinutes;
+
+  bus2.exactJourney = { totalMinutes: 16 };
+  bus2.estimatedMinutes = bus2.exactJourney.totalMinutes;
+
+  walk.exactJourney = { totalMinutes: 18 };
+  walk.estimatedMinutes = walk.exactJourney.totalMinutes;
+
+  const exactSelection = selectCandidates([bus1, bus2, walk]);
+  // Bus L2 is now the true fastest option (Hero)
+  assert.equal(exactSelection.primary.identity, 'bus:2');
+  assert.equal(exactSelection.primary.estimatedMinutes, 16);
+
+  // Walk (+2m) and Bus L1 (+3m) are competitive alternatives within 5m
+  assert.equal(exactSelection.alternatives.length, 2);
+  assert.equal(exactSelection.alternatives[0].identity, 'walk');
+  assert.equal(exactSelection.alternatives[1].identity, 'bus:1');
+
+  // If Bus L1 exact was 23m (> 16 + 5 = 21m), it is pruned from alternatives
+  bus1.estimatedMinutes = 23;
+  const prunedSelection = selectCandidates([bus1, bus2, walk]);
+  assert.equal(prunedSelection.primary.identity, 'bus:2');
+  assert.equal(prunedSelection.alternatives.length, 1);
+  assert.equal(prunedSelection.alternatives[0].identity, 'walk');
+});
+
+test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
+  const primary = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+
+  // 1. Line differs
+  const diffLine = {
+    identity: 'bus:2:1106:1204',
+    mode: 'bus',
+    estimate: { waitMinutes: 3 },
+    metadata: {
+      line: '2',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+  assert.equal(formatAlternativeDiff(diffLine, primary), 'Línea 2 · espera 3′');
+
+  // 2. Boarding stop differs (same line)
+  const diffBoard = {
+    identity: 'bus:1:1121:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 4 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1121', name: 'San Felipe' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+  assert.equal(formatAlternativeDiff(diffBoard, primary), 'Desde San Felipe (caminar 4′)');
+
+  // 3. Alighting stop differs
+  const diffAlight = {
+    identity: 'bus:1:1106:1208',
+    mode: 'bus',
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1208', name: 'Audiencia' },
+    },
+  };
+  assert.equal(formatAlternativeDiff(diffAlight, primary), 'Baja en Audiencia');
+
+  // 4. Walk alternative
+  const walkAlt = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    metadata: {},
+  };
+  assert.equal(formatAlternativeDiff(walkAlt, primary), 'Ruta directa a pie');
+});
+
+test('planner: cheapWalkToStop uses walkToStopCache first, haversine/80 as fallback', () => {
+  const cache = new Map();
+  cache.set('1106', { minutes: 5 });
+
+  const me = { lat: 36.52, lon: -6.28 };
+  const cachedStop = { stop: '1106', lat: 36.522, lon: -6.282 };
+  // Hit: returns cached 5m
+  assert.equal(cheapWalkToStop(me, cachedStop, cache), 5);
+
+  // Miss: uses haversine / 80
+  const uncachedStop = { stop: '9999', lat: 36.525, lon: -6.28 };
+  const est = cheapWalkToStop(me, uncachedStop, cache);
+  assert.ok(typeof est === 'number' && est > 0);
+});
+
+test('ui: buildAlternativeCardHTML renders compact card with differentiator and delta', () => {
+  const primary = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    exactJourney: { totalMinutes: 14 },
+    metadata: { line: '1' },
+  };
+
+  const busAlt = {
+    identity: 'bus:2:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 16,
+    exactJourney: { totalMinutes: 16, lastMileDegraded: false },
+    estimate: { waitMinutes: 3 },
+    metadata: {
+      line: '2',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+
+  const html = buildAlternativeCardHTML(busAlt, primary);
+  assert.ok(html.includes('class="alternative-card"'));
+  assert.ok(html.includes('data-identity="bus:2:1106:1204"'));
+  assert.ok(html.includes('Bus L2'));
+  assert.ok(html.includes('Línea 2 · espera 3′'));
+  assert.ok(html.includes('16′'));
+  assert.ok(html.includes('+2′'));
+
+  // Walk alternative
+  const walkAlt = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 18,
+    exactJourney: { totalMinutes: 18 },
+  };
+  const walkHtml = buildAlternativeCardHTML(walkAlt, primary);
+  assert.ok(walkHtml.includes('Andar'));
+  assert.ok(walkHtml.includes('Ruta directa a pie'));
+  assert.ok(walkHtml.includes('18′'));
+  assert.ok(walkHtml.includes('+4′'));
+
+  // Degraded last mile mark ~
+  const degradedAlt = {
+    identity: 'bus:5:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    exactJourney: { totalMinutes: 15, lastMileDegraded: true },
+    metadata: { line: '5' },
+  };
+  const degradedHtml = buildAlternativeCardHTML(degradedAlt, primary);
+  assert.ok(degradedHtml.includes('~15′'));
+
+  // Negative delta (when alt is faster than current primary)
+  const fasterAlt = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 12,
+    exactJourney: { totalMinutes: 12 },
+    metadata: { line: '1' },
+  };
+  const fasterHtml = buildAlternativeCardHTML(fasterAlt, primary);
+  assert.ok(fasterHtml.includes('-2′'));
+});
+
+test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and alternatives', () => {
+  const cWalk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 18,
+    exactJourney: { totalMinutes: 18 },
+  };
+
+  const cBus = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    exactJourney: {
+      totalMinutes: 14,
+      walkToStopRoute: { minutes: 3 },
+      lastMileMinutes: 2,
+      lastMileDegraded: false,
+    },
+    estimate: {
+      walkToStopMinutes: 3,
+      waitMinutes: 2,
+      rideMinutes: 7,
+      lastMileMinutes: 2,
+    },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+
+  // Case 1: activeIndex = 0 (Bus is Hero, Walk is alternative)
+  const html0 = planningCardsHTML([cBus, cWalk], 0);
+  assert.ok(html0.includes('class="decision-card bus"'));
+  assert.ok(html0.includes('14<span class="unit">′ total</span>'));
+  assert.ok(html0.includes('L1 · Bájate en Plaza Mina'));
+  assert.ok(html0.includes('class="alternatives-container"'));
+  assert.ok(html0.includes('Otras opciones competitivas'));
+  assert.ok(html0.includes('data-identity="walk:direct"'));
+  assert.ok(html0.includes('+4′'));
+
+  // Case 2: activeIndex = 1 (Walk is Hero, Bus is alternative)
+  const html1 = planningCardsHTML([cBus, cWalk], 1);
+  assert.ok(html1.includes('class="decision-card walk"'));
+  assert.ok(html1.includes('18<span class="unit">′</span>'));
+  assert.ok(html1.includes('Ruta directa a pie'));
+  assert.ok(html1.includes('data-identity="bus:1:1106:1204"'));
+  assert.ok(html1.includes('-4′'));
+
+  // Case 3: Single candidate produces no alternatives container
+  const htmlSingle = planningCardsHTML([cWalk], 0);
+  assert.ok(htmlSingle.includes('class="decision-card walk"'));
+  assert.ok(!htmlSingle.includes('alternatives-container'));
+});
+
+test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', () => {
+  const cWalk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 18,
+    exactJourney: { totalMinutes: 18 },
+  };
+
+  const cBus = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    exactJourney: { totalMinutes: 14 },
+    estimate: { waitMinutes: 2, rideMinutes: 5, lastMileMinutes: 2 },
+    metadata: { line: '1', alightStop: { name: 'Plaza Mina' } },
+  };
+
+  // Mock minimal DOM for tap-to-promote test
+  const listeners = [];
+  const mockButton = {
+    getAttribute: (attr) => (attr === 'data-identity' ? 'walk:direct' : null),
+    addEventListener: (event, handler) => listeners.push(handler),
+  };
+  const mockDecision = {
+    innerHTML: '',
+    classList: { remove: () => {} },
+    querySelectorAll: (sel) => (sel === '.alternative-card' ? [mockButton] : []),
+  };
+
+  globalThis.document = {
+    getElementById: (id) => (id === 'decision' ? mockDecision : null),
+  };
+
+  try {
+    let promoted = null;
+    let promotedIdx = null;
+    renderDecisionWithAlternatives([cBus, cWalk], 0, (c, idx) => {
+      promoted = c;
+      promotedIdx = idx;
+    });
+
+    assert.equal(listeners.length, 1);
+    // Simulate user clicking alternative (Walk)
+    listeners[0]();
+    assert.equal(promoted?.identity, 'walk:direct');
+    assert.equal(promotedIdx, 1);
+  } finally {
+    delete globalThis.document;
+  }
+});

@@ -91,7 +91,7 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
       busLine: entry.recommendation.busLine ?? null,
       totalMinutes: entry.recommendation.totalMinutes ?? null,
     },
-    choice: null,
+    choice: entry.choice ?? null,
   };
 
   // Check if recent entry for same destination exists within DEDUP_WINDOW_MS
@@ -103,12 +103,13 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
 
   let updated;
   if (existingIndex !== -1) {
-    // Update recommendation and timestamp of existing item, place at top (LIFO)
+    // Update recommendation, timestamp, and choice of existing item, place at top (LIFO)
     const existing = current[existingIndex];
     const merged = {
       ...existing,
       timestamp: normalized.timestamp,
       recommendation: normalized.recommendation,
+      choice: normalized.choice ?? existing.choice ?? null,
     };
     updated = [merged, ...current.filter((_, idx) => idx !== existingIndex)].slice(0, max);
   } else {
