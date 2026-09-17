@@ -1,3 +1,4 @@
+import { WALK_METERS_PER_MINUTE, BUS_METERS_PER_MINUTE } from './constants.js';
 export function decide(arrivals, walkMinutes) {
     if (arrivals.length === 0)
         return { decision: 'walk', soonest: null };
@@ -24,11 +25,6 @@ export function filterCandidates(arrivals, resolveAlight) {
 // walk from alight stop to destination, not a bus-speed guess like the
 // removed driveMinutes() — swap for a real OSRM last-mile time if the
 // ranking needs to get sharper than "prefer the bus that lands you closer".
-const WALK_METERS_PER_MINUTE = 80;
-// ponytail: constant urban bus pace (~15 km/h, incl. stops/traffic) to
-// estimate ride time from rideMeters — swap for the busRoute() driving-time
-// estimate (already fetched for the map line) if this needs to get sharper.
-const BUS_METERS_PER_MINUTE = 250;
 function rideMinutes(candidate) {
     return candidate.alight?.rideMeters != null ? candidate.alight.rideMeters / BUS_METERS_PER_MINUTE : 0;
 }

@@ -9,6 +9,7 @@ import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { appendEntry, getRecentDestinations, classifyDivergence } from './journey-log.js';
+import { computeLastMile } from './last-mile.js';
 import {
   createWalkCandidate,
   createBusCandidates,
@@ -401,13 +402,8 @@ export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = f
   `;
 }
 
-// walkRoute() returns null on nearly every realistic failure (it only
-// throws on malformed JSON from a 200 response) — so "degraded" must be
-// derived from a missing `minutes`, not from the throw path alone.
-export function computeLastMile(lastMile, distanceMeters) {
-  if (lastMile?.minutes != null) return { lastMileMinutes: lastMile.minutes, lastMileDegraded: false };
-  return { lastMileMinutes: Math.round(distanceMeters / 80), lastMileDegraded: true };
-}
+// computeLastMile moved to domain (src/domain/last-mile.ts); re-exported here for transitional compatibility
+export { computeLastMile };
 
 
 
