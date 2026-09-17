@@ -4,8 +4,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "rootDir": "src/domain",
+    "rootDir": "src",
     "outDir": "public/web"
   },
-  "include": ["src/domain/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

@@ -13,6 +13,18 @@ export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: 
   return Math.round(2 * R * Math.asin(Math.sqrt(a)));
 }
 
+export function nearestStops<T extends Stop>(
+  stops: T[],
+  lat: number,
+  lon: number,
+  n = 3,
+): (T & { dist: number })[] {
+  return [...stops]
+    .map((s) => ({ ...s, dist: haversineMeters(lat, lon, s.lat, s.lon) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, n);
+}
+
 function stripAccents(str: string): string {
   return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
