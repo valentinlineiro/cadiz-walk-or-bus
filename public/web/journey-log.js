@@ -36,6 +36,86 @@ export function formatRecommendationSub(rec) {
   return null;
 }
 
+export function classifyDivergence(choice, recommendation) {
+  if (!choice || !recommendation) return 'none';
+  const choiceId = choice.identity || '';
+  const recId = recommendation.identity || '';
+  if (choiceId && recId && choiceId === recId) return 'none';
+
+  const choiceMode = choice.mode || (choiceId.startsWith('walk') ? 'walk' : choiceId.startsWith('bus') ? 'bus' : null);
+  const recMode = recommendation.kind || recommendation.mode || (recId.startsWith('walk') ? 'walk' : recId.startsWith('bus') ? 'bus' : null);
+
+  if (choiceMode && recMode && choiceMode !== recMode) {
+    return 'mode';
+  }
+
+  if (choiceMode === 'bus' && recMode === 'bus') {
+    const choiceParts = choiceId.startsWith('bus:') ? choiceId.split(':') : [];
+    const recParts = recId.startsWith('bus:') ? recId.split(':') : [];
+
+    const choiceLine = choice.busLine != null ? String(choice.busLine) : (choiceParts[1] || null);
+    const recLine = recommendation.busLine != null ? String(recommendation.busLine) : (recParts[1] || null);
+
+    if (choiceLine && recLine && choiceLine !== recLine) {
+      return 'line';
+    }
+
+    const choiceBoard = choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts[2] || null);
+    const recBoard = recommendation.boardingStopId != null ? String(recommendation.boardingStopId) : (recParts[2] || null);
+    const choiceAlight = choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts[3] || null);
+    const recAlight = recommendation.alightStopId != null ? String(recommendation.alightStopId) : (recParts[3] || null);
+
+    if ((choiceBoard && recBoard && choiceBoard !== recBoard) || (choiceAlight && recAlight && choiceAlight !== recAlight)) {
+      return 'access';
+    }
+  }
+
+  return 'none';
+}
+
+function normalizeEntryOnRead(item) {
+  if (!item || !item.recommendation) return null;
+  let choice = item.choice ?? null;
+  if (typeof choice === 'string') {
+    const isWalk = choice.startsWith('walk');
+    const busLine = choice.startsWith('bus:') ? choice.split(':')[1] : (item.recommendation.busLine ?? null);
+    choice = {
+      identity: choice,
+      mode: isWalk ? 'walk' : 'bus',
+      busLine: busLine ?? null,
+      totalMinutes: item.recommendation.totalMinutes ?? 0,
+      deltaMinutes: 0,
+      divergenceType: 'none',
+    };
+  } else if (choice && typeof choice === 'object') {
+    choice = {
+      identity: String(choice.identity || ''),
+      mode: choice.mode === 'walk' ? 'walk' : 'bus',
+      busLine: choice.busLine != null ? String(choice.busLine) : null,
+      totalMinutes: Number(choice.totalMinutes) || 0,
+      deltaMinutes: Number(choice.deltaMinutes) || 0,
+      divergenceType: choice.divergenceType || 'none',
+    };
+  }
+
+  const recIdentity = item.recommendation.identity ??
+    (item.recommendation.kind === 'walk'
+      ? 'walk:direct'
+      : (item.recommendation.busLine ? `bus:${item.recommendation.busLine}` : 'bus:unknown'));
+
+  return {
+    ...item,
+    recommendation: {
+      identity: recIdentity,
+      kind: item.recommendation.kind,
+      walkMinutes: item.recommendation.walkMinutes ?? null,
+      busLine: item.recommendation.busLine ?? null,
+      totalMinutes: item.recommendation.totalMinutes ?? null,
+    },
+    choice,
+  };
+}
+
 export function getLog(storageImpl) {
   const storage = getStorage(storageImpl);
   if (!storage) return [];
@@ -44,18 +124,21 @@ export function getLog(storageImpl) {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item) =>
-        item &&
-        typeof item.id === 'string' &&
-        typeof item.timestamp === 'number' &&
-        item.destination &&
-        typeof item.destination.label === 'string' &&
-        Number.isFinite(item.destination.lat) &&
-        Number.isFinite(item.destination.lon) &&
-        item.recommendation &&
-        typeof item.recommendation.kind === 'string',
-    ).slice(0, MAX_LOG);
+    return parsed
+      .filter(
+        (item) =>
+          item &&
+          typeof item.id === 'string' &&
+          typeof item.timestamp === 'number' &&
+          item.destination &&
+          typeof item.destination.label === 'string' &&
+          Number.isFinite(item.destination.lat) &&
+          Number.isFinite(item.destination.lon) &&
+          item.recommendation &&
+          typeof item.recommendation.kind === 'string',
+      )
+      .map(normalizeEntryOnRead)
+      .slice(0, MAX_LOG);
   } catch {
     return [];
   }
@@ -77,6 +160,35 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
   const storage = getStorage(storageImpl);
   const current = getLog(storageImpl);
   const timestamp = typeof entry.timestamp === 'number' ? entry.timestamp : Date.now();
+
+  let choice = null;
+  if (entry.choice && typeof entry.choice === 'object') {
+    choice = {
+      identity: String(entry.choice.identity || ''),
+      mode: entry.choice.mode === 'walk' ? 'walk' : 'bus',
+      busLine: entry.choice.busLine != null ? String(entry.choice.busLine) : null,
+      totalMinutes: Number(entry.choice.totalMinutes) || 0,
+      deltaMinutes: Number(entry.choice.deltaMinutes) || 0,
+      divergenceType: entry.choice.divergenceType || 'none',
+    };
+  } else if (typeof entry.choice === 'string') {
+    const isWalk = entry.choice.startsWith('walk');
+    const busLine = entry.choice.startsWith('bus:') ? entry.choice.split(':')[1] : (entry.recommendation?.busLine ?? null);
+    choice = {
+      identity: entry.choice,
+      mode: isWalk ? 'walk' : 'bus',
+      busLine: busLine ?? null,
+      totalMinutes: entry.recommendation?.totalMinutes ?? 0,
+      deltaMinutes: 0,
+      divergenceType: 'none',
+    };
+  }
+
+  const recIdentity = entry.recommendation.identity ??
+    (entry.recommendation.kind === 'walk'
+      ? 'walk:direct'
+      : (entry.recommendation.busLine ? `bus:${entry.recommendation.busLine}` : 'bus:unknown'));
+
   const normalized = {
     id: entry.id || `${timestamp}-${Math.random().toString(36).slice(2, 7)}`,
     timestamp,
@@ -86,12 +198,13 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
       lon: Number(entry.destination.lon),
     },
     recommendation: {
+      identity: recIdentity,
       kind: entry.recommendation.kind,
       walkMinutes: entry.recommendation.walkMinutes ?? null,
       busLine: entry.recommendation.busLine ?? null,
       totalMinutes: entry.recommendation.totalMinutes ?? null,
     },
-    choice: entry.choice ?? null,
+    choice,
   };
 
   // Check if recent entry for same destination exists within DEDUP_WINDOW_MS

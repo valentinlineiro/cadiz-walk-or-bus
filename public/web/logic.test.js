@@ -17,7 +17,7 @@ import {
   planningCardsHTML,
   renderDecisionWithAlternatives,
 } from './ui.js';
-import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations } from './journey-log.js';
+import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations, classifyDivergence } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
 import {
@@ -695,7 +695,7 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   assert.equal(log.length, 1);
   assert.equal(log[0].timestamp, baseTime + 120000);
   assert.equal(log[0].recommendation.kind, 'bus');
-  assert.equal(log[0].choice, 'bus:1:1106:1204');
+  assert.equal(log[0].choice?.identity ?? log[0].choice, 'bus:1:1106:1204');
 
   // Same destination after 6 minutes (> 5 min window) -> appends new entry (LIFO)
   const entry1Later = {
@@ -727,6 +727,135 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   log = getLog(mockStorage);
   assert.equal(log.length, 200);
   assert.equal(log[0].id, 'bulk-204');
+});
+
+test('journey-log: classifyDivergence identifies none, mode, line, and access divergences', () => {
+  const recBus = {
+    identity: 'bus:1:1106:1204',
+    kind: 'bus',
+    busLine: '1',
+    boardingStopId: '1106',
+    alightStopId: '1204',
+  };
+
+  // Same identity -> none
+  assert.equal(classifyDivergence({ identity: 'bus:1:1106:1204', mode: 'bus' }, recBus), 'none');
+
+  // Divergence to walk -> mode
+  assert.equal(classifyDivergence({ identity: 'walk:direct', mode: 'walk' }, recBus), 'mode');
+
+  // Divergence to another bus line -> line
+  assert.equal(
+    classifyDivergence({ identity: 'bus:2:1106:1205', mode: 'bus', busLine: '2' }, recBus),
+    'line',
+  );
+
+  // Same line, different stop -> access
+  assert.equal(
+    classifyDivergence({ identity: 'bus:1:1107:1204', mode: 'bus', busLine: '1', boardingStopId: '1107' }, recBus),
+    'access',
+  );
+
+  // Divergence from walk recommendation to bus choice -> mode
+  const recWalk = { identity: 'walk:direct', kind: 'walk' };
+  assert.equal(
+    classifyDivergence({ identity: 'bus:1:1106:1204', mode: 'bus', busLine: '1' }, recWalk),
+    'mode',
+  );
+
+  // Null inputs -> none
+  assert.equal(classifyDivergence(null, recBus), 'none');
+  assert.equal(classifyDivergence({ identity: 'bus:1' }, null), 'none');
+});
+
+test('journey-log: getLog normalizes legacy v1 entries with string choice safely', () => {
+  const legacyData = [
+    {
+      id: 'legacy-1',
+      timestamp: 1700000000000,
+      destination: { label: 'Plaza Mina', lat: 36.534, lon: -6.297 },
+      recommendation: { kind: 'bus', busLine: '1', totalMinutes: 14 },
+      choice: 'bus:2:1106:1205',
+    },
+    {
+      id: 'legacy-2',
+      timestamp: 1700000060000,
+      destination: { label: 'Hospital', lat: 36.52, lon: -6.28 },
+      recommendation: { kind: 'walk', walkMinutes: 10, totalMinutes: 10 },
+      choice: null,
+    },
+  ];
+
+  const mockStorage = {
+    getItem: () => JSON.stringify(legacyData),
+    setItem: () => {},
+  };
+
+  const log = getLog(mockStorage);
+  assert.equal(log.length, 2);
+
+  // Legacy string choice normalized to structured DecisionAlternative
+  assert.equal(typeof log[0].choice, 'object');
+  assert.equal(log[0].choice.identity, 'bus:2:1106:1205');
+  assert.equal(log[0].choice.mode, 'bus');
+  assert.equal(log[0].choice.busLine, '2');
+  assert.equal(log[0].choice.divergenceType, 'none');
+  assert.equal(log[0].recommendation.identity, 'bus:1');
+
+  // Legacy null choice remains null
+  assert.equal(log[1].choice, null);
+  assert.equal(log[1].recommendation.identity, 'walk:direct');
+});
+
+test('journey-log: appendEntry preserves and updates structured choice', () => {
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  const t0 = 1700000000000;
+  // Step 1: initial evaluation with implicit acceptance (choice: null)
+  appendEntry(
+    {
+      id: 'e1',
+      timestamp: t0,
+      destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
+      recommendation: { identity: 'bus:1:1106:1204', kind: 'bus', busLine: '1', totalMinutes: 14 },
+      choice: null,
+    },
+    mockStorage,
+  );
+
+  let log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].choice, null);
+
+  // Step 2: explicit promotion of alternative within 5 minutes -> choice updated
+  appendEntry(
+    {
+      id: 'e1-promote',
+      timestamp: t0 + 30000,
+      destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
+      recommendation: { identity: 'bus:1:1106:1204', kind: 'bus', busLine: '1', totalMinutes: 14 },
+      choice: {
+        identity: 'walk:direct',
+        mode: 'walk',
+        busLine: null,
+        totalMinutes: 17,
+        deltaMinutes: 3,
+        divergenceType: 'mode',
+      },
+    },
+    mockStorage,
+  );
+
+  log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].choice.identity, 'walk:direct');
+  assert.equal(log[0].choice.mode, 'walk');
+  assert.equal(log[0].choice.deltaMinutes, 3);
+  assert.equal(log[0].choice.divergenceType, 'mode');
 });
 
 test('journey-log: getRecentDestinations groups by destination and ranks by recency desc', () => {
