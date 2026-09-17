@@ -3,13 +3,11 @@ import {
   WALK_METERS_PER_MINUTE,
   BUS_METERS_PER_MINUTE,
   DEFAULT_PLANNING_POLICY,
-  DEFAULT_DIVERSITY_THRESHOLDS,
 } from './constants.js';
 import {
   createWalkIdentity,
   createBusIdentity,
   serializeIdentity,
-  isSameIdentity,
 } from './identity.js';
 import { isStructurallyDiverse, filterDiverseAlternatives } from './diversity.js';
 

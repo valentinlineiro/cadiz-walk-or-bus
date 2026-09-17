@@ -14,13 +14,24 @@ export type { DivergenceType };
  * identity is a structured JourneyIdentity or null (not a string).
  * Walk-specific access fields come from estimate; bus line comes from identity or metadata.
  */
+export interface StructurallyDiverseExactJourney {
+  walkToStopRoute?: { minutes?: number | null } | null;
+  walkToStopMinutes?: number | null;
+}
+
+/**
+ * Closed item shape for diversity comparisons.
+ * Supports both pre-routing candidates and post-routing evaluated items.
+ * Access walk respects exactJourney when present, falling back to estimate.
+ */
 export interface StructurallyDiverseItem {
-  identity: JourneyIdentity | null | undefined;
+  identity: JourneyIdentity | string | null | undefined;
   mode?: 'walk' | 'bus' | string;
   metadata?: {
     line?: string | number | null;
     alightDistanceMeters?: number | null;
   };
+  exactJourney?: StructurallyDiverseExactJourney | null;
   estimate?: {
     walkToStopMinutes?: number | null;
   } | null;
@@ -34,6 +45,7 @@ export interface StructurallyDiverseItem {
  * 1. Modal diversity: WALK vs BUS → always diverse.
  * 2. Line diversity: BUS L1 vs BUS L2 → diverse.
  * 3. Access diversity (same line): walk-to-stop delta ≥ threshold OR alighting distance delta ≥ threshold → diverse.
+ *    Walk-to-stop precedence: exactJourney?.walkToStopRoute?.minutes ?? exactJourney?.walkToStopMinutes ?? estimate?.walkToStopMinutes ?? 0
  */
 export function isStructurallyDiverse(
   candidate: StructurallyDiverseItem | null | undefined,
@@ -51,12 +63,15 @@ export function isStructurallyDiverse(
 
   // 2. Line diversity (for bus)
   if (candidate.mode === 'bus' && hero.mode === 'bus') {
+    const candIdent = typeof candidate.identity === 'string' ? parseIdentity(candidate.identity) : candidate.identity;
+    const heroIdent = typeof hero.identity === 'string' ? parseIdentity(hero.identity) : hero.identity;
+
     // Line is read directly from the structured identity, falling back to metadata
-    const candLine = candidate.identity.mode === 'bus'
-      ? candidate.identity.line
+    const candLine = candIdent?.mode === 'bus'
+      ? candIdent.line
       : (candidate.metadata?.line != null ? String(candidate.metadata.line) : null);
-    const heroLine = hero.identity.mode === 'bus'
-      ? hero.identity.line
+    const heroLine = heroIdent?.mode === 'bus'
+      ? heroIdent.line
       : (hero.metadata?.line != null ? String(hero.metadata.line) : null);
 
     if (candLine && heroLine && candLine !== heroLine) {
@@ -65,8 +80,14 @@ export function isStructurallyDiverse(
 
     // 3. Access diversity (same line)
     const accessWalkThreshold = thresholds?.accessWalkMinutes ?? 3;
-    const candWalk = candidate.estimate?.walkToStopMinutes ?? 0;
-    const heroWalk = hero.estimate?.walkToStopMinutes ?? 0;
+    const candWalk = candidate.exactJourney?.walkToStopRoute?.minutes
+      ?? candidate.exactJourney?.walkToStopMinutes
+      ?? candidate.estimate?.walkToStopMinutes
+      ?? 0;
+    const heroWalk = hero.exactJourney?.walkToStopRoute?.minutes
+      ?? hero.exactJourney?.walkToStopMinutes
+      ?? hero.estimate?.walkToStopMinutes
+      ?? 0;
     if (Math.abs(candWalk - heroWalk) >= accessWalkThreshold) {
       return true;
     }

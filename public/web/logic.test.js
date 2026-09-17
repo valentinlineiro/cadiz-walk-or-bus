@@ -172,6 +172,22 @@ test('domain diversity: pure rules classify divergence and filter diverse altern
   assert.equal(admitted.length, 2);
   assert.deepEqual(admitted[0].identity, createBusIdentity('2', '10', '20'));
   assert.deepEqual(admitted[1].identity, createWalkIdentity());
+
+  // Access diversity respects exactJourney walk-to-stop precedence (|3 - 6| = 3 >= 3)
+  const heroExactWalk = {
+    identity: createBusIdentity('1', '10', '20'),
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    exactJourney: { walkToStopRoute: { minutes: 6 } },
+    metadata: { line: '1', alightDistanceMeters: 100 },
+  };
+  const candEstimateWalk = {
+    identity: createBusIdentity('1', '11', '20'),
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightDistanceMeters: 100 },
+  };
+  assert.equal(domainIsStructurallyDiverse(candEstimateWalk, heroExactWalk), true);
 });
 
 test('domain models: conform to structured Decision, EvaluatedJourney, and Candidate contracts', () => {
@@ -1500,6 +1516,54 @@ test('planner: isStructurallyDiverse validates modal, line, and access diversity
   // Null guards
   assert.equal(isStructurallyDiverse(null, heroBus), false);
   assert.equal(isStructurallyDiverse(heroBus, null), false);
+});
+
+test('planner: isStructurallyDiverse respects exactJourney walk-to-stop precedence over estimate', () => {
+  // Hero: estimate is 2m, but exactJourney walkToStopRoute is 6m
+  const heroBus = {
+    identity: createBusIdentity('1', '1106', '1204'),
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    exactJourney: { walkToStopRoute: { minutes: 6 } },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+
+  // Candidate: estimate is 3m.
+  // If exactJourney is ignored: |3 - 2| = 1m (< 3m) -> not diverse.
+  // With exactJourney precedence: |3 - 6| = 3m (>= 3m) -> diverse!
+  const candidateBus = {
+    identity: createBusIdentity('1', '1107', '1204'),
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 3 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1107' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+
+  assert.equal(isStructurallyDiverse(candidateBus, heroBus), true);
+
+  // Also test walkToStopMinutes property fallback on exactJourney
+  const heroBusFlatMinutes = {
+    identity: createBusIdentity('1', '1106', '1204'),
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    exactJourney: { walkToStopMinutes: 6 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+  assert.equal(isStructurallyDiverse(candidateBus, heroBusFlatMinutes), true);
 });
 
 test('planner: selectCandidates filters out redundant same-line alternatives in favor of useful diversity', () => {

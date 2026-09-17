@@ -7,6 +7,7 @@ import { isSameIdentity, parseIdentity } from './identity.js';
  * 1. Modal diversity: WALK vs BUS → always diverse.
  * 2. Line diversity: BUS L1 vs BUS L2 → diverse.
  * 3. Access diversity (same line): walk-to-stop delta ≥ threshold OR alighting distance delta ≥ threshold → diverse.
+ *    Walk-to-stop precedence: exactJourney?.walkToStopRoute?.minutes ?? exactJourney?.walkToStopMinutes ?? estimate?.walkToStopMinutes ?? 0
  */
 export function isStructurallyDiverse(candidate, hero, thresholds = DEFAULT_DIVERSITY_THRESHOLDS) {
     if (!candidate || !hero)
@@ -21,20 +22,28 @@ export function isStructurallyDiverse(candidate, hero, thresholds = DEFAULT_DIVE
     }
     // 2. Line diversity (for bus)
     if (candidate.mode === 'bus' && hero.mode === 'bus') {
+        const candIdent = typeof candidate.identity === 'string' ? parseIdentity(candidate.identity) : candidate.identity;
+        const heroIdent = typeof hero.identity === 'string' ? parseIdentity(hero.identity) : hero.identity;
         // Line is read directly from the structured identity, falling back to metadata
-        const candLine = candidate.identity.mode === 'bus'
-            ? candidate.identity.line
+        const candLine = candIdent?.mode === 'bus'
+            ? candIdent.line
             : (candidate.metadata?.line != null ? String(candidate.metadata.line) : null);
-        const heroLine = hero.identity.mode === 'bus'
-            ? hero.identity.line
+        const heroLine = heroIdent?.mode === 'bus'
+            ? heroIdent.line
             : (hero.metadata?.line != null ? String(hero.metadata.line) : null);
         if (candLine && heroLine && candLine !== heroLine) {
             return true;
         }
         // 3. Access diversity (same line)
         const accessWalkThreshold = thresholds?.accessWalkMinutes ?? 3;
-        const candWalk = candidate.estimate?.walkToStopMinutes ?? 0;
-        const heroWalk = hero.estimate?.walkToStopMinutes ?? 0;
+        const candWalk = candidate.exactJourney?.walkToStopRoute?.minutes
+            ?? candidate.exactJourney?.walkToStopMinutes
+            ?? candidate.estimate?.walkToStopMinutes
+            ?? 0;
+        const heroWalk = hero.exactJourney?.walkToStopRoute?.minutes
+            ?? hero.exactJourney?.walkToStopMinutes
+            ?? hero.estimate?.walkToStopMinutes
+            ?? 0;
         if (Math.abs(candWalk - heroWalk) >= accessWalkThreshold) {
             return true;
         }
