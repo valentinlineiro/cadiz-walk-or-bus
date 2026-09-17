@@ -8,6 +8,7 @@ import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { decisionCardHTML, errorCardHTML, escapeHTML, computeLastMile } from './ui.js';
+import { getLog, appendEntry, formatRecommendationSub } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -616,5 +617,97 @@ test('errorCardHTML properly HTML-escapes raw queries preventing XSS', () => {
 
   // String error query
   assert.equal(errorCardHTML('algo & nada'), '<div class="decision-error">No encontramos «algo &amp; nada». Prueba con otro nombre.</div>');
+});
+
+test('journey-log: getLog survives missing storage, corrupt JSON, or invalid shapes', () => {
+  assert.deepEqual(getLog(null), []);
+  const badJsonStorage = { getItem: () => '{{broken' };
+  assert.deepEqual(getLog(badJsonStorage), []);
+  const notArrayStorage = { getItem: () => JSON.stringify({ a: 1 }) };
+  assert.deepEqual(getLog(notArrayStorage), []);
+});
+
+test('journey-log: formatRecommendationSub formats walk and bus correctly', () => {
+  assert.equal(formatRecommendationSub(null), null);
+  assert.equal(formatRecommendationSub({ kind: 'walk', walkMinutes: 12 }), 'última vez: ANDAR · 12′');
+  assert.equal(
+    formatRecommendationSub({ kind: 'bus', busLine: '1', totalMinutes: 22 }),
+    'última vez: BUS L1 · 22′',
+  );
+  assert.equal(
+    formatRecommendationSub({ kind: 'bus', busLine: 'L2', totalMinutes: 15 }),
+    'última vez: BUS L2 · 15′',
+  );
+});
+
+test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and deduplicates within 5 minutes', () => {
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  // Invalid entries ignored
+  assert.deepEqual(appendEntry(null, mockStorage), []);
+  assert.deepEqual(appendEntry({ destination: null }, mockStorage), []);
+
+  const baseTime = 1700000000000;
+  const entry1 = {
+    id: 'e1',
+    timestamp: baseTime,
+    destination: { label: 'Plaza Mina', lat: 36.534, lon: -6.297 },
+    recommendation: { kind: 'walk', walkMinutes: 10, busLine: null, totalMinutes: 10 },
+    choice: null,
+  };
+  appendEntry(entry1, mockStorage);
+  let log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].destination.label, 'Plaza Mina');
+  assert.equal(log[0].choice, null);
+
+  // Same destination within 2 minutes (< 5 min window) -> updates entry without duplicate
+  const entry1Updated = {
+    id: 'e1-updated',
+    timestamp: baseTime + 120000,
+    destination: { label: 'Plaza Mina', lat: 36.53405, lon: -6.29705 },
+    recommendation: { kind: 'bus', walkMinutes: 12, busLine: '1', totalMinutes: 14 },
+    choice: null,
+  };
+  appendEntry(entry1Updated, mockStorage);
+  log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].timestamp, baseTime + 120000);
+  assert.equal(log[0].recommendation.kind, 'bus');
+
+  // Same destination after 6 minutes (> 5 min window) -> appends new entry (LIFO)
+  const entry1Later = {
+    id: 'e1-later',
+    timestamp: baseTime + 480000,
+    destination: { label: 'Plaza Mina', lat: 36.534, lon: -6.297 },
+    recommendation: { kind: 'walk', walkMinutes: 9, busLine: null, totalMinutes: 9 },
+    choice: null,
+  };
+  appendEntry(entry1Later, mockStorage);
+  log = getLog(mockStorage);
+  assert.equal(log.length, 2);
+  assert.equal(log[0].id, 'e1-later');
+  assert.equal(log[1].recommendation.kind, 'bus');
+
+  // Caps at 200 entries
+  for (let i = 0; i < 205; i++) {
+    appendEntry(
+      {
+        id: `bulk-${i}`,
+        timestamp: baseTime + 1000000 + i * 1000,
+        destination: { label: `Destino ${i}`, lat: 36.5 + i * 0.001, lon: -6.2 - i * 0.001 },
+        recommendation: { kind: 'walk', walkMinutes: 5, busLine: null, totalMinutes: 5 },
+        choice: null,
+      },
+      mockStorage,
+    );
+  }
+  log = getLog(mockStorage);
+  assert.equal(log.length, 200);
+  assert.equal(log[0].id, 'bulk-204');
 });
 
