@@ -688,13 +688,14 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
     timestamp: baseTime + 120000,
     destination: { label: 'Plaza Mina', lat: 36.53405, lon: -6.29705 },
     recommendation: { kind: 'bus', walkMinutes: 12, busLine: '1', totalMinutes: 14 },
-    choice: null,
+    choice: 'bus:1:1106:1204',
   };
   appendEntry(entry1Updated, mockStorage);
   log = getLog(mockStorage);
   assert.equal(log.length, 1);
   assert.equal(log[0].timestamp, baseTime + 120000);
   assert.equal(log[0].recommendation.kind, 'bus');
+  assert.equal(log[0].choice, 'bus:1:1106:1204');
 
   // Same destination after 6 minutes (> 5 min window) -> appends new entry (LIFO)
   const entry1Later = {
