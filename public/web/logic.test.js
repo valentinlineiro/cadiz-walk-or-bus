@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decide, verdict, filterCandidates } from './decision.js';
-import { nearestStops } from './geo.js';
+import { nearestStops, isInCadiz } from './geo.js';
 import { transition } from './state.js';
 import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes, busRoute } from './api.js';
 import { pinStyle } from './map.js';
@@ -169,6 +169,31 @@ test('nearestStops returns 3 closest with _km', () => {
   const n = nearestStops(stops, 36.5271, -6.2885, 3);
   assert.deepEqual(n.map((s) => s.name), ['NEAR', 'MID', 'FAR']);
   assert.ok(n[0]._km < 0.05);
+});
+
+test('isInCadiz returns true for Cádiz center', () => {
+  assert.equal(isInCadiz(36.5271, -6.2885), true);
+});
+
+test('isInCadiz returns false for Madrid', () => {
+  assert.equal(isInCadiz(40.4168, -3.7038), false);
+});
+
+test('isInCadiz returns true on bbox boundary (SW corner)', () => {
+  assert.equal(isInCadiz(36.40, -6.35), true);
+});
+
+test('isInCadiz returns true on bbox boundary (NE corner)', () => {
+  assert.equal(isInCadiz(36.60, -6.20), true);
+});
+
+test('isInCadiz returns false one meter north of bbox', () => {
+  // 36.601 is just outside the northern edge
+  assert.equal(isInCadiz(36.601, -6.2885), false);
+});
+
+test('isInCadiz returns false one step west of bbox', () => {
+  assert.equal(isInCadiz(36.5271, -6.351), false);
 });
 
 test('transition follows the locating→ready→deciding flow', () => {

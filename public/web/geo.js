@@ -12,3 +12,12 @@ export function nearestStops(stops, lat, lon, n = 3) {
     .sort((a, b) => a._km - b._km)
     .slice(0, n);
 }
+
+// Viewbox string format: 'west,north,east,south' (Nominatim convention).
+// Parsed once at module load — same source of truth as api.js CADIZ_VIEWBOX.
+export const CADIZ_BBOX = { latMin: 36.40, latMax: 36.60, lonMin: -6.35, lonMax: -6.20 };
+
+export function isInCadiz(lat, lon) {
+  return lat >= CADIZ_BBOX.latMin && lat <= CADIZ_BBOX.latMax &&
+         lon >= CADIZ_BBOX.lonMin && lon <= CADIZ_BBOX.lonMax;
+}
