@@ -8,6 +8,12 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
             Math.sin(dLon / 2) ** 2;
     return Math.round(2 * R * Math.asin(Math.sqrt(a)));
 }
+export function nearestStops(stops, lat, lon, n = 3) {
+    return [...stops]
+        .map((s) => ({ ...s, dist: haversineMeters(lat, lon, s.lat, s.lon) }))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, n);
+}
 function stripAccents(str) {
     return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }

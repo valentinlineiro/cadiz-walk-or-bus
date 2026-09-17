@@ -210,16 +210,29 @@ test('RecordUserChoiceUseCase: bus recommendation extracts line and stops from m
 });
 
 test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 candidates routed)', async () => {
-  let walkingRouteCalls = 0;
-  let busRouteCalls = 0;
+  const routingLog = {
+    walkDirect: [],
+    walkToStop: [],
+    walkLastMile: [],
+    busLegs: [],
+  };
+
+  const origin = { lat: 36.520, lon: -6.280 };
+  const destination = { lat: 36.535, lon: -6.295, label: 'Plaza San Antonio' };
 
   const fakeRouting = {
-    routeWalking: async () => {
-      walkingRouteCalls++;
+    routeWalking: async (from, to) => {
+      if (from.lat === origin.lat && to.lat === destination.lat) {
+        routingLog.walkDirect.push({ from, to });
+      } else if (to.lat === destination.lat) {
+        routingLog.walkLastMile.push({ from, to });
+      } else {
+        routingLog.walkToStop.push({ from, to });
+      }
       return { minutes: 15, coordinates: [] };
     },
-    routeBus: async () => {
-      busRouteCalls++;
+    routeBus: async (boarding, alight, path) => {
+      routingLog.busLegs.push({ boarding, alight, path });
       return { minutes: 8, coordinates: [] };
     },
   };
@@ -232,13 +245,11 @@ test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 can
       { stop: '201', name: 'Stop 201', lat: 36.535, lon: -6.295 },
     ],
     getLines: async () => ({
-      lines: {
-        '1': { 'Centro': ['101', '201'] },
-        '2': { 'Centro': ['102', '201'] },
-        '3': { 'Centro': ['103', '201'] },
-        '4': { 'Centro': ['101', '201'] },
-        '5': { 'Centro': ['102', '201'] },
-      },
+      '1': { 'Centro': ['101', '201'] },
+      '2': { 'Centro': ['102', '201'] },
+      '3': { 'Centro': ['103', '201'] },
+      '4': { 'Centro': ['101', '201'] },
+      '5': { 'Centro': ['102', '201'] },
     }),
     getArrivals: async (stopId) => {
       if (stopId === '101') {
@@ -272,17 +283,78 @@ test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 can
     transit: fakeTransit,
   });
 
-  const origin = { lat: 36.520, lon: -6.280 };
-  const destination = { lat: 36.535, lon: -6.295, label: 'Plaza San Antonio' };
-
   const decision = await useCase.execute({ origin, destination });
 
   assert.ok(decision.hero);
   assert.ok(Array.isArray(decision.alternatives));
-  // Total exact routing operations bounded by admitted candidates (at most 3)
-  assert.ok(walkingRouteCalls <= 6, `Expected walking calls <= 6, got ${walkingRouteCalls}`);
-  assert.ok(busRouteCalls <= 3, `Expected bus calls <= 3, got ${busRouteCalls}`);
+
+  const busCandidatesRouted = routingLog.busLegs.length;
+  const walkCandidatesRouted = routingLog.walkDirect.length;
+  const totalCandidatesRouted = busCandidatesRouted + walkCandidatesRouted;
+
+  // Invariant 1: Total candidates sent to exact routing strictly obeys policy.maxCandidates (<= 3)
+  assert.ok(totalCandidatesRouted <= 3, `Expected candidates routed <= 3, got ${totalCandidatesRouted}`);
+  assert.ok(totalCandidatesRouted >= 1);
+
+  // Invariant 2: Verification of exact routing calls produced by each candidate type:
+  // - Walk candidate: exactly 1 routeWalking(origin, destination) call, 0 routeBus calls
+  assert.equal(routingLog.walkDirect.length, walkCandidatesRouted);
+  // - Each bus candidate: exactly 1 walkToStop call, exactly 1 lastMile call, exactly 1 bus leg call
+  assert.equal(routingLog.walkToStop.length, busCandidatesRouted);
+  assert.equal(routingLog.walkLastMile.length, busCandidatesRouted);
+  assert.equal(routingLog.busLegs.length, busCandidatesRouted);
+
+  // Invariant 3: Total walking calls is exactly walkDirect + 2 * busCandidates
+  const totalWalkingCalls = routingLog.walkDirect.length + routingLog.walkToStop.length + routingLog.walkLastMile.length;
+  assert.equal(totalWalkingCalls, walkCandidatesRouted + 2 * busCandidatesRouted);
+
   assert.ok(decision.alternatives.length <= 2);
+});
+
+test('FindBestJourneysUseCase: throws Sin ruta andando when pedestrian routing fails (contract preservation)', async () => {
+  const origin = { lat: 36.520, lon: -6.280 };
+  const destination = { lat: 36.524, lon: -6.280, label: 'Plaza San Antonio' };
+
+  const fakeRouting = {
+    routeWalking: async (from, to) => {
+      // Direct walk route fails / returns null
+      if (from.lat === origin.lat && to.lat === destination.lat) {
+        return null;
+      }
+      return { minutes: 2, coordinates: [] };
+    },
+    routeBus: async () => {
+      return { coordinates: [] };
+    },
+  };
+
+  const fakeTransit = {
+    getStops: async () => [
+      { stop: '101', name: 'Stop 101', lat: 36.520, lon: -6.280 },
+      { stop: '201', name: 'Stop 201', lat: 36.535, lon: -6.295 },
+    ],
+    getLines: async () => ({
+      '1': { 'Centro': ['101', '201'] },
+    }),
+    getArrivals: async () => [
+      { line: '1', destination: 'Centro', minutes: 2 },
+    ],
+  };
+
+  const useCase = new FindBestJourneysUseCase({
+    routing: fakeRouting,
+    transit: fakeTransit,
+  });
+
+  await assert.rejects(
+    async () => {
+      await useCase.execute({ origin, destination });
+    },
+    {
+      name: 'Error',
+      message: 'Sin ruta andando',
+    },
+  );
 });
 
 test('FindBestJourneysUseCase: exact re-ranking promotes post-routing fastest candidate to Hero', async () => {

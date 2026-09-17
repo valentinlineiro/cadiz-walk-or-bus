@@ -1,7 +1,7 @@
 import { WALK_METERS_PER_MINUTE, DEFAULT_PLANNING_POLICY, } from '../../domain/constants.js';
 import { computeLastMile } from '../../domain/last-mile.js';
 import { filterDiverseAlternatives } from '../../domain/diversity.js';
-import { haversineMeters, findAlightStop } from '../../domain/topology.js';
+import { haversineMeters, findAlightStop, nearestStops, diversifyByLine } from '../../domain/topology.js';
 import { createWalkCandidate, createBusCandidates, selectCandidates } from '../../domain/planner.js';
 export class FindBestJourneysUseCase {
     ports;
@@ -26,20 +26,18 @@ export class FindBestJourneysUseCase {
         const lines = rawLines
             ? (rawLines.lines ?? rawLines)
             : null;
-        // Nearby stops sorted by proximity
-        const nearbyStops = stops
-            .map((s) => ({ ...s, dist: haversineMeters(origin.lat, origin.lon, s.lat, s.lon) }))
-            .sort((a, b) => a.dist - b.dist)
-            .slice(0, 8);
+        // Nearby stops pool prioritized and diversified by line
+        const pool = nearestStops(stops, origin.lat, origin.lon, 32);
+        const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
         const busCandidates = [];
         await Promise.all(nearbyStops.map(async (stop) => {
             const arrivals = await this.ports.transit.getArrivals(stop.stop).catch(() => []);
-            const walkToStopMinutes = Math.max(0, Math.round(stop.dist / WALK_METERS_PER_MINUTE));
+            const stopDist = haversineMeters(origin.lat, origin.lon, stop.lat, stop.lon);
+            const walkToStopMinutes = Math.max(0, Math.round(stopDist / WALK_METERS_PER_MINUTE));
             const resolveAlight = (arr) => {
                 if (!lines)
                     return null;
-                // Try standard findAlightStop first
-                const res = findAlightStop({
+                return findAlightStop({
                     line: arr.line,
                     direction: arr.destination,
                     boardingStopId: stop.stop,
@@ -47,39 +45,6 @@ export class FindBestJourneysUseCase {
                     stops,
                     lines,
                 });
-                if (res)
-                    return res;
-                // Fallback sequence traversal if lines format is structured with directions array or custom shape
-                const lineDef = lines[arr.line];
-                if (!lineDef)
-                    return null;
-                // If lineDef has directions array (e.g. { directions: [{ stops: [...] }] })
-                if (Array.isArray(lineDef.directions)) {
-                    for (const dir of lineDef.directions) {
-                        const bIdx = dir.stops?.indexOf(stop.stop);
-                        if (bIdx != null && bIdx >= 0 && dir.stops) {
-                            for (let i = bIdx + 1; i < dir.stops.length; i++) {
-                                const candidateStopId = dir.stops[i];
-                                const sObj = stops.find((s) => s.stop === candidateStopId);
-                                if (sObj) {
-                                    const alightDist = haversineMeters(sObj.lat, sObj.lon, destination.lat, destination.lon);
-                                    const boardingDist = haversineMeters(stop.lat, stop.lon, destination.lat, destination.lon);
-                                    if (alightDist < boardingDist) {
-                                        return {
-                                            stop: sObj,
-                                            alightStop: sObj,
-                                            distanceMeters: alightDist,
-                                            alightDistanceMeters: alightDist,
-                                            rideMinutes: Math.max(1, (i - bIdx) * 2),
-                                            path: dir.stops.slice(bIdx, i + 1).map((sid) => stops.find((s) => s.stop === sid)).filter(Boolean),
-                                        };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                return null;
             };
             const cands = createBusCandidates({
                 arrivals,
@@ -96,18 +61,21 @@ export class FindBestJourneysUseCase {
         const evaluatedJourneys = await Promise.all(selected.map(async (cand) => {
             if (cand.mode === 'walk') {
                 const routedWalk = await this.ports.routing.routeWalking(origin, destination).catch(() => null);
-                const totalMins = routedWalk?.minutes ?? cand.estimatedMinutes;
+                if (!routedWalk || typeof routedWalk.minutes !== 'number') {
+                    throw new Error('Sin ruta andando');
+                }
+                const totalMins = routedWalk.minutes;
                 return {
                     identity: cand.identity,
                     mode: 'walk',
                     totalMinutes: totalMins,
-                    dataQuality: routedWalk ? 'live' : 'degraded',
+                    dataQuality: 'live',
                     breakdown: {
                         walkToStopMinutes: 0,
                         waitMinutes: 0,
                         rideMinutes: 0,
                         lastMileMinutes: totalMins,
-                        lastMileDegraded: !routedWalk,
+                        lastMileDegraded: false,
                     },
                     routes: { walkRoute: routedWalk },
                     metadata: cand.metadata,
@@ -149,12 +117,29 @@ export class FindBestJourneysUseCase {
         }));
         // 4. EXACT RE-RANKING (Definitive Hero Selection)
         const reRankItems = evaluatedJourneys.map((j) => ({
-            ...j,
+            identity: j.identity,
+            mode: j.mode,
             estimatedMinutes: j.totalMinutes,
+            metadata: j.metadata,
+            estimate: {
+                walkToStopMinutes: j.breakdown.walkToStopMinutes,
+                waitMinutes: j.breakdown.waitMinutes,
+                rideMinutes: j.breakdown.rideMinutes,
+                lastMileMinutes: j.breakdown.lastMileMinutes,
+            },
+            exactJourney: {
+                totalMinutes: j.totalMinutes,
+                walkToStopRoute: j.routes.walkToStopRoute,
+                busRoute: j.routes.busRoute,
+                lastMileRoute: j.routes.lastMileRoute,
+                lastMileMinutes: j.breakdown.lastMileMinutes,
+                lastMileDegraded: j.breakdown.lastMileDegraded,
+                walkRoute: j.routes.walkRoute,
+            },
             journey: j,
         }));
         const { primary: finalPrimaryItem, alternatives: finalAltItems } = selectCandidates(reRankItems, policy);
-        const finalHero = finalPrimaryItem?.journey ?? evaluatedJourneys[0];
+        const finalHero = finalPrimaryItem ? finalPrimaryItem.journey : evaluatedJourneys[0];
         const candidateAlternatives = finalAltItems.map((item) => item.journey);
         // 5. DIVERSITY FILTERING AGAINST FINAL HERO
         const diverseAlternatives = filterDiverseAlternatives(candidateAlternatives, finalHero, policy);

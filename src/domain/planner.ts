@@ -12,7 +12,7 @@ import {
   serializeIdentity,
 } from './identity.js';
 import { isStructurallyDiverse, filterDiverseAlternatives, type StructurallyDiverseItem } from './diversity.js';
-import type { Coordinates, JourneyCandidate, Stop } from './models.js';
+import type { Arrival, AlightResolution, CandidateEstimate, CandidateMetadata, Coordinates, JourneyCandidate, Stop } from './models.js';
 
 export { DEFAULT_PLANNING_POLICY, isStructurallyDiverse, filterDiverseAlternatives };
 
@@ -23,12 +23,12 @@ export interface CreateWalkCandidateOptions {
 }
 
 export function createWalkCandidate({ walkMinutes, origin, destination }: CreateWalkCandidateOptions): JourneyCandidate {
-  const mins = Math.max(0, Math.round(walkMinutes ?? 0));
+  const mins = Math.max(1, Math.round(walkMinutes ?? 0));
   return {
     identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: mins,
-    dataQuality: 'live',
+    dataQuality: walkMinutes != null ? 'live' : 'estimated',
     estimate: {
       walkToStopMinutes: 0,
       waitMinutes: 0,
@@ -52,12 +52,22 @@ export interface AlightResolutionResult {
   path?: Stop[];
 }
 
+export interface ResolvedAlight {
+  stop?: Stop;
+  alightStop?: Stop;
+  distanceMeters?: number;
+  alightDistanceMeters?: number;
+  rideMeters?: number;
+  rideMinutes?: number;
+  path?: Stop[];
+}
+
 export interface CreateBusCandidatesOptions {
-  arrivals?: any[];
+  arrivals?: Arrival[];
   stop?: Stop;
   destCoords?: Coordinates;
   walkToStopMinutes?: number;
-  resolveAlight?: (arrival: any) => any;
+  resolveAlight?: (arrival: Arrival) => ResolvedAlight | null;
 }
 
 export function createBusCandidates({
@@ -180,7 +190,23 @@ export function cheapWalkToStop(
   return Math.max(0, Math.round(distMeters / WALK_METERS_PER_MINUTE));
 }
 
-export function formatAlternativeDiff(candidate: any, primary: any): string {
+export interface AlternativeDiffCandidate {
+  mode?: string;
+  metadata?: CandidateMetadata;
+  estimate?: CandidateEstimate;
+  breakdown?: {
+    walkToStopMinutes?: number;
+    waitMinutes?: number;
+    rideMinutes?: number;
+    lastMileMinutes?: number;
+    lastMileDegraded?: boolean;
+  };
+}
+
+export function formatAlternativeDiff(
+  candidate: AlternativeDiffCandidate | null | undefined,
+  primary: AlternativeDiffCandidate | null | undefined,
+): string {
   if (!candidate) return '';
   if (candidate.mode === 'walk') {
     return 'Ruta directa a pie';

@@ -4,12 +4,12 @@ import { createWalkIdentity, createBusIdentity, serializeIdentity, } from './ide
 import { isStructurallyDiverse, filterDiverseAlternatives } from './diversity.js';
 export { DEFAULT_PLANNING_POLICY, isStructurallyDiverse, filterDiverseAlternatives };
 export function createWalkCandidate({ walkMinutes, origin, destination }) {
-    const mins = Math.max(0, Math.round(walkMinutes ?? 0));
+    const mins = Math.max(1, Math.round(walkMinutes ?? 0));
     return {
         identity: createWalkIdentity(),
         mode: 'walk',
         estimatedMinutes: mins,
-        dataQuality: 'live',
+        dataQuality: walkMinutes != null ? 'live' : 'estimated',
         estimate: {
             walkToStopMinutes: 0,
             waitMinutes: 0,
