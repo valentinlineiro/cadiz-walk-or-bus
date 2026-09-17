@@ -184,6 +184,7 @@ async function loadNearby() {
 async function quickVerdictFor(dest) {
   if (!isInCadiz(dest.lat, dest.lon)) return null;
   if (!me || stops.length === 0) return null;
+  if (!isInCadiz(me.lat, me.lon)) return null; // origin guard: user outside Cádiz
   const walkRes = await walkRoute(fetch, me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
   const walkTotal = walkRes?.minutes ?? null;
   if (walkTotal == null) return null;
@@ -497,6 +498,7 @@ async function routeToDestination(dest) {
     console.warn('[D2] destination outside Cádiz bbox — aborting route', dest);
     return;
   }
+  if (!isInCadiz(me.lat, me.lon)) return; // origin guard: user outside Cádiz
   const id = ++requestId;
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
@@ -824,7 +826,7 @@ function locate() {
       skipBtn?.classList.add('hidden');
       const { latitude, longitude } = pos.coords;
       if (!isInCadiz(latitude, longitude)) {
-        me = { ...CADIZ };
+        me = { lat: latitude, lon: longitude };
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(me.lat, me.lon);
         Promise.all([getStops(fetch), getLines(fetch)])
