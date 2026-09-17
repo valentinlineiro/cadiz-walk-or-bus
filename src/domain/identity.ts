@@ -45,23 +45,28 @@ export function serializeIdentity(id: JourneyIdentity | string | null | undefine
 
 /**
  * Parses a serialized identity string back to a JourneyIdentity.
- * Returns null for unknown or malformed strings (not a catch-all 'unknown' mode).
- * Note: 'walk:scenic' and all other walk variants normalize to 'walk:direct' for
- * backward compatibility with legacy serialized entries.
+ * Returns null for unknown or malformed strings.
+ * Valid canonical walk format is 'walk:direct'.
+ * 'walk:scenic' is explicitly supported for backward compatibility with legacy entries.
+ * Valid bus format is 'bus:<line>:<boardingStopId>:<alightStopId>' with exactly 4 non-empty segments.
  */
 export function parseIdentity(raw: string | null | undefined): JourneyIdentity | null {
   if (!raw || typeof raw !== 'string') return null;
-  if (raw.startsWith('walk:')) {
-    return { mode: 'walk', variant: 'direct' };
+  if (raw === 'walk:direct' || raw === 'walk:scenic') {
+    return createWalkIdentity();
   }
   if (raw.startsWith('bus:')) {
     const parts = raw.split(':');
-    if (parts.length < 4) return null;
+    if (parts.length !== 4) return null;
+    const line = parts[1];
+    const boardingStopId = parts[2];
+    const alightStopId = parts[3];
+    if (!line || !boardingStopId || !alightStopId) return null;
     return {
       mode: 'bus',
-      line: parts[1] || '',
-      boardingStopId: parts[2] || '',
-      alightStopId: parts[3] || '',
+      line,
+      boardingStopId,
+      alightStopId,
     };
   }
   return null;

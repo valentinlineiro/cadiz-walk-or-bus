@@ -7,10 +7,12 @@ export const BUS_METERS_PER_MINUTE = 250;
 
 // Hard planning budget and temporal similarity thresholds
 export interface PlanningPolicy {
-  maxCandidates?: number;
-  maxAlternatives?: number;
-  similarityMaxDeltaMinutes?: number;
+  maxCandidates: number;
+  maxAlternatives: number;
+  similarityMaxDeltaMinutes: number;
 }
+
+export type PlanningPolicyOverrides = Partial<PlanningPolicy>;
 
 export const DEFAULT_PLANNING_POLICY: PlanningPolicy = {
   maxCandidates: 3,
@@ -20,12 +22,13 @@ export const DEFAULT_PLANNING_POLICY: PlanningPolicy = {
 
 // Structural diversity thresholds
 export interface DiversityThresholds {
-  accessWalkMinutes?: number;
-  alightDistanceMeters?: number;
+  accessWalkMinutes: number;
+  alightDistanceMeters: number;
 }
+
+export type DiversityThresholdsOverrides = Partial<DiversityThresholds>;
 
 export const DEFAULT_DIVERSITY_THRESHOLDS: DiversityThresholds = {
   accessWalkMinutes: 3,
   alightDistanceMeters: 250,
 };
-

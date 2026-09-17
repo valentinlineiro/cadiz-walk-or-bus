@@ -59,6 +59,11 @@ export function isStructurallyDiverse(candidate, hero, thresholds = DEFAULT_DIVE
 }
 /**
  * Filters and admits alternative candidates against a reference Hero and previously admitted alternatives.
+ *
+ * Semantic note on similarity filter:
+ *   candidate <= hero + delta
+ * Options that are faster than Hero (candidate < hero) are NEVER pruned by this threshold.
+ * Only options that exceed Hero + delta are pruned.
  */
 export function filterDiverseAlternatives(candidates, hero, policy = DEFAULT_PLANNING_POLICY) {
     if (!hero || !Array.isArray(candidates))
@@ -93,8 +98,12 @@ export function filterDiverseAlternatives(candidates, hero, policy = DEFAULT_PLA
 }
 /**
  * Pure classifier of divergence between user choice and system recommendation.
- * Operates on serialized string identities (persistence boundary) and returns
- * 'none', 'mode', 'line', or 'access'.
+ *
+ * NOTE (Transitional boundary debt for PR 2/PR 3):
+ * This function currently operates at the persistence/application boundary
+ * on serialized string identities (e.g. from localStorage). In PR 2 (Application Use Cases),
+ * boundary DTOs will be mapped to domain models with pure JourneyIdentity objects before
+ * invoking domain divergence classification.
  */
 export function classifyDivergence(choice, recommendation) {
     if (!choice || !recommendation)

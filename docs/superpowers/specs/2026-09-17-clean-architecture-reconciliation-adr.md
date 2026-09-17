@@ -95,7 +95,11 @@ Contiene **lo que es verdad independientemente del navegador, OSRM, Cloudflare W
   * Atributos: `identity`, `mode`, `totalMinutes`, `breakdown` (caminata a parada exacta, espera real, viaje en bus, last-mile exacto o degradado), `routes` (geometrías resueltas), `dataQuality` (`live` | `degraded`).
 * **`Decision` (Resultado de Planificación)**:
   * `hero`: El viaje ganador seleccionado (`EvaluatedJourney`).
-  * `alternatives`: Hasta 2 viajes alternativos admitidos (`EvaluatedJourney[]`).
+  * `alternatives`: Hasta 2 alternativas contextualizadas (`DecisionAlternative[]`), donde cada alternativa encapsula:
+    * `journey`: El viaje resuelto (`EvaluatedJourney`).
+    * `differentiator`: Etiqueta humana que explica por qué difiere del Hero (`string`).
+    * `deltaMinutes`: Diferencia con signo respecto al Hero (`number`).
+    * `divergenceType`: Tipo de divergencia estructural (`DivergenceType`).
 * **`DecisionRecord` (Registro de Observabilidad)**:
   * `recommendation`: Datos esenciales del Hero emitido.
   * `choice`: Declaración de elección explícita (`DecisionAlternative | null`).

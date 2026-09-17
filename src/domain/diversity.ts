@@ -2,7 +2,9 @@ import {
   DEFAULT_PLANNING_POLICY,
   DEFAULT_DIVERSITY_THRESHOLDS,
   type DiversityThresholds,
+  type DiversityThresholdsOverrides,
   type PlanningPolicy,
+  type PlanningPolicyOverrides,
 } from './constants.js';
 import { isSameIdentity, parseIdentity, type JourneyIdentity } from './identity.js';
 import type { DivergenceType } from './models.js';
@@ -50,7 +52,7 @@ export interface StructurallyDiverseItem {
 export function isStructurallyDiverse(
   candidate: StructurallyDiverseItem | null | undefined,
   hero: StructurallyDiverseItem | null | undefined,
-  thresholds: DiversityThresholds = DEFAULT_DIVERSITY_THRESHOLDS,
+  thresholds: DiversityThresholds | DiversityThresholdsOverrides = DEFAULT_DIVERSITY_THRESHOLDS,
 ): boolean {
   if (!candidate || !hero) return false;
   if (!candidate.identity || !hero.identity) return false;
@@ -108,11 +110,16 @@ export function isStructurallyDiverse(
 
 /**
  * Filters and admits alternative candidates against a reference Hero and previously admitted alternatives.
+ *
+ * Semantic note on similarity filter:
+ *   candidate <= hero + delta
+ * Options that are faster than Hero (candidate < hero) are NEVER pruned by this threshold.
+ * Only options that exceed Hero + delta are pruned.
  */
 export function filterDiverseAlternatives<T extends StructurallyDiverseItem>(
   candidates: T[] | null | undefined,
   hero: T | null | undefined,
-  policy: PlanningPolicy = DEFAULT_PLANNING_POLICY,
+  policy: PlanningPolicy | PlanningPolicyOverrides = DEFAULT_PLANNING_POLICY,
 ): T[] {
   if (!hero || !Array.isArray(candidates)) return [];
   const maxDelta = policy.similarityMaxDeltaMinutes ?? 5;
@@ -166,8 +173,12 @@ export interface DivergenceRecommendationLike {
 
 /**
  * Pure classifier of divergence between user choice and system recommendation.
- * Operates on serialized string identities (persistence boundary) and returns
- * 'none', 'mode', 'line', or 'access'.
+ *
+ * NOTE (Transitional boundary debt for PR 2/PR 3):
+ * This function currently operates at the persistence/application boundary
+ * on serialized string identities (e.g. from localStorage). In PR 2 (Application Use Cases),
+ * boundary DTOs will be mapped to domain models with pure JourneyIdentity objects before
+ * invoking domain divergence classification.
  */
 export function classifyDivergence(
   choice: DivergenceChoiceLike | null | undefined,

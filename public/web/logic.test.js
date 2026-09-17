@@ -97,6 +97,14 @@ test('domain identity: JourneyIdentity is a structured Value Object', () => {
   assert.equal(parseIdentity(''), null);
   assert.equal(parseIdentity('custom:route'), null);
   assert.equal(parseIdentity('bus:1:only-two'), null);
+  assert.equal(parseIdentity('walk:'), null);
+  assert.equal(parseIdentity('walk:whatever'), null);
+  assert.equal(parseIdentity('walk:foo:bar'), null);
+  assert.equal(parseIdentity('bus:1:1106:1204:garbage'), null);
+  assert.equal(parseIdentity('bus:1:1106:'), null);
+  assert.equal(parseIdentity('bus::1106:1204'), null);
+  assert.equal(parseIdentity('bus:1::1204'), null);
+  assert.equal(parseIdentity('bus:::'), null);
 
   // isSameIdentity does structural comparison on VO objects
   assert.equal(isSameIdentity(createWalkIdentity(), createWalkIdentity()), true);
