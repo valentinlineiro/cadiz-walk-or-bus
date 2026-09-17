@@ -714,7 +714,6 @@ async function routeToDestination(dest) {
   // 2. Fetch arrivals for nearby pool and build bus candidates using cheap pre-ranking
   const pool = nearbyDiverseStops(8);
   arrivalsByStop = new Map();
-  walkToStopCache = new Map();
   await Promise.all(
     pool.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
   );
@@ -1125,6 +1124,7 @@ function locate() {
       const { latitude, longitude } = pos.coords;
       if (!isInCadiz(latitude, longitude)) {
         me = { lat: latitude, lon: longitude };
+        walkToStopCache = new Map();
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(me.lat, me.lon);
         Promise.all([getStops(fetch), getLines(fetch)])
@@ -1137,6 +1137,7 @@ function locate() {
         return;
       }
       me = { lat: latitude, lon: longitude };
+      walkToStopCache = new Map();
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
       try {
