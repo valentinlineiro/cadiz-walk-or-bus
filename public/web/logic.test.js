@@ -27,6 +27,8 @@ import {
   selectCandidates,
   formatAlternativeDiff,
   cheapWalkToStop,
+  isStructurallyDiverse,
+  filterDiverseAlternatives,
 } from './planner.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
@@ -1081,6 +1083,173 @@ test('planner: two-stage selection re-ranks candidates after exact routing refin
   assert.equal(prunedSelection.primary.identity, 'bus:2');
   assert.equal(prunedSelection.alternatives.length, 1);
   assert.equal(prunedSelection.alternatives[0].identity, 'walk');
+});
+
+test('planner: isStructurallyDiverse validates modal, line, and access diversity against Hero', () => {
+  const heroBus = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+
+  const heroWalk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimate: { walkToStopMinutes: 0 },
+  };
+
+  // 1. Modal diversity
+  assert.equal(isStructurallyDiverse(heroWalk, heroBus), true);
+  assert.equal(isStructurallyDiverse(heroBus, heroWalk), true);
+
+  // 2. Line diversity (for bus)
+  const busLine2 = {
+    identity: 'bus:2:1106:1205',
+    mode: 'bus',
+    metadata: { line: '2' },
+  };
+  assert.equal(isStructurallyDiverse(busLine2, heroBus), true);
+
+  // Identical candidate -> not diverse
+  assert.equal(isStructurallyDiverse(heroBus, heroBus), false);
+
+  // 3. Access diversity: same line L1
+  // A: Walk to stop diff < 3m, same alight -> redundant (false)
+  const redundantAdjacentBus = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 3 }, // diff |3 - 2| = 1 < 3
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1107' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+  assert.equal(isStructurallyDiverse(redundantAdjacentBus, heroBus), false);
+
+  // B: Walk to stop diff >= 3m (e.g. walk 6m vs 2m) -> diverse (true)
+  const walkAccessBus = {
+    identity: 'bus:1:1120:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 6 }, // diff |6 - 2| = 4 >= 3
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1120' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+  assert.equal(isStructurallyDiverse(walkAccessBus, heroBus), true);
+
+  // C: Alight stop diff >= 250m -> diverse (true)
+  const alightCorridorBus = {
+    identity: 'bus:1:1106:1208',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106' },
+      alightStop: { stop: '1208' },
+      alightDistanceMeters: 450, // diff |450 - 100| = 350 >= 250
+    },
+  };
+  assert.equal(isStructurallyDiverse(alightCorridorBus, heroBus), true);
+
+  // Null guards
+  assert.equal(isStructurallyDiverse(null, heroBus), false);
+  assert.equal(isStructurallyDiverse(heroBus, null), false);
+});
+
+test('planner: selectCandidates filters out redundant same-line alternatives in favor of useful diversity', () => {
+  // Hero is Bus L1 (14m)
+  const hero = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    estimate: { walkToStopMinutes: 2 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // c2: redundant marquee variant on line 1 (15m, 1m walk diff, same alight)
+  const c2Redundant = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // c3: Walk alternative (17m)
+  const c3Walk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 17,
+    estimate: { walkToStopMinutes: 0 },
+  };
+
+  // c4: Line 2 alternative (18m)
+  const c4BusL2 = {
+    identity: 'bus:2:1106:1205',
+    mode: 'bus',
+    estimatedMinutes: 18,
+    metadata: { line: '2' },
+  };
+
+  const res = selectCandidates([hero, c2Redundant, c3Walk, c4BusL2]);
+  assert.equal(res.primary.identity, 'bus:1:1106:1204');
+  assert.equal(res.alternatives.length, 2);
+  // c2Redundant must be pruned because it's not diverse from hero (same line, adjacent stop)
+  assert.equal(res.alternatives[0].identity, 'walk:direct');
+  assert.equal(res.alternatives[1].identity, 'bus:2:1106:1205');
+});
+
+test('planner: selectCandidates ensures diversity among multiple admitted alternatives', () => {
+  // Hero is Walk (14m)
+  const heroWalk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 14,
+  };
+
+  // b1: Bus L1 at Stop A (15m)
+  const b1 = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    estimate: { walkToStopMinutes: 2 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // b2: Bus L1 at adjacent Stop B (16m) - redundant with b1!
+  const b2Redundant = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimatedMinutes: 16,
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // b3: Bus L2 at Stop C (17m) - diverse from both walk and L1
+  const b3BusL2 = {
+    identity: 'bus:2:1110:1206',
+    mode: 'bus',
+    estimatedMinutes: 17,
+    metadata: { line: '2' },
+  };
+
+  const res = selectCandidates([heroWalk, b1, b2Redundant, b3BusL2]);
+  assert.equal(res.primary.identity, 'walk:direct');
+  assert.equal(res.alternatives.length, 2);
+  assert.equal(res.alternatives[0].identity, 'bus:1:1106:1204');
+  // b2Redundant must not be admitted because it is structurally redundant with b1 (already admitted)
+  assert.equal(res.alternatives[1].identity, 'bus:2:1110:1206');
 });
 
 test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
