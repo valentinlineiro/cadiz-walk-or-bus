@@ -125,7 +125,7 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
   return updated;
 }
 
-export function getTopDestinations(n = 5, storageImpl) {
+export function getRecentDestinations(n = 5, storageImpl) {
   const entries = getLog(storageImpl);
   if (entries.length === 0) return [];
 
@@ -148,12 +148,12 @@ export function getTopDestinations(n = 5, storageImpl) {
     }
   }
 
-  grouped.sort((a, b) => {
-    if (b.count !== a.count) {
-      return b.count - a.count; // primary: frequency desc
-    }
-    return b.lastTimestamp - a.lastTimestamp; // tie-breaker: recency desc
-  });
+  // Memory v1: sort strictly by recency (most recent evaluation first)
+  grouped.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
   return grouped.slice(0, n);
 }
+
+// Alias for backwards-compatibility or v2 preparation
+export const getTopDestinations = getRecentDestinations;
+

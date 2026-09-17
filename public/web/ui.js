@@ -8,7 +8,7 @@ import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorit
 import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
-import { appendEntry, getTopDestinations } from './journey-log.js';
+import { appendEntry, getRecentDestinations } from './journey-log.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -464,7 +464,7 @@ function renderQuickPicks() {
   let destinations = [];
   try { favorites = getFavorites(); } catch { favorites = []; }
   try {
-    destinations = getTopDestinations(20).filter((d) => !isFavorite(d)).slice(0, 5);
+    destinations = getRecentDestinations(20).filter((d) => !isFavorite(d)).slice(0, 5);
     if (destinations.length === 0) {
       destinations = getRecent().filter((r) => !isFavorite(r)).slice(0, 5);
     }

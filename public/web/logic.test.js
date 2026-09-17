@@ -8,7 +8,7 @@ import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { decisionCardHTML, errorCardHTML, escapeHTML, computeLastMile } from './ui.js';
-import { getLog, appendEntry, formatRecommendationSub, getTopDestinations } from './journey-log.js';
+import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -711,19 +711,19 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   assert.equal(log[0].id, 'bulk-204');
 });
 
-test('journey-log: getTopDestinations groups by destination, ranks by frequency desc, then recency desc', () => {
+test('journey-log: getRecentDestinations groups by destination and ranks by recency desc', () => {
   const store = new Map();
   const mockStorage = {
     getItem: (k) => store.get(k) ?? null,
     setItem: (k, v) => store.set(k, v),
   };
 
-  assert.deepEqual(getTopDestinations(5, mockStorage), []);
+  assert.deepEqual(getRecentDestinations(5, mockStorage), []);
 
   const t0 = 1700000000000;
   // Destino A: 2 visits (t0 + 10m, t0 + 20m)
-  // Destino B: 3 visits (t0 + 1m, t0 + 2m, t0 + 3m)
-  // Destino C: 2 visits (t0 + 30m, t0 + 40m - more recent than A)
+  // Destino B: 3 visits (t0 + 1m, t0 + 2m, t0 + 3m - most frequent, but oldest)
+  // Destino C: 2 visits (t0 + 30m, t0 + 40m - most recent)
   const logEntries = [
     {
       id: 'c2',
@@ -778,27 +778,28 @@ test('journey-log: getTopDestinations groups by destination, ranks by frequency 
 
   mockStorage.setItem('cadiz_journey_log', JSON.stringify(logEntries));
 
-  const top = getTopDestinations(5, mockStorage);
-  assert.equal(top.length, 3);
-  // Destino B has 3 visits -> rank 1
-  assert.equal(top[0].label, 'Destino B');
-  assert.equal(top[0].count, 3);
-  assert.equal(top[0].sub, 'última vez: BUS L2 · 20′');
+  const recent = getRecentDestinations(5, mockStorage);
+  assert.equal(recent.length, 3);
+  // Memory v1 ranks strictly by recency:
+  // Destino C has latest timestamp t0 + 4000000 -> rank 1
+  assert.equal(recent[0].label, 'Destino C');
+  assert.equal(recent[0].count, 2);
+  assert.equal(recent[0].sub, 'última vez: ANDAR · 8′');
 
-  // Destino C has 2 visits, latest timestamp t0 + 4000000 -> rank 2 (beats A on recency)
-  assert.equal(top[1].label, 'Destino C');
-  assert.equal(top[1].count, 2);
-  assert.equal(top[1].sub, 'última vez: ANDAR · 8′');
+  // Destino A has latest timestamp t0 + 2000000 -> rank 2
+  assert.equal(recent[1].label, 'Destino A');
+  assert.equal(recent[1].count, 2);
+  assert.equal(recent[1].sub, 'última vez: BUS L1 · 18′');
 
-  // Destino A has 2 visits, latest timestamp t0 + 2000000 -> rank 3
-  assert.equal(top[2].label, 'Destino A');
-  assert.equal(top[2].count, 2);
-  assert.equal(top[2].sub, 'última vez: BUS L1 · 18′');
+  // Destino B has latest timestamp t0 + 300000 -> rank 3 (even though count is 3)
+  assert.equal(recent[2].label, 'Destino B');
+  assert.equal(recent[2].count, 3);
+  assert.equal(recent[2].sub, 'última vez: BUS L2 · 20′');
 
   // Test limit (n = 2)
-  const top2 = getTopDestinations(2, mockStorage);
-  assert.equal(top2.length, 2);
-  assert.equal(top2[0].label, 'Destino B');
-  assert.equal(top2[1].label, 'Destino C');
+  const recent2 = getRecentDestinations(2, mockStorage);
+  assert.equal(recent2.length, 2);
+  assert.equal(recent2[0].label, 'Destino C');
+  assert.equal(recent2[1].label, 'Destino A');
 });
 
