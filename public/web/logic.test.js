@@ -1029,6 +1029,65 @@ test('journey-log: getLog normalizes legacy v1 entries with string choice safely
   assert.equal(log[1].recommendation.identity, 'walk:direct');
 });
 
+test('journey-log: normalizes legacy recommendation without busLine extracting line from identity', () => {
+  const legacyWithoutBusLine = [
+    {
+      id: 'legacy-no-busline',
+      timestamp: 1700000000000,
+      destination: { label: 'Plaza Mina', lat: 36.534, lon: -6.297 },
+      recommendation: {
+        identity: 'bus:7:1106:1204',
+        kind: 'bus',
+        // busLine intentionally omitted to verify fallback extraction from identity
+        boardingStopId: '1106',
+        alightStopId: '1204',
+        totalMinutes: 18,
+      },
+      choice: null,
+    },
+  ];
+
+  const mockStorage = {
+    getItem: () => JSON.stringify(legacyWithoutBusLine),
+    setItem: () => {},
+  };
+
+  const log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].recommendation.busLine, '7');
+  assert.equal(log[0].recommendation.boardingStopId, '1106');
+  assert.equal(log[0].recommendation.alightStopId, '1204');
+  assert.equal(log[0].recommendation.identity, 'bus:7:1106:1204');
+
+  // Also verify appendEntry normalizes missing recommendation.busLine from identity
+  const store = new Map();
+  const appendStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  appendEntry(
+    {
+      id: 'append-no-busline',
+      timestamp: 1700000000000,
+      destination: { label: 'Plaza Mina', lat: 36.534, lon: -6.297 },
+      recommendation: {
+        identity: 'bus:3:1108:1206',
+        kind: 'bus',
+        totalMinutes: 20,
+      },
+      choice: null,
+    },
+    appendStorage,
+  );
+
+  const appendLog = getLog(appendStorage);
+  assert.equal(appendLog.length, 1);
+  assert.equal(appendLog[0].recommendation.busLine, '3');
+  assert.equal(appendLog[0].recommendation.boardingStopId, '1108');
+  assert.equal(appendLog[0].recommendation.alightStopId, '1206');
+});
+
 test('journey-log: appendEntry preserves and updates structured choice', () => {
   const store = new Map();
   const mockStorage = {
