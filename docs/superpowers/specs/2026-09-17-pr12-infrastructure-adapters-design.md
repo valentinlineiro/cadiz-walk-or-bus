@@ -165,7 +165,8 @@ Each adapter is isolated, fully typed, accepts an injectable I/O client for test
   - Deduplicates consecutive evaluations for the same destination within 5 minutes.
   - Prepends LIFO and enforces 200-entry cap.
   - Safe error handling: catches `QuotaExceededError` or storage corruption silently without crashing.
-- **Exposed Read Capabilities (for UI & Queries)**:
+- **Exposed Read Capabilities (Non-Port Adapter Methods)**:
+  - *Architectural boundary clarification*: These read methods are concrete adapter capabilities used exclusively by UI compatibility and query rendering. They do NOT belong to `JourneyLogPort` (which remains strictly ISP-compliant with `append(record): void`).
   - `getLog(): DecisionRecord[]`: Retrieves and validates historical entries, safely normalizing legacy records.
   - `getRecentDestinations(n = 5)`: Returns distinct recent destinations sorted by recency.
   - `getTopDestinations(n = 5)`: Returns top destinations grouped by coordinates, sorted by frequency desc with recency tie-breaker.
@@ -217,6 +218,30 @@ export async function busRoute(fetchImpl, stopCoords) {
   const route = await new OsrmRoutingAdapter(fetchImpl).routeBus(boarding, alight, intermediate);
   return route?.coordinates ?? null;
 }
+
+// Helpers outside Application Ports:
+// walkMinutes and driveMinutes do not belong to any Application Port.
+// They remain as temporary compatibility helpers in api.js without introducing unnecessary port abstractions.
+export async function walkMinutes(fetchImpl, from, to) {
+  const res = await walkRoute(fetchImpl, from, to);
+  return res ? res.minutes : null;
+}
+
+export async function driveMinutes(fetchImpl, from, to) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=false`;
+  let r;
+  try {
+    r = await fetchImpl(url);
+  } catch {
+    return null;
+  }
+  if (!r.ok) return null;
+  const [route] = (await r.json()).routes ?? [];
+  if (!route) return null;
+  const speed = route.distance / route.duration;
+  if (speed > 33 || speed < 2) return null;
+  return Math.ceil(route.duration / 60);
+}
 ```
 All existing tests importing from `api.js` continue to pass without a single change.
 
@@ -252,8 +277,8 @@ In `public/web/ui.js`:
 
 The following invariants are strictly enforced:
 
-1. **Zero Behavioral Changes**:
-   - Routing calculation, profiles, fallback straight-line conditions, Nominatim viewbox bounding, and deduplication rules are character-for-character identical to existing runtime.
+1. **Cero cambios de comportamiento observable**:
+   - Mismas URLs, perfiles de transporte, validaciones, fallbacks por salto, normalizaciones geográficas, errores y valores de retorno que el runtime actual.
 2. **Layering Rule**:
    - `Domain` has ZERO external dependencies.
    - `Application` depends ONLY on `Domain`.
