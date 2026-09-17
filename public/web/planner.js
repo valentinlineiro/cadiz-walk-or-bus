@@ -1,18 +1,23 @@
 import { haversineMeters } from './topology.js';
+import {
+  WALK_METERS_PER_MINUTE,
+  BUS_METERS_PER_MINUTE,
+  DEFAULT_PLANNING_POLICY,
+  DEFAULT_DIVERSITY_THRESHOLDS,
+} from './constants.js';
+import {
+  createWalkIdentity,
+  createBusIdentity,
+  parseIdentity,
+  isSameIdentity,
+} from './identity.js';
 
-const WALK_METERS_PER_MINUTE = 80;
-const BUS_METERS_PER_MINUTE = 250;
-
-export const DEFAULT_PLANNING_POLICY = {
-  maxCandidates: 3,
-  maxAlternatives: 2,
-  similarityMaxDeltaMinutes: 5,
-};
+export { DEFAULT_PLANNING_POLICY };
 
 export function createWalkCandidate({ walkMinutes, origin, destination }) {
   const mins = Math.max(0, Math.round(walkMinutes ?? 0));
   return {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: mins,
     dataQuality: 'live',
@@ -53,7 +58,7 @@ export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolve
     const lineStr = String(arr.line ?? '');
 
     candidates.push({
-      identity: `bus:${lineStr}:${stopId}:${alightId}`,
+      identity: createBusIdentity(lineStr, stopId, alightId),
       mode: 'bus',
       estimatedMinutes: totalEstimated,
       dataQuality: arr.minutes != null ? 'live' : 'estimated',
@@ -80,10 +85,10 @@ export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolve
 export function isStructurallyDiverse(
   candidate,
   hero,
-  thresholds = { accessWalkMinutes: 3, alightDistanceMeters: 250 },
+  thresholds = DEFAULT_DIVERSITY_THRESHOLDS,
 ) {
   if (!candidate || !hero) return false;
-  if (candidate.identity === hero.identity) return false;
+  if (isSameIdentity(candidate.identity, hero.identity)) return false;
 
   // 1. Modal diversity
   if (candidate.mode !== hero.mode) {
@@ -92,8 +97,10 @@ export function isStructurallyDiverse(
 
   // 2. Line diversity (for bus)
   if (candidate.mode === 'bus' && hero.mode === 'bus') {
-    const candLine = candidate.metadata?.line ?? (candidate.identity.startsWith('bus:') ? candidate.identity.split(':')[1] : null);
-    const heroLine = hero.metadata?.line ?? (hero.identity.startsWith('bus:') ? hero.identity.split(':')[1] : null);
+    const candParts = parseIdentity(candidate.identity);
+    const heroParts = parseIdentity(hero.identity);
+    const candLine = candidate.metadata?.line ?? (candParts.mode === 'bus' ? candParts.line : null);
+    const heroLine = hero.metadata?.line ?? (heroParts.mode === 'bus' ? heroParts.line : null);
 
     if (candLine && heroLine && candLine !== heroLine) {
       return true;

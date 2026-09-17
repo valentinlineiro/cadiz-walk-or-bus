@@ -18,7 +18,6 @@ import {
   renderDecisionWithAlternatives,
 } from './ui.js';
 import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations, classifyDivergence } from './journey-log.js';
-
 import { findAlightStop } from './topology.js';
 import {
   DEFAULT_PLANNING_POLICY,
@@ -30,8 +29,60 @@ import {
   isStructurallyDiverse,
   filterDiverseAlternatives,
 } from './planner.js';
+import {
+  WALK_METERS_PER_MINUTE,
+  BUS_METERS_PER_MINUTE,
+  DEFAULT_PLANNING_POLICY as DOMAIN_PLANNING_POLICY,
+  DEFAULT_DIVERSITY_THRESHOLDS,
+} from './constants.js';
+import {
+  createWalkIdentity,
+  createBusIdentity,
+  parseIdentity,
+  isSameIdentity,
+} from './identity.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
+
+test('domain constants: values match urban transit kinematics and planning defaults', () => {
+  assert.equal(WALK_METERS_PER_MINUTE, 80);
+  assert.equal(BUS_METERS_PER_MINUTE, 250);
+  assert.deepEqual(DOMAIN_PLANNING_POLICY, {
+    maxCandidates: 3,
+    maxAlternatives: 2,
+    similarityMaxDeltaMinutes: 5,
+  });
+  assert.deepEqual(DEFAULT_DIVERSITY_THRESHOLDS, {
+    accessWalkMinutes: 3,
+    alightDistanceMeters: 250,
+  });
+});
+
+test('domain identity: creates, parses, and compares JourneyIdentity value objects', () => {
+  assert.equal(createWalkIdentity(), 'walk:direct');
+  assert.equal(createBusIdentity('1', '1106', '1204'), 'bus:1:1106:1204');
+  assert.equal(createBusIdentity(2, 100, 200), 'bus:2:100:200');
+
+  assert.deepEqual(parseIdentity('walk:direct'), { mode: 'walk', variant: 'direct' });
+  assert.deepEqual(parseIdentity('walk:scenic'), { mode: 'walk', variant: 'direct' });
+
+  assert.deepEqual(parseIdentity('bus:1:1106:1204'), {
+    mode: 'bus',
+    line: '1',
+    boardingStopId: '1106',
+    alightStopId: '1204',
+  });
+
+  assert.deepEqual(parseIdentity(null), { mode: 'unknown', raw: '' });
+  assert.deepEqual(parseIdentity(''), { mode: 'unknown', raw: '' });
+  assert.deepEqual(parseIdentity('custom:route'), { mode: 'unknown', raw: 'custom:route' });
+
+  assert.equal(isSameIdentity('walk:direct', 'walk:direct'), true);
+  assert.equal(isSameIdentity('bus:1:1106:1204', 'bus:1:1106:1204'), true);
+  assert.equal(isSameIdentity('bus:1:1106:1204', 'bus:2:1106:1204'), false);
+  assert.equal(isSameIdentity(null, 'walk:direct'), false);
+  assert.equal(isSameIdentity('walk:direct', null), false);
+});
 
 test('decide prefers bus only when strictly faster', () => {
   const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
