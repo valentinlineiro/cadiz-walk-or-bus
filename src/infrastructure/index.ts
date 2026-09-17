@@ -1,1 +1,1 @@
-// Infrastructure adapters barrel — will export adapters as implemented in subsequent tasks
+export { OsrmRoutingAdapter } from './routing/OsrmRoutingAdapter.js';
