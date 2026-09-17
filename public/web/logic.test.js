@@ -871,6 +871,34 @@ test('journey-log: appendEntry preserves and updates structured choice', () => {
   assert.equal(log[0].choice.alightStopId, '1204');
   assert.equal(log[0].choice.deltaMinutes, 1);
   assert.equal(log[0].choice.divergenceType, 'access');
+
+  // Step 3: promotion with negative deltaMinutes preserves negative value without clamping to 0
+  appendEntry(
+    {
+      id: 'e1-promote-faster',
+      timestamp: t0 + 40000,
+      destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
+      recommendation: {
+        identity: 'bus:1:1106:1204',
+        kind: 'bus',
+        busLine: '1',
+        totalMinutes: 14,
+      },
+      choice: {
+        identity: 'bus:1:1105:1204',
+        mode: 'bus',
+        busLine: '1',
+        totalMinutes: 12,
+        deltaMinutes: -2,
+        divergenceType: 'access',
+      },
+    },
+    mockStorage,
+  );
+
+  log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].choice.deltaMinutes, -2);
 });
 
 test('journey-log: getRecentDestinations groups by destination and ranks by recency desc', () => {

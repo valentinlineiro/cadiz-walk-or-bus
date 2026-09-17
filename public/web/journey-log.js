@@ -99,7 +99,7 @@ function normalizeEntryOnRead(item) {
       boardingStopId: choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts[2] || null),
       alightStopId: choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts[3] || null),
       totalMinutes: Number(choice.totalMinutes) || 0,
-      deltaMinutes: Number(choice.deltaMinutes) || 0,
+      deltaMinutes: Number.isFinite(Number(choice.deltaMinutes)) ? Number(choice.deltaMinutes) : 0,
       divergenceType: choice.divergenceType || 'none',
     };
   }
@@ -188,7 +188,7 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
       boardingStopId: entry.choice.boardingStopId != null ? String(entry.choice.boardingStopId) : (parts[2] || null),
       alightStopId: entry.choice.alightStopId != null ? String(entry.choice.alightStopId) : (parts[3] || null),
       totalMinutes: Number(entry.choice.totalMinutes) || 0,
-      deltaMinutes: Number(entry.choice.deltaMinutes) || 0,
+      deltaMinutes: Number.isFinite(Number(entry.choice.deltaMinutes)) ? Number(entry.choice.deltaMinutes) : 0,
       divergenceType: entry.choice.divergenceType || 'none',
     };
   } else if (typeof entry.choice === 'string') {

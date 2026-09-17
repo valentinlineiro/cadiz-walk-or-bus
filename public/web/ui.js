@@ -759,7 +759,7 @@ async function routeToDestination(dest) {
     if (destCoords && destLabel && winningHero) {
       const promotedTotal = promoted.exactJourney?.totalMinutes ?? promoted.estimatedMinutes;
       const heroTotal = winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes;
-      const deltaMinutes = Math.max(0, promotedTotal - heroTotal);
+      const deltaMinutes = promotedTotal - heroTotal;
       const divergenceType = classifyDivergence(promoted, winningHero);
 
       const winningBoardingStopId = winningHero.mode === 'bus'
