@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.js';
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
+import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
 
 test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
   const fakeFetch = async (url) => {
@@ -191,3 +192,69 @@ test('MunicipalTransitAdapter: getArrivals returns arrivals array or empty list 
   const empty = await failAdapter.getArrivals('1106');
   assert.deepEqual(empty, []);
 });
+
+test('NominatimGeocodingAdapter: search formats query with viewbox and normalizes results', async () => {
+  let calledUrl = '';
+  const fakeFetch = async (url) => {
+    calledUrl = url;
+    return {
+      ok: true,
+      json: async () => [
+        {
+          name: 'Plaza Mina',
+          display_name: 'Plaza Mina, San Antonio, Cádiz, Andalucía, España',
+          lat: '36.5350',
+          lon: '-6.2970',
+        },
+      ],
+    };
+  };
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch);
+  const results = await adapter.search('Plaza Mina', 3);
+
+  assert.ok(calledUrl.includes('nominatim.openstreetmap.org/search'));
+  assert.ok(calledUrl.includes('viewbox=-6.35,36.60,-6.20,36.40'));
+  assert.ok(calledUrl.includes('bounded=1'));
+  assert.ok(calledUrl.includes('limit=3'));
+  assert.equal(results.length, 1);
+  assert.deepEqual(results[0], {
+    label: 'Plaza Mina',
+    sub: 'San Antonio, Cádiz',
+    lat: 36.535,
+    lon: -6.297,
+  });
+});
+
+test('NominatimGeocodingAdapter: geocode delegates to search limit 1 and returns single coordinate', async () => {
+  const fakeFetch = async () => ({
+    ok: true,
+    json: async () => [
+      {
+        name: 'Catedral de Cádiz',
+        display_name: 'Catedral de Cádiz, Plaza de la Catedral, Cádiz, España',
+        lat: '36.5289',
+        lon: '-6.2952',
+      },
+    ],
+  });
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch);
+  const result = await adapter.geocode('Catedral');
+
+  assert.deepEqual(result, {
+    lat: 36.5289,
+    lon: -6.2952,
+    name: 'Catedral de Cádiz',
+  });
+});
+
+test('NominatimGeocodingAdapter: returns empty array or null on network error', async () => {
+  const failAdapter = new NominatimGeocodingAdapter(async () => { throw new Error('offline'); });
+  const searchResults = await failAdapter.search('Plaza');
+  assert.deepEqual(searchResults, []);
+
+  const geocodeResult = await failAdapter.geocode('Plaza');
+  assert.equal(geocodeResult, null);
+});
+
