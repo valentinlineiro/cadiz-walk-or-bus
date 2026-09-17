@@ -8,6 +8,7 @@ import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorit
 import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
+import { appendEntry, getTopDestinations } from './journey-log.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -328,6 +329,7 @@ async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
   ]);
 
   updateFavToggle();
+  return v;
 }
 
 function hideFavToggle() {
@@ -459,16 +461,23 @@ function renderQuickPicks() {
   const dropdown = document.getElementById('dropdown');
   if (!dropdown) return;
   let favorites = [];
-  let recents = [];
+  let destinations = [];
   try { favorites = getFavorites(); } catch { favorites = []; }
-  try { recents = getRecent().filter((r) => !isFavorite(r)); } catch { recents = []; }
-  if (favorites.length === 0 && recents.length === 0) {
+  try {
+    destinations = getTopDestinations(5).filter((d) => !isFavorite(d));
+    if (destinations.length === 0) {
+      destinations = getRecent().filter((r) => !isFavorite(r));
+    }
+  } catch {
+    destinations = [];
+  }
+  if (favorites.length === 0 && destinations.length === 0) {
     closeDropdown();
     return;
   }
   dropdown.replaceChildren();
   appendDropdownSection(dropdown, 'Habituales', favorites, ICON.starFill, { removable: true, badge: true });
-  appendDropdownSection(dropdown, 'Últimos', recents, ICON.history);
+  appendDropdownSection(dropdown, 'Mis destinos', destinations, ICON.history);
   dropdown.classList.remove('hidden');
 }
 
@@ -536,7 +545,23 @@ async function routeToDestination(dest) {
   const walkToStopRoute = f ? await getWalkToStopRoute(f) : null;
   if (id !== requestId) return;
 
-  await renderSheet(near, lastWalkRoute, walkToStopRoute);
+  const v = await renderSheet(near, lastWalkRoute, walkToStopRoute);
+  if (v && destCoords && destLabel) {
+    try {
+      appendEntry({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: Date.now(),
+        destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
+        recommendation: {
+          kind: v.kind,
+          walkMinutes: v.walkMinutes,
+          busLine: v.kind === 'bus' ? (v.bus?.line ?? null) : null,
+          totalMinutes: v.kind === 'bus' ? (v.bus?.total ?? null) : v.walkMinutes,
+        },
+        choice: null,
+      });
+    } catch {}
+  }
   setState('DONE', '');
 }
 
