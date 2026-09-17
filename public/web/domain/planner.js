@@ -121,10 +121,12 @@ export function formatAlternativeDiff(candidate, primary) {
     }
     const cMeta = candidate.metadata ?? {};
     const pMeta = primary?.metadata ?? {};
+    const waitMins = candidate.breakdown?.waitMinutes ?? candidate.estimate?.waitMinutes;
+    const walkMins = candidate.breakdown?.walkToStopMinutes ?? candidate.estimate?.walkToStopMinutes;
     // 1. Line difference
     if (cMeta.line && (!pMeta.line || String(cMeta.line) !== String(pMeta.line))) {
         const lineStr = String(cMeta.line).startsWith('L') ? cMeta.line : `Línea ${cMeta.line}`;
-        const wait = candidate.estimate?.waitMinutes != null ? ` · espera ${candidate.estimate.waitMinutes}′` : '';
+        const wait = waitMins != null ? ` · espera ${waitMins}′` : '';
         return `${lineStr}${wait}`;
     }
     // 2. Boarding stop difference
@@ -132,7 +134,7 @@ export function formatAlternativeDiff(candidate, primary) {
     const pBoard = String(pMeta.boardingStop?.stop ?? pMeta.boardingStop?.number ?? '');
     if (cBoard && cBoard !== pBoard) {
         const boardName = cMeta.boardingStop?.name ? `Desde ${cMeta.boardingStop.name}` : 'Desde otra parada';
-        const walk = candidate.estimate?.walkToStopMinutes != null ? ` (caminar ${candidate.estimate.walkToStopMinutes}′)` : '';
+        const walk = walkMins != null ? ` (caminar ${walkMins}′)` : '';
         return `${boardName}${walk}`;
     }
     // 3. Alighting stop difference
@@ -142,8 +144,8 @@ export function formatAlternativeDiff(candidate, primary) {
         return cMeta.alightStop?.name ? `Baja en ${cMeta.alightStop.name}` : 'Baja en otra parada';
     }
     // Default fallback
-    if (candidate.estimate?.waitMinutes != null) {
-        return `Espera ${candidate.estimate.waitMinutes}′`;
+    if (waitMins != null) {
+        return `Espera ${waitMins}′`;
     }
     return 'Opción alternativa';
 }

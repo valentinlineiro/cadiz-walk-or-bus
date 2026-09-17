@@ -18,6 +18,7 @@ import {
   formatAlternativeDiff,
   cheapWalkToStop,
 } from './planner.js';
+import { FindBestJourneysUseCase, RecordUserChoiceUseCase } from './application/index.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -33,6 +34,40 @@ let walkToStopCache = new Map();
 let lastNear = [];
 let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
+
+const routingBridge = {
+  routeWalking: (from, to) => walkRoute(fetch, from, to),
+  routeBus: (boarding, alight, path) => busRoute(fetch, path ?? [boarding, alight]),
+};
+
+const transitBridge = {
+  getStops: async () => {
+    if (!stops || stops.length === 0) {
+      stops = await getStops(fetch).catch(() => []);
+    }
+    return stops ?? [];
+  },
+  getLines: async () => {
+    if (!lines) {
+      lines = await getLines(fetch).catch(() => null);
+    }
+    return lines;
+  },
+  getArrivals: (stopId) => getArrivals(fetch, stopId),
+};
+
+const journeyLogBridge = {
+  append: (record) => appendEntry(record),
+};
+
+const findBestJourneysUseCase = new FindBestJourneysUseCase({
+  routing: routingBridge,
+  transit: transitBridge,
+});
+
+const recordUserChoiceUseCase = new RecordUserChoiceUseCase({
+  journeyLog: journeyLogBridge,
+});
 
 // Inline SVG glyphs — no emoji as primary iconography.
 const ICON = {
@@ -243,16 +278,15 @@ export function errorCardHTML(query) {
 
 export function buildAlternativeCardHTML(alt, primary) {
   const diff = formatAlternativeDiff(alt, primary);
-  const deltaMins = alt.exactJourney?.totalMinutes != null && primary?.exactJourney?.totalMinutes != null
-    ? alt.exactJourney.totalMinutes - primary.exactJourney.totalMinutes
-    : alt.estimatedMinutes - (primary?.estimatedMinutes ?? 0);
+  const altTotal = alt.totalMinutes ?? alt.exactJourney?.totalMinutes ?? alt.estimatedMinutes;
+  const priTotal = primary?.totalMinutes ?? primary?.exactJourney?.totalMinutes ?? primary?.estimatedMinutes ?? 0;
+  const deltaMins = altTotal - priTotal;
   const deltaStr = deltaMins > 0 ? `+${deltaMins}′` : `${deltaMins}′`;
-  const totalMins = alt.exactJourney?.totalMinutes ?? alt.estimatedMinutes;
   const modeIcon = alt.mode === 'bus' ? ICON.bus : ICON.walk;
   const modeTitle = alt.mode === 'bus'
     ? (alt.metadata?.line ? `Bus L${escapeHTML(alt.metadata.line)}` : 'Bus')
     : 'Andar';
-  const degradedMark = alt.exactJourney?.lastMileDegraded ? '~' : '';
+  const degradedMark = (alt.breakdown?.lastMileDegraded ?? alt.exactJourney?.lastMileDegraded) ? '~' : '';
 
   return `
     <button type="button" class="alternative-card" data-identity="${escapeHTML(serializeIdentity(alt.identity))}">
@@ -261,7 +295,7 @@ export function buildAlternativeCardHTML(alt, primary) {
         <div class="alt-desc">${escapeHTML(diff)}</div>
       </div>
       <div class="alt-right">
-        <div class="alt-time">${degradedMark}${totalMins}′</div>
+        <div class="alt-time">${degradedMark}${altTotal}′</div>
         <div class="alt-delta">${deltaStr}</div>
       </div>
     </button>
@@ -271,7 +305,7 @@ export function buildAlternativeCardHTML(alt, primary) {
 export function heroCardHTML(cand) {
   if (!cand) return '';
   if (cand.mode === 'bus') {
-    const totalMins = cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
+    const totalMins = cand.totalMinutes ?? cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
     const line = cand.metadata?.line ?? '';
     const alightName = cand.metadata?.alightStop?.name;
     const destName = cand.metadata?.destination;
@@ -279,11 +313,11 @@ export function heroCardHTML(cand) {
       ? `L${escapeHTML(line)} · Bájate en ${escapeHTML(alightName)}`
       : (destName ? `L${escapeHTML(line)} · ${escapeHTML(destName)}` : `L${escapeHTML(line)}`);
 
-    const walkToStop = cand.exactJourney?.walkToStopRoute?.minutes ?? cand.estimate?.walkToStopMinutes ?? '?';
-    const waitMins = cand.estimate?.waitMinutes ?? 0;
-    const rideMins = cand.estimate?.rideMinutes ?? 0;
-    const lastMileMins = cand.exactJourney?.lastMileMinutes ?? cand.estimate?.lastMileMinutes;
-    const lastMileDegraded = cand.exactJourney?.lastMileDegraded ?? false;
+    const walkToStop = cand.breakdown?.walkToStopMinutes ?? cand.exactJourney?.walkToStopRoute?.minutes ?? cand.estimate?.walkToStopMinutes ?? '?';
+    const waitMins = cand.breakdown?.waitMinutes ?? cand.estimate?.waitMinutes ?? 0;
+    const rideMins = cand.breakdown?.rideMinutes ?? cand.estimate?.rideMinutes ?? 0;
+    const lastMileMins = cand.breakdown?.lastMileMinutes ?? cand.exactJourney?.lastMileMinutes ?? cand.estimate?.lastMileMinutes;
+    const lastMileDegraded = cand.breakdown?.lastMileDegraded ?? cand.exactJourney?.lastMileDegraded ?? false;
     const lastMileLabel = lastMileMins == null ? '?' : `${lastMileDegraded ? '~' : ''}${lastMileMins}`;
 
     return `
@@ -301,7 +335,7 @@ export function heroCardHTML(cand) {
     `;
   }
 
-  const totalMins = cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
+  const totalMins = cand.totalMinutes ?? cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
   return `
     <div class="decision-card walk">
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
@@ -587,13 +621,19 @@ function applyCandidateToMap(cand) {
     focused = cand.metadata?.boardingStop?.stop ?? null;
     showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
     showAlightStop(cand.metadata?.alightStop ?? null);
-    showBusRoute(cand.exactJourney?.busRoute ?? cand.metadata?.path?.map((s) => [s.lat, s.lon]) ?? null);
+    const busGeometry = cand.routes?.busRoute?.coordinates
+      ?? cand.exactJourney?.busRoute
+      ?? cand.metadata?.path?.map((s) => [s.lat, s.lon])
+      ?? null;
+    showBusRoute(busGeometry);
     const segments = [];
-    if (cand.exactJourney?.walkToStopRoute?.coordinates?.length) {
-      segments.push(cand.exactJourney.walkToStopRoute.coordinates);
+    const walkToStopCoords = cand.routes?.walkToStopRoute?.coordinates ?? cand.exactJourney?.walkToStopRoute?.coordinates;
+    if (walkToStopCoords?.length) {
+      segments.push(walkToStopCoords);
     }
-    if (cand.exactJourney?.lastMileRoute?.coordinates?.length) {
-      segments.push(cand.exactJourney.lastMileRoute.coordinates);
+    const lastMileCoords = cand.routes?.lastMileRoute?.coordinates ?? cand.exactJourney?.lastMileRoute?.coordinates;
+    if (lastMileCoords?.length) {
+      segments.push(lastMileCoords);
     }
     showWalkRoute(segments);
     fitRoute([
@@ -607,7 +647,11 @@ function applyCandidateToMap(cand) {
     showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
     showAlightStop(null);
     showBusRoute(null);
-    showWalkRoute(cand.exactJourney?.walkRoute?.coordinates ?? lastWalkRoute?.coordinates ?? null);
+    const walkCoords = cand.routes?.walkRoute?.coordinates
+      ?? cand.exactJourney?.walkRoute?.coordinates
+      ?? lastWalkRoute?.coordinates
+      ?? null;
+    showWalkRoute(walkCoords);
     fitRoute([me, destCoords]);
   }
 }
@@ -628,120 +672,37 @@ async function routeToDestination(dest) {
   document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Calculando…';
 
-  // A stop's eligibility depends on the destination — a manual pin pick or
-  // auto-focus from a previous search must not carry over to a new one.
   focused = null;
   showDestination(dest.lat, dest.lon, dest.label);
   setState('GEOCODED');
 
-  let routeRes;
+  let decision;
   try {
-    routeRes = await walkRoute(fetch, me, destCoords);
+    decision = await findBestJourneysUseCase.execute({
+      origin: me,
+      destination: { ...destCoords, label: destLabel },
+    });
   } catch {
     if (id === requestId) setState('FAILED', 'Sin ruta andando → Andar');
     return;
   }
   if (id !== requestId) return;
 
-  if (!routeRes || routeRes.minutes == null) {
+  if (!decision || !decision.hero) {
     setState('FAILED', 'Sin ruta andando → Andar');
     return;
   }
 
-  lastWalkRoute = routeRes;
+  lastWalkRoute = decision.hero.routes?.walkRoute ?? null;
   setState('ROUTED');
 
-  // 1. Generate walk candidate
-  const walkCandidate = createWalkCandidate({
-    walkMinutes: lastWalkRoute?.minutes,
-    origin: me,
-    destination: destCoords,
-  });
-  walkCandidate.exactJourney = {
-    totalMinutes: walkCandidate.estimatedMinutes,
-    walkRoute: lastWalkRoute,
-    lastMileMinutes: walkCandidate.estimatedMinutes,
-    lastMileDegraded: false,
-  };
-
-  // 2. Fetch arrivals for nearby pool and build bus candidates using cheap pre-ranking
-  const pool = nearbyDiverseStops(8);
-  arrivalsByStop = new Map();
-  await Promise.all(
-    pool.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
-  );
-  if (id !== requestId) return;
-
-  const allBusCandidates = [];
-  for (const s of pool) {
-    const arrivals = arrivalsByStop.get(s.stop) ?? [];
-    const walkToStopMinutes = cheapWalkToStop(me, s, walkToStopCache);
-    const resolveAlight = makeAlightResolver(s, destCoords);
-    const busCandidates = createBusCandidates({
-      arrivals,
-      stop: s,
-      destCoords,
-      walkToStopMinutes,
-      resolveAlight,
-    });
-    allBusCandidates.push(...busCandidates);
-  }
-
-  // 3. Mode-agnostic candidate selection
-  const { primary, alternatives } = selectCandidates([walkCandidate, ...allBusCandidates]);
-  const selected = primary ? [primary, ...alternatives] : [walkCandidate];
-
-  // 4. Exact OSRM routing concurrently ONLY for selected 1..3 candidates
-  await Promise.all(
-    selected.map(async (cand) => {
-      if (cand.mode === 'bus') {
-        const boardStop = cand.metadata?.boardingStop;
-        const alightStop = cand.metadata?.alightStop;
-
-        const [walkToStopRoute, lastMile, routedBus] = await Promise.all([
-          boardStop ? getWalkToStopRoute(boardStop) : Promise.resolve(null),
-          alightStop
-            ? walkRoute(fetch, { lat: alightStop.lat, lon: alightStop.lon }, destCoords).catch(() => null)
-            : Promise.resolve(null),
-          cand.metadata?.path?.length >= 2
-            ? busRoute(fetch, cand.metadata.path).catch(() => null)
-            : Promise.resolve(null),
-        ]);
-
-        const { lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, cand.metadata?.alightDistanceMeters ?? 0);
-        const walkToStopMinutes = walkToStopRoute?.minutes ?? cand.estimate.walkToStopMinutes;
-        const totalMinutes = walkToStopMinutes + cand.estimate.waitMinutes + cand.estimate.rideMinutes + lastMileMinutes;
-
-        if (lastMileDegraded) {
-          cand.dataQuality = 'degraded';
-        }
-
-        cand.exactJourney = {
-          totalMinutes,
-          walkToStopRoute,
-          busRoute: routedBus ?? cand.metadata?.path?.map((s) => [s.lat, s.lon]) ?? null,
-          lastMileRoute: lastMile,
-          lastMileMinutes,
-          lastMileDegraded,
-        };
-      }
-    })
-  );
-  if (id !== requestId) return;
-
-  // 5. Update estimatedMinutes with exact journey minutes and re-rank with selectCandidates
-  for (const cand of selected) {
-    if (cand.exactJourney && typeof cand.exactJourney.totalMinutes === 'number') {
-      cand.estimatedMinutes = cand.exactJourney.totalMinutes;
-    }
-  }
-  const { primary: exactPrimary, alternatives: exactAlternatives } = selectCandidates(selected);
-  const finalSelected = exactPrimary ? [exactPrimary, ...exactAlternatives] : selected;
+  const winningHero = decision.hero;
+  const candidatesForUI = [decision.hero, ...decision.alternatives.map((a) => a.journey)];
 
   // Boarding stops of final selected bus candidates for map pins
   const nearStops = [];
   const seenStops = new Set();
-  for (const c of finalSelected) {
+  for (const c of candidatesForUI) {
     if (c.mode === 'bus' && c.metadata?.boardingStop) {
       const sId = c.metadata.boardingStop.stop;
       if (!seenStops.has(sId)) {
@@ -752,54 +713,15 @@ async function routeToDestination(dest) {
   }
   lastNear = nearStops;
 
-  const winningHero = finalSelected[0];
-
   const onPromote = (promoted) => {
     applyCandidateToMap(promoted);
     if (destCoords && destLabel && winningHero) {
-      const promotedTotal = promoted.exactJourney?.totalMinutes ?? promoted.estimatedMinutes;
-      const heroTotal = winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes;
-      const deltaMinutes = promotedTotal - heroTotal;
-      const divergenceType = classifyDivergence(promoted, winningHero);
-
-      const winningBoardingStopId = winningHero.mode === 'bus'
-        ? String(winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.boardingStopId : '') ?? '')
-        : null;
-      const winningAlightStopId = winningHero.mode === 'bus'
-        ? String(winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.alightStopId : '') ?? '')
-        : null;
-
-      const promotedBoardingStopId = promoted.mode === 'bus'
-        ? String(promoted.metadata?.boardingStop?.stop ?? promoted.metadata?.boardingStop?.number ?? (promoted.identity?.mode === 'bus' ? promoted.identity.boardingStopId : '') ?? '')
-        : null;
-      const promotedAlightStopId = promoted.mode === 'bus'
-        ? String(promoted.metadata?.alightStop?.stop ?? promoted.metadata?.alightStop?.number ?? (promoted.identity?.mode === 'bus' ? promoted.identity.alightStopId : '') ?? '')
-        : null;
-
+      const chosenAlternative = decision.alternatives.find((a) => isSameIdentity(a.journey.identity, promoted.identity)) ?? null;
       try {
-        appendEntry({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          timestamp: Date.now(),
-          destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
-          recommendation: {
-            identity: serializeIdentity(winningHero.identity),
-            kind: winningHero.mode,
-            walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
-            busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
-            boardingStopId: winningBoardingStopId || null,
-            alightStopId: winningAlightStopId || null,
-            totalMinutes: heroTotal,
-          },
-          choice: {
-            identity: serializeIdentity(promoted.identity),
-            mode: promoted.mode,
-            busLine: promoted.mode === 'bus' ? (promoted.metadata?.line ?? null) : null,
-            boardingStopId: promotedBoardingStopId || null,
-            alightStopId: promotedAlightStopId || null,
-            totalMinutes: promotedTotal,
-            deltaMinutes,
-            divergenceType,
-          },
+        recordUserChoiceUseCase.execute({
+          destination: { ...destCoords, label: destLabel },
+          recommendation: winningHero,
+          choice: chosenAlternative,
         });
       } catch {}
     }
@@ -807,44 +729,26 @@ async function routeToDestination(dest) {
   };
 
   const promote = (cand) => {
-    const idx = finalSelected.findIndex((c) => isSameIdentity(c.identity, cand.identity));
+    const idx = candidatesForUI.findIndex((c) => isSameIdentity(c.identity, cand.identity));
     if (idx !== -1) {
-      renderDecisionWithAlternatives(finalSelected, idx, onPromote);
-      onPromote(finalSelected[idx]);
+      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote);
+      onPromote(candidatesForUI[idx]);
     }
   };
 
   currentPlanningSession = {
-    selected: finalSelected,
+    selected: candidatesForUI,
     onPromote: promote,
   };
 
-  // 6. Render Hero primary and alternatives
-  renderDecisionWithAlternatives(finalSelected, 0, onPromote);
-  applyCandidateToMap(finalSelected[0]);
+  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote);
+  applyCandidateToMap(winningHero);
 
   if (winningHero && destCoords && destLabel) {
-    const winningBoardingStopId = winningHero.mode === 'bus'
-      ? String(winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.boardingStopId : '') ?? '')
-      : null;
-    const winningAlightStopId = winningHero.mode === 'bus'
-      ? String(winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.alightStopId : '') ?? '')
-      : null;
-
     try {
-      appendEntry({
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        timestamp: Date.now(),
-        destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
-        recommendation: {
-          identity: serializeIdentity(winningHero.identity),
-          kind: winningHero.mode,
-          walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
-          busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
-          boardingStopId: winningBoardingStopId || null,
-          alightStopId: winningAlightStopId || null,
-          totalMinutes: winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes,
-        },
+      recordUserChoiceUseCase.execute({
+        destination: { ...destCoords, label: destLabel },
+        recommendation: winningHero,
         choice: null,
       });
     } catch {}
