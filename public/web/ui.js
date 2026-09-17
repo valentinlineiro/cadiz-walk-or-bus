@@ -1,4 +1,4 @@
-import { nearestStops } from './geo.js';
+import { nearestStops, isInCadiz } from './geo.js';
 import { verdict, filterCandidates } from './decision.js';
 import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRoute } from './api.js';
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
@@ -182,7 +182,9 @@ async function loadNearby() {
 // itself answers "bus or walk", without touching the current search state
 // (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
 async function quickVerdictFor(dest) {
+  if (!isInCadiz(dest.lat, dest.lon)) return null;
   if (!me || stops.length === 0) return null;
+  if (!isInCadiz(me.lat, me.lon)) return null; // origin guard: user outside Cádiz
   const walkRes = await walkRoute(fetch, me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
   const walkTotal = walkRes?.minutes ?? null;
   if (walkTotal == null) return null;
@@ -492,6 +494,11 @@ async function selectDestination(dest) {
 
 async function routeToDestination(dest) {
   if (!me) return;
+  if (!isInCadiz(dest.lat, dest.lon)) {
+    console.warn('[D2] destination outside Cádiz bbox — aborting route', dest);
+    return;
+  }
+  if (!isInCadiz(me.lat, me.lon)) return; // origin guard: user outside Cádiz
   const id = ++requestId;
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
@@ -817,7 +824,21 @@ function locate() {
       settled = true;
       clearTimeout(autoFallbackId);
       skipBtn?.classList.add('hidden');
-      me = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+      const { latitude, longitude } = pos.coords;
+      if (!isInCadiz(latitude, longitude)) {
+        me = { lat: latitude, lon: longitude };
+        setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
+        showMe(me.lat, me.lon);
+        Promise.all([getStops(fetch), getLines(fetch)])
+          .then(([s, l]) => {
+            stops = s;
+            lines = l;
+            setSheetState('IDLE');
+          })
+          .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
+        return;
+      }
+      me = { lat: latitude, lon: longitude };
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
       try {
