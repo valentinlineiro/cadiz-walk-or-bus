@@ -16,6 +16,8 @@ import {
   createWalkCandidate,
   createBusCandidates,
   selectCandidates,
+  formatAlternativeDiff,
+  cheapWalkToStop,
 } from './planner.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
@@ -877,4 +879,75 @@ test('planner: selectCandidates respects custom policy overrides', () => {
   assert.equal(resLimit.alternatives[0].identity, 'bus:2');
 });
 
+test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
+  const primary = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
 
+  // 1. Line differs
+  const diffLine = {
+    identity: 'bus:2:1106:1204',
+    mode: 'bus',
+    estimate: { waitMinutes: 3 },
+    metadata: {
+      line: '2',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+  assert.equal(formatAlternativeDiff(diffLine, primary), 'Línea 2 · espera 3′');
+
+  // 2. Boarding stop differs (same line)
+  const diffBoard = {
+    identity: 'bus:1:1121:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 4 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1121', name: 'San Felipe' },
+      alightStop: { stop: '1204', name: 'Plaza Mina' },
+    },
+  };
+  assert.equal(formatAlternativeDiff(diffBoard, primary), 'Desde San Felipe (caminar 4′)');
+
+  // 3. Alighting stop differs
+  const diffAlight = {
+    identity: 'bus:1:1106:1208',
+    mode: 'bus',
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106', name: 'Santa María del Mar' },
+      alightStop: { stop: '1208', name: 'Audiencia' },
+    },
+  };
+  assert.equal(formatAlternativeDiff(diffAlight, primary), 'Baja en Audiencia');
+
+  // 4. Walk alternative
+  const walkAlt = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    metadata: {},
+  };
+  assert.equal(formatAlternativeDiff(walkAlt, primary), 'Ruta directa a pie');
+});
+
+test('planner: cheapWalkToStop uses walkToStopCache first, haversine/80 as fallback', () => {
+  const cache = new Map();
+  cache.set('1106', { minutes: 5 });
+
+  const me = { lat: 36.52, lon: -6.28 };
+  const cachedStop = { stop: '1106', lat: 36.522, lon: -6.282 };
+  // Hit: returns cached 5m
+  assert.equal(cheapWalkToStop(me, cachedStop, cache), 5);
+
+  // Miss: uses haversine / 80
+  const uncachedStop = { stop: '9999', lat: 36.525, lon: -6.28 };
+  const est = cheapWalkToStop(me, uncachedStop, cache);
+  assert.ok(typeof est === 'number' && est > 0);
+});

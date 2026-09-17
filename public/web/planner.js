@@ -1,3 +1,5 @@
+import { haversineMeters } from './topology.js';
+
 const WALK_METERS_PER_MINUTE = 80;
 const BUS_METERS_PER_MINUTE = 250;
 
@@ -112,4 +114,56 @@ export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
   }
 
   return { primary, alternatives };
+}
+
+export function cheapWalkToStop(me, stop, walkToStopCache) {
+  if (!me || !stop) return 0;
+  const stopId = String(stop.stop ?? stop.number ?? '');
+  if (walkToStopCache && walkToStopCache.has(stopId)) {
+    const cached = walkToStopCache.get(stopId);
+    if (cached && typeof cached.minutes === 'number') {
+      return cached.minutes;
+    }
+  }
+  const distMeters = haversineMeters(me.lat, me.lon, stop.lat, stop.lon);
+  return Math.max(0, Math.round(distMeters / WALK_METERS_PER_MINUTE));
+}
+
+export function formatAlternativeDiff(candidate, primary) {
+  if (!candidate) return '';
+  if (candidate.mode === 'walk') {
+    return 'Ruta directa a pie';
+  }
+
+  const cMeta = candidate.metadata ?? {};
+  const pMeta = primary?.metadata ?? {};
+
+  // 1. Line difference
+  if (cMeta.line && (!pMeta.line || String(cMeta.line) !== String(pMeta.line))) {
+    const lineStr = String(cMeta.line).startsWith('L') ? cMeta.line : `Línea ${cMeta.line}`;
+    const wait = candidate.estimate?.waitMinutes != null ? ` · espera ${candidate.estimate.waitMinutes}′` : '';
+    return `${lineStr}${wait}`;
+  }
+
+  // 2. Boarding stop difference
+  const cBoard = String(cMeta.boardingStop?.stop ?? cMeta.boardingStop?.number ?? '');
+  const pBoard = String(pMeta.boardingStop?.stop ?? pMeta.boardingStop?.number ?? '');
+  if (cBoard && cBoard !== pBoard) {
+    const boardName = cMeta.boardingStop?.name ? `Desde ${cMeta.boardingStop.name}` : 'Desde otra parada';
+    const walk = candidate.estimate?.walkToStopMinutes != null ? ` (caminar ${candidate.estimate.walkToStopMinutes}′)` : '';
+    return `${boardName}${walk}`;
+  }
+
+  // 3. Alighting stop difference
+  const cAlight = String(cMeta.alightStop?.stop ?? cMeta.alightStop?.number ?? '');
+  const pAlight = String(pMeta.alightStop?.stop ?? pMeta.alightStop?.number ?? '');
+  if (cAlight && cAlight !== pAlight) {
+    return cMeta.alightStop?.name ? `Baja en ${cMeta.alightStop.name}` : 'Baja en otra parada';
+  }
+
+  // Default fallback
+  if (candidate.estimate?.waitMinutes != null) {
+    return `Espera ${candidate.estimate.waitMinutes}′`;
+  }
+  return 'Opción alternativa';
 }
