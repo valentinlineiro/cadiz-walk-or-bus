@@ -187,7 +187,7 @@ test('isInCadiz returns true on bbox boundary (NE corner)', () => {
   assert.equal(isInCadiz(36.60, -6.20), true);
 });
 
-test('isInCadiz returns false one meter north of bbox', () => {
+test('isInCadiz returns false just north of bbox', () => {
   // 36.601 is just outside the northern edge
   assert.equal(isInCadiz(36.601, -6.2885), false);
 });

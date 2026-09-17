@@ -1,6 +1,6 @@
 import { haversineMeters } from './topology.js';
+import { CADIZ_VIEWBOX } from './geo.js';
 
-const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
 
 export async function getStops(fetchImpl) {
   const r = await fetchImpl('/stops');

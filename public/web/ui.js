@@ -182,6 +182,7 @@ async function loadNearby() {
 // itself answers "bus or walk", without touching the current search state
 // (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
 async function quickVerdictFor(dest) {
+  if (!isInCadiz(dest.lat, dest.lon)) return null;
   if (!me || stops.length === 0) return null;
   const walkRes = await walkRoute(fetch, me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
   const walkTotal = walkRes?.minutes ?? null;
