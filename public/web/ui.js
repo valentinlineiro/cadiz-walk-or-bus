@@ -8,7 +8,7 @@ import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorit
 import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
-import { appendEntry, getRecentDestinations } from './journey-log.js';
+import { appendEntry, getRecentDestinations, classifyDivergence } from './journey-log.js';
 import {
   createWalkCandidate,
   createBusCandidates,
@@ -349,6 +349,16 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
           }
         });
       });
+      if (typeof decision.querySelector === 'function') {
+        const heroEl = decision.querySelector('.decision-card');
+        if (heroEl && typeof heroEl.addEventListener === 'function') {
+          heroEl.addEventListener('click', () => {
+            if (typeof onPromote === 'function' && selectedCandidates[activeIndex]) {
+              onPromote(selectedCandidates[activeIndex], activeIndex);
+            }
+          });
+        }
+      }
     }
   }
   return html;
@@ -742,21 +752,36 @@ async function routeToDestination(dest) {
   }
   lastNear = nearStops;
 
+  const winningHero = finalSelected[0];
+
   const onPromote = (promoted) => {
     applyCandidateToMap(promoted);
-    if (destCoords && destLabel) {
+    if (destCoords && destLabel && winningHero) {
+      const promotedTotal = promoted.exactJourney?.totalMinutes ?? promoted.estimatedMinutes;
+      const heroTotal = winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes;
+      const deltaMinutes = Math.max(0, promotedTotal - heroTotal);
+      const divergenceType = classifyDivergence(promoted, winningHero);
+
       try {
         appendEntry({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           timestamp: Date.now(),
           destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
           recommendation: {
-            kind: promoted.mode,
+            identity: winningHero.identity,
+            kind: winningHero.mode,
             walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
-            busLine: promoted.mode === 'bus' ? (promoted.metadata?.line ?? null) : null,
-            totalMinutes: promoted.exactJourney?.totalMinutes ?? promoted.estimatedMinutes,
+            busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
+            totalMinutes: heroTotal,
           },
-          choice: promoted.identity,
+          choice: {
+            identity: promoted.identity,
+            mode: promoted.mode,
+            busLine: promoted.mode === 'bus' ? (promoted.metadata?.line ?? null) : null,
+            totalMinutes: promotedTotal,
+            deltaMinutes,
+            divergenceType,
+          },
         });
       } catch {}
     }
@@ -780,17 +805,18 @@ async function routeToDestination(dest) {
   renderDecisionWithAlternatives(finalSelected, 0, onPromote);
   applyCandidateToMap(finalSelected[0]);
 
-  if (finalSelected[0] && destCoords && destLabel) {
+  if (winningHero && destCoords && destLabel) {
     try {
       appendEntry({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: Date.now(),
         destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
         recommendation: {
-          kind: finalSelected[0].mode,
+          identity: winningHero.identity,
+          kind: winningHero.mode,
           walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
-          busLine: finalSelected[0].mode === 'bus' ? (finalSelected[0].metadata?.line ?? null) : null,
-          totalMinutes: finalSelected[0].exactJourney?.totalMinutes ?? finalSelected[0].estimatedMinutes,
+          busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
+          totalMinutes: winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes,
         },
         choice: null,
       });

@@ -1252,6 +1252,113 @@ test('planner: selectCandidates ensures diversity among multiple admitted altern
   assert.equal(res.alternatives[1].identity, 'bus:2:1110:1206');
 });
 
+test('planner: candidate diverse from cheap hero becomes redundant against final exact hero and is pruned', () => {
+  // Cheap phase:
+  // Provisional Hero: Bus L2 (12m)
+  // Candidate B: Bus L1 at Stop 1106 (14m, walk 2m, alight 1204)
+  // Candidate C: Bus L1 at Stop 1107 (15m, walk 3m, alight 1204) - adjacent stop, 1m walk diff
+  const busL2 = {
+    identity: 'bus:2:2001:1205',
+    mode: 'bus',
+    estimatedMinutes: 12,
+    metadata: { line: '2' },
+  };
+  const busL1_A = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    estimate: { walkToStopMinutes: 2 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+  const busL1_B = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // Against cheap hero (Bus L2), both L1 candidates are diverse by line (L1 vs L2)
+  assert.equal(isStructurallyDiverse(busL1_A, busL2), true);
+  assert.equal(isStructurallyDiverse(busL1_B, busL2), true);
+
+  // Exact routing re-ranking:
+  // Bus L1_A arrives sooner than estimated -> exact total 11m (becomes final Hero)
+  // Bus L2 has longer travel time -> exact total 16m
+  // Bus L1_B exact total remains 15m
+  busL1_A.exactJourney = { totalMinutes: 11, walkToStopMinutes: 2 };
+  busL1_A.estimatedMinutes = 11;
+
+  busL2.exactJourney = { totalMinutes: 16 };
+  busL2.estimatedMinutes = 16;
+
+  busL1_B.exactJourney = { totalMinutes: 15, walkToStopMinutes: 3 };
+  busL1_B.estimatedMinutes = 15;
+
+  // Final selection evaluated against final Hero (busL1_A):
+  const finalSelection = selectCandidates([busL1_A, busL2, busL1_B]);
+  assert.equal(finalSelection.primary.identity, 'bus:1:1106:1204'); // Final Hero
+
+  // busL1_B is redundant against final Hero (same line L1, adjacent stop |3-2|=1m < 3m) -> pruned!
+  // busL2 is diverse from final Hero (line 2 vs line 1, delta 16-11 = 5m <= 5m) -> admitted!
+  assert.equal(finalSelection.alternatives.length, 1);
+  assert.equal(finalSelection.alternatives[0].identity, 'bus:2:2001:1205');
+});
+
+test('ui: renderDecisionWithAlternatives wires hero card tap to onPromote with none divergence', () => {
+  // Mock DOM
+  const prevDoc = globalThis.document;
+  const heroCard = {
+    addEventListener(event, fn) {
+      this.onClick = fn;
+    },
+  };
+  const decisionEl = {
+    innerHTML: '',
+    className: '',
+    classList: {
+      remove(cls) { this[cls] = false; },
+      add(cls) { this[cls] = true; },
+    },
+    querySelectorAll(selector) {
+      return [];
+    },
+    querySelector(selector) {
+      if (selector === '.decision-card') {
+        return heroCard;
+      }
+      return null;
+    },
+  };
+
+  globalThis.document = {
+    getElementById(id) {
+      if (id === 'decision') return decisionEl;
+      return null;
+    },
+  };
+
+  let promotedItem = null;
+  const candidates = [
+    { identity: 'bus:1', mode: 'bus', estimatedMinutes: 12 },
+    { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 15 },
+  ];
+
+  renderDecisionWithAlternatives(candidates, 0, (cand, idx) => {
+    promotedItem = cand;
+  });
+
+  assert.equal(typeof heroCard.onClick, 'function');
+  heroCard.onClick();
+
+  assert.equal(promotedItem?.identity, 'bus:1');
+
+  // Verify classifyDivergence of hero against hero is 'none'
+  assert.equal(classifyDivergence(promotedItem, candidates[0]), 'none');
+
+  globalThis.document = prevDoc;
+});
+
 test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
   const primary = {
     identity: 'bus:1:1106:1204',
