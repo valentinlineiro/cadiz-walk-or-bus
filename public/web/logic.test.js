@@ -40,6 +40,7 @@ import {
   createBusIdentity,
   parseIdentity,
   isSameIdentity,
+  serializeIdentity,
 } from './identity.js';
 import { computeLastMile as domainComputeLastMile } from './last-mile.js';
 import {
@@ -64,12 +65,24 @@ test('domain constants: values match urban transit kinematics and planning defau
   });
 });
 
-test('domain identity: creates, parses, and compares JourneyIdentity value objects', () => {
-  assert.equal(createWalkIdentity(), 'walk:direct');
-  assert.equal(createBusIdentity('1', '1106', '1204'), 'bus:1:1106:1204');
-  assert.equal(createBusIdentity(2, 100, 200), 'bus:2:100:200');
+test('domain identity: JourneyIdentity is a structured Value Object', () => {
+  // Constructors return structured objects, not strings
+  const walk = createWalkIdentity();
+  assert.deepEqual(walk, { mode: 'walk', variant: 'direct' });
 
+  const bus = createBusIdentity('1', '1106', '1204');
+  assert.deepEqual(bus, { mode: 'bus', line: '1', boardingStopId: '1106', alightStopId: '1204' });
+
+  const busNumeric = createBusIdentity(2, 100, 200);
+  assert.deepEqual(busNumeric, { mode: 'bus', line: '2', boardingStopId: '100', alightStopId: '200' });
+
+  // serializeIdentity converts to infrastructure string form
+  assert.equal(serializeIdentity(walk), 'walk:direct');
+  assert.equal(serializeIdentity(bus), 'bus:1:1106:1204');
+
+  // parseIdentity returns VO object or null (no 'unknown' sentinel)
   assert.deepEqual(parseIdentity('walk:direct'), { mode: 'walk', variant: 'direct' });
+  // Legacy walk variants normalize to direct for backward compat
   assert.deepEqual(parseIdentity('walk:scenic'), { mode: 'walk', variant: 'direct' });
 
   assert.deepEqual(parseIdentity('bus:1:1106:1204'), {
@@ -79,15 +92,20 @@ test('domain identity: creates, parses, and compares JourneyIdentity value objec
     alightStopId: '1204',
   });
 
-  assert.deepEqual(parseIdentity(null), { mode: 'unknown', raw: '' });
-  assert.deepEqual(parseIdentity(''), { mode: 'unknown', raw: '' });
-  assert.deepEqual(parseIdentity('custom:route'), { mode: 'unknown', raw: 'custom:route' });
+  // Unknown / malformed returns null
+  assert.equal(parseIdentity(null), null);
+  assert.equal(parseIdentity(''), null);
+  assert.equal(parseIdentity('custom:route'), null);
+  assert.equal(parseIdentity('bus:1:only-two'), null);
 
-  assert.equal(isSameIdentity('walk:direct', 'walk:direct'), true);
-  assert.equal(isSameIdentity('bus:1:1106:1204', 'bus:1:1106:1204'), true);
-  assert.equal(isSameIdentity('bus:1:1106:1204', 'bus:2:1106:1204'), false);
-  assert.equal(isSameIdentity(null, 'walk:direct'), false);
-  assert.equal(isSameIdentity('walk:direct', null), false);
+  // isSameIdentity does structural comparison on VO objects
+  assert.equal(isSameIdentity(createWalkIdentity(), createWalkIdentity()), true);
+  assert.equal(isSameIdentity(createBusIdentity('1', '1106', '1204'), createBusIdentity('1', '1106', '1204')), true);
+  assert.equal(isSameIdentity(createBusIdentity('1', '1106', '1204'), createBusIdentity('2', '1106', '1204')), false);
+  assert.equal(isSameIdentity(null, createWalkIdentity()), false);
+  assert.equal(isSameIdentity(createWalkIdentity(), null), false);
+  // Cross-mode comparison
+  assert.equal(isSameIdentity(createWalkIdentity(), createBusIdentity('1', '10', '20')), false);
 });
 
 test('domain last-mile: computes routed and degraded last-mile durations with explicit flags', () => {
@@ -113,7 +131,7 @@ test('domain last-mile: computes routed and degraded last-mile durations with ex
 });
 
 test('domain diversity: pure rules classify divergence and filter diverse alternatives', () => {
-  // Modal divergence
+  // Modal divergence — classifyDivergence accepts serialized strings (persistence boundary)
   assert.equal(
     domainClassifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'walk', identity: 'walk:direct' }),
     'mode',
@@ -143,16 +161,17 @@ test('domain diversity: pure rules classify divergence and filter diverse altern
     'none',
   );
 
-  // Structural diversity filter with hero
-  const hero = { identity: 'bus:1:10:20', mode: 'bus', estimatedMinutes: 20, metadata: { line: '1' } };
-  const redundant = { identity: 'bus:1:10:20b', mode: 'bus', estimatedMinutes: 21, metadata: { line: '1' }, estimate: { walkToStopMinutes: 0 } };
-  const diverseLine = { identity: 'bus:2:10:20', mode: 'bus', estimatedMinutes: 22, metadata: { line: '2' } };
-  const diverseWalk = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 24 };
+  // Structural diversity filter — items use VO identities
+  const heroId = createBusIdentity('1', '10', '20');
+  const hero = { identity: heroId, mode: 'bus', estimatedMinutes: 20, metadata: { line: '1' } };
+  const redundant = { identity: createBusIdentity('1', '10', '20x'), mode: 'bus', estimatedMinutes: 21, metadata: { line: '1' }, estimate: { walkToStopMinutes: 0 } };
+  const diverseLine = { identity: createBusIdentity('2', '10', '20'), mode: 'bus', estimatedMinutes: 22, metadata: { line: '2' } };
+  const diverseWalk = { identity: createWalkIdentity(), mode: 'walk', estimatedMinutes: 24 };
 
   const admitted = domainFilterDiverseAlternatives([redundant, diverseLine, diverseWalk], hero);
   assert.equal(admitted.length, 2);
-  assert.equal(admitted[0].identity, 'bus:2:10:20');
-  assert.equal(admitted[1].identity, 'walk:direct');
+  assert.deepEqual(admitted[0].identity, createBusIdentity('2', '10', '20'));
+  assert.deepEqual(admitted[1].identity, createWalkIdentity());
 });
 
 test('domain models: conform to structured Decision, EvaluatedJourney, and Candidate contracts', () => {
@@ -174,6 +193,7 @@ test('domain models: conform to structured Decision, EvaluatedJourney, and Candi
     },
   };
 
+  // EvaluatedJourney has no back-reference to candidate
   const evaluated = {
     identity: candidate.identity,
     mode: candidate.mode,
@@ -192,7 +212,7 @@ test('domain models: conform to structured Decision, EvaluatedJourney, and Candi
       lastMileRoute: null,
     },
     metadata: candidate.metadata,
-    candidate,
+    // No 'candidate' field — one-way transformation
   };
 
   const alternative = {
@@ -224,7 +244,14 @@ test('domain models: conform to structured Decision, EvaluatedJourney, and Candi
   assert.equal(decision.alternatives.length, 1);
   assert.equal(decision.alternatives[0].divergenceType, 'mode');
   assert.equal(decision.alternatives[0].deltaMinutes, 4);
+  // identity is a VO
+  assert.equal(isSameIdentity(decision.hero.identity, createBusIdentity('1', '10', '20')), true);
+  assert.equal(isSameIdentity(decision.alternatives[0].journey.identity, createWalkIdentity()), true);
+  // No circular reference: evaluated.candidate is not present
+  assert.equal('candidate' in evaluated, false);
 });
+
+
 
 test('decide prefers bus only when strictly faster', () => {
   const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
@@ -1193,7 +1220,8 @@ test('planner: createWalkCandidate produces normalized candidate', () => {
     destination: { lat: 36.53, lon: -6.29, label: 'Plaza Mina' },
   });
   assert.equal(walk.mode, 'walk');
-  assert.equal(walk.identity, 'walk:direct');
+  assert.equal(isSameIdentity(walk.identity, createWalkIdentity()), true);
+  assert.equal(serializeIdentity(walk.identity), 'walk:direct');
   assert.equal(walk.estimatedMinutes, 18);
   assert.equal(walk.dataQuality, 'live');
   assert.deepEqual(walk.estimate, { walkToStopMinutes: 0, waitMinutes: 0, rideMinutes: 0, lastMileMinutes: 18 });
@@ -1201,74 +1229,74 @@ test('planner: createWalkCandidate produces normalized candidate', () => {
 
 test('planner: selectCandidates is mode-agnostic: selects minimum as primary and alternatives within similarity delta', () => {
   // Case 1: Bus is primary (14m), Walk (18m) and another Bus (16m) are alternatives within 5m
-  const c1 = { identity: 'bus:1:A:X', mode: 'bus', estimatedMinutes: 14 };
-  const c2 = { identity: 'bus:2:B:Y', mode: 'bus', estimatedMinutes: 16 };
-  const c3 = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 18 };
-  const c4 = { identity: 'bus:5:A:Z', mode: 'bus', estimatedMinutes: 22 }; // > 14 + 5 -> pruned
+  const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 14 };
+  const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 16 };
+  const c3 = { identity: createWalkIdentity(), mode: 'walk', estimatedMinutes: 18 };
+  const c4 = { identity: createBusIdentity('5', 'A', 'Z'), mode: 'bus', estimatedMinutes: 22 }; // > 14 + 5 -> pruned
 
   const res1 = selectCandidates([c4, c2, c3, c1]);
-  assert.equal(res1.primary.identity, 'bus:1:A:X');
+  assert.equal(isSameIdentity(res1.primary.identity, createBusIdentity('1', 'A', 'X')), true);
   assert.equal(res1.alternatives.length, 2);
-  assert.equal(res1.alternatives[0].identity, 'bus:2:B:Y'); // +2m
-  assert.equal(res1.alternatives[1].identity, 'walk:direct'); // +4m
+  assert.equal(isSameIdentity(res1.alternatives[0].identity, createBusIdentity('2', 'B', 'Y')), true); // +2m
+  assert.equal(isSameIdentity(res1.alternatives[1].identity, createWalkIdentity()), true); // +4m
 
   // Case 2: Walk is primary (15m), Bus (19m) is competitive alternative
-  const w1 = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 15 };
-  const b1 = { identity: 'bus:1:A:X', mode: 'bus', estimatedMinutes: 19 };
-  const b2 = { identity: 'bus:2:B:Y', mode: 'bus', estimatedMinutes: 23 }; // > 15 + 5 -> pruned
+  const w1 = { identity: createWalkIdentity(), mode: 'walk', estimatedMinutes: 15 };
+  const b1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 19 };
+  const b2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 23 }; // > 15 + 5 -> pruned
 
   const res2 = selectCandidates([b2, b1, w1]);
-  assert.equal(res2.primary.identity, 'walk:direct');
+  assert.equal(isSameIdentity(res2.primary.identity, createWalkIdentity()), true);
   assert.equal(res2.alternatives.length, 1);
-  assert.equal(res2.alternatives[0].identity, 'bus:1:A:X');
+  assert.equal(isSameIdentity(res2.alternatives[0].identity, createBusIdentity('1', 'A', 'X')), true);
 });
 
 test('planner: selectCandidates deduplicates identical structural identities, keeping the fastest', () => {
   // Two buses on same line, same boarding stop, same alight stop (e.g. 1st bus vs 2nd bus)
-  const early = { identity: 'bus:1:1106:1204', mode: 'bus', estimatedMinutes: 14 };
-  const later = { identity: 'bus:1:1106:1204', mode: 'bus', estimatedMinutes: 18 };
-  const other = { identity: 'bus:2:1106:1205', mode: 'bus', estimatedMinutes: 16 };
+  const early = { identity: createBusIdentity('1', '1106', '1204'), mode: 'bus', estimatedMinutes: 14 };
+  const later = { identity: createBusIdentity('1', '1106', '1204'), mode: 'bus', estimatedMinutes: 18 };
+  const other = { identity: createBusIdentity('2', '1106', '1205'), mode: 'bus', estimatedMinutes: 16 };
 
   const res = selectCandidates([later, early, other]);
-  assert.equal(res.primary.identity, 'bus:1:1106:1204');
+  assert.equal(isSameIdentity(res.primary.identity, createBusIdentity('1', '1106', '1204')), true);
   assert.equal(res.primary.estimatedMinutes, 14);
   assert.equal(res.alternatives.length, 1);
-  assert.equal(res.alternatives[0].identity, 'bus:2:1106:1205');
+  assert.equal(isSameIdentity(res.alternatives[0].identity, createBusIdentity('2', '1106', '1205')), true);
 });
 
 test('planner: selectCandidates respects custom policy overrides', () => {
-  const c1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 10 };
-  const c2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 13 };
-  const c3 = { identity: 'bus:3', mode: 'bus', estimatedMinutes: 14 };
+  const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 10 };
+  const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 13 };
+  const c3 = { identity: createBusIdentity('3', 'C', 'Z'), mode: 'bus', estimatedMinutes: 14 };
 
   // Custom policy: similarity max delta 2m (c2 and c3 pruned)
   const strictPolicy = { maxCandidates: 3, maxAlternatives: 2, similarityMaxDeltaMinutes: 2 };
   const res = selectCandidates([c1, c2, c3], strictPolicy);
-  assert.equal(res.primary.identity, 'bus:1');
+  assert.equal(isSameIdentity(res.primary.identity, createBusIdentity('1', 'A', 'X')), true);
   assert.equal(res.alternatives.length, 0);
 
   // Custom policy: maxAlternatives = 1
   const limitPolicy = { maxCandidates: 2, maxAlternatives: 1, similarityMaxDeltaMinutes: 5 };
   const resLimit = selectCandidates([c1, c2, c3], limitPolicy);
   assert.equal(resLimit.alternatives.length, 1);
-  assert.equal(resLimit.alternatives[0].identity, 'bus:2');
+  assert.equal(isSameIdentity(resLimit.alternatives[0].identity, createBusIdentity('2', 'B', 'Y')), true);
 });
 
 test('planner: selectCandidates enforces maxCandidates as a hard budget on total candidates', () => {
-  const c1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 10 };
-  const c2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 11 };
-  const c3 = { identity: 'bus:3', mode: 'bus', estimatedMinutes: 12 };
-  const c4 = { identity: 'bus:4', mode: 'bus', estimatedMinutes: 13 };
+  const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 10 };
+  const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 11 };
+  const c3 = { identity: createBusIdentity('3', 'C', 'Z'), mode: 'bus', estimatedMinutes: 12 };
+  const c4 = { identity: createBusIdentity('4', 'D', 'W'), mode: 'bus', estimatedMinutes: 13 };
 
   // maxCandidates = 2 with maxAlternatives = 5: allowed alternatives must be min(5, 2 - 1) = 1
   const res2 = selectCandidates([c1, c2, c3, c4], { maxCandidates: 2, maxAlternatives: 5, similarityMaxDeltaMinutes: 5 });
-  assert.equal(res2.primary.identity, 'bus:1');
+  assert.equal(isSameIdentity(res2.primary.identity, createBusIdentity('1', 'A', 'X')), true);
   assert.equal(res2.alternatives.length, 1);
-  assert.equal(res2.alternatives[0].identity, 'bus:2');
+  assert.equal(isSameIdentity(res2.alternatives[0].identity, createBusIdentity('2', 'B', 'Y')), true);
 
   // maxCandidates = 1 with maxAlternatives = 2: 0 alternatives
   const res1 = selectCandidates([c1, c2, c3], { maxCandidates: 1, maxAlternatives: 2, similarityMaxDeltaMinutes: 5 });
-  assert.equal(res1.primary.identity, 'bus:1');
+  assert.equal(isSameIdentity(res1.primary.identity, createBusIdentity('1', 'A', 'X')), true);
   assert.equal(res1.alternatives.length, 0);
 
   // maxCandidates = 0: null primary and empty alternatives
@@ -1280,12 +1308,12 @@ test('planner: selectCandidates enforces maxCandidates as a hard budget on total
 test('planner: two-stage selection re-ranks candidates after exact routing refinement', () => {
   // Stage 1 (cheap pre-ranking):
   // Bus L1 is estimated at 15m (primary), Bus L2 at 16m, Walk at 18m
-  const bus1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 15 };
-  const bus2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 16 };
-  const walk = { identity: 'walk', mode: 'walk', estimatedMinutes: 18 };
+  const bus1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 15 };
+  const bus2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 16 };
+  const walk = { identity: createWalkIdentity(), mode: 'walk', estimatedMinutes: 18 };
 
   const cheapSelection = selectCandidates([bus1, bus2, walk]);
-  assert.equal(cheapSelection.primary.identity, 'bus:1');
+  assert.equal(isSameIdentity(cheapSelection.primary.identity, createBusIdentity('1', 'A', 'X')), true);
   assert.equal(cheapSelection.alternatives.length, 2);
 
   // Stage 2 (exact OSRM refinement):
@@ -1303,20 +1331,20 @@ test('planner: two-stage selection re-ranks candidates after exact routing refin
 
   const exactSelection = selectCandidates([bus1, bus2, walk]);
   // Bus L2 is now the true fastest option (Hero)
-  assert.equal(exactSelection.primary.identity, 'bus:2');
+  assert.equal(isSameIdentity(exactSelection.primary.identity, createBusIdentity('2', 'B', 'Y')), true);
   assert.equal(exactSelection.primary.estimatedMinutes, 16);
 
   // Walk (+2m) and Bus L1 (+3m) are competitive alternatives within 5m
   assert.equal(exactSelection.alternatives.length, 2);
-  assert.equal(exactSelection.alternatives[0].identity, 'walk');
-  assert.equal(exactSelection.alternatives[1].identity, 'bus:1');
+  assert.equal(isSameIdentity(exactSelection.alternatives[0].identity, createWalkIdentity()), true);
+  assert.equal(isSameIdentity(exactSelection.alternatives[1].identity, createBusIdentity('1', 'A', 'X')), true);
 
   // If Bus L1 exact was 23m (> 16 + 5 = 21m), it is pruned from alternatives
   bus1.estimatedMinutes = 23;
   const prunedSelection = selectCandidates([bus1, bus2, walk]);
-  assert.equal(prunedSelection.primary.identity, 'bus:2');
+  assert.equal(isSameIdentity(prunedSelection.primary.identity, createBusIdentity('2', 'B', 'Y')), true);
   assert.equal(prunedSelection.alternatives.length, 1);
-  assert.equal(prunedSelection.alternatives[0].identity, 'walk');
+  assert.equal(isSameIdentity(prunedSelection.alternatives[0].identity, createWalkIdentity()), true);
 });
 
 test('planner: isStructurallyDiverse validates modal, line, and access diversity against Hero', () => {
@@ -1418,7 +1446,7 @@ test('planner: isStructurallyDiverse validates modal, line, and access diversity
 test('planner: selectCandidates filters out redundant same-line alternatives in favor of useful diversity', () => {
   // Hero is Bus L1 (14m)
   const hero = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 14,
     estimate: { walkToStopMinutes: 2 },
@@ -1427,7 +1455,7 @@ test('planner: selectCandidates filters out redundant same-line alternatives in 
 
   // c2: redundant marquee variant on line 1 (15m, 1m walk diff, same alight)
   const c2Redundant = {
-    identity: 'bus:1:1107:1204',
+    identity: createBusIdentity('1', '1107', '1204'),
     mode: 'bus',
     estimatedMinutes: 15,
     estimate: { walkToStopMinutes: 3 },
@@ -1436,7 +1464,7 @@ test('planner: selectCandidates filters out redundant same-line alternatives in 
 
   // c3: Walk alternative (17m)
   const c3Walk = {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: 17,
     estimate: { walkToStopMinutes: 0 },
@@ -1444,31 +1472,31 @@ test('planner: selectCandidates filters out redundant same-line alternatives in 
 
   // c4: Line 2 alternative (18m)
   const c4BusL2 = {
-    identity: 'bus:2:1106:1205',
+    identity: createBusIdentity('2', '1106', '1205'),
     mode: 'bus',
     estimatedMinutes: 18,
     metadata: { line: '2' },
   };
 
   const res = selectCandidates([hero, c2Redundant, c3Walk, c4BusL2]);
-  assert.equal(res.primary.identity, 'bus:1:1106:1204');
+  assert.equal(isSameIdentity(res.primary.identity, createBusIdentity('1', '1106', '1204')), true);
   assert.equal(res.alternatives.length, 2);
   // c2Redundant must be pruned because it's not diverse from hero (same line, adjacent stop)
-  assert.equal(res.alternatives[0].identity, 'walk:direct');
-  assert.equal(res.alternatives[1].identity, 'bus:2:1106:1205');
+  assert.equal(isSameIdentity(res.alternatives[0].identity, createWalkIdentity()), true);
+  assert.equal(isSameIdentity(res.alternatives[1].identity, createBusIdentity('2', '1106', '1205')), true);
 });
 
 test('planner: selectCandidates ensures diversity among multiple admitted alternatives', () => {
   // Hero is Walk (14m)
   const heroWalk = {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: 14,
   };
 
   // b1: Bus L1 at Stop A (15m)
   const b1 = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 15,
     estimate: { walkToStopMinutes: 2 },
@@ -1477,7 +1505,7 @@ test('planner: selectCandidates ensures diversity among multiple admitted altern
 
   // b2: Bus L1 at adjacent Stop B (16m) - redundant with b1!
   const b2Redundant = {
-    identity: 'bus:1:1107:1204',
+    identity: createBusIdentity('1', '1107', '1204'),
     mode: 'bus',
     estimatedMinutes: 16,
     estimate: { walkToStopMinutes: 3 },
@@ -1486,18 +1514,18 @@ test('planner: selectCandidates ensures diversity among multiple admitted altern
 
   // b3: Bus L2 at Stop C (17m) - diverse from both walk and L1
   const b3BusL2 = {
-    identity: 'bus:2:1110:1206',
+    identity: createBusIdentity('2', '1110', '1206'),
     mode: 'bus',
     estimatedMinutes: 17,
     metadata: { line: '2' },
   };
 
   const res = selectCandidates([heroWalk, b1, b2Redundant, b3BusL2]);
-  assert.equal(res.primary.identity, 'walk:direct');
+  assert.equal(isSameIdentity(res.primary.identity, createWalkIdentity()), true);
   assert.equal(res.alternatives.length, 2);
-  assert.equal(res.alternatives[0].identity, 'bus:1:1106:1204');
+  assert.equal(isSameIdentity(res.alternatives[0].identity, createBusIdentity('1', '1106', '1204')), true);
   // b2Redundant must not be admitted because it is structurally redundant with b1 (already admitted)
-  assert.equal(res.alternatives[1].identity, 'bus:2:1110:1206');
+  assert.equal(isSameIdentity(res.alternatives[1].identity, createBusIdentity('2', '1110', '1206')), true);
 });
 
 test('planner: candidate diverse from cheap hero becomes redundant against final exact hero and is pruned', () => {
@@ -1506,20 +1534,20 @@ test('planner: candidate diverse from cheap hero becomes redundant against final
   // Candidate B: Bus L1 at Stop 1106 (14m, walk 2m, alight 1204)
   // Candidate C: Bus L1 at Stop 1107 (15m, walk 3m, alight 1204) - adjacent stop, 1m walk diff
   const busL2 = {
-    identity: 'bus:2:2001:1205',
+    identity: createBusIdentity('2', '2001', '1205'),
     mode: 'bus',
     estimatedMinutes: 12,
     metadata: { line: '2' },
   };
   const busL1_A = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 14,
     estimate: { walkToStopMinutes: 2 },
     metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
   };
   const busL1_B = {
-    identity: 'bus:1:1107:1204',
+    identity: createBusIdentity('1', '1107', '1204'),
     mode: 'bus',
     estimatedMinutes: 15,
     estimate: { walkToStopMinutes: 3 },
@@ -1545,12 +1573,12 @@ test('planner: candidate diverse from cheap hero becomes redundant against final
 
   // Final selection evaluated against final Hero (busL1_A):
   const finalSelection = selectCandidates([busL1_A, busL2, busL1_B]);
-  assert.equal(finalSelection.primary.identity, 'bus:1:1106:1204'); // Final Hero
+  assert.equal(isSameIdentity(finalSelection.primary.identity, createBusIdentity('1', '1106', '1204')), true); // Final Hero
 
   // busL1_B is redundant against final Hero (same line L1, adjacent stop |3-2|=1m < 3m) -> pruned!
   // busL2 is diverse from final Hero (line 2 vs line 1, delta 16-11 = 5m <= 5m) -> admitted!
   assert.equal(finalSelection.alternatives.length, 1);
-  assert.equal(finalSelection.alternatives[0].identity, 'bus:2:2001:1205');
+  assert.equal(isSameIdentity(finalSelection.alternatives[0].identity, createBusIdentity('2', '2001', '1205')), true);
 });
 
 test('ui: renderDecisionWithAlternatives wires hero card tap to onPromote with none divergence', () => {
@@ -1682,7 +1710,7 @@ test('planner: cheapWalkToStop uses walkToStopCache first, haversine/80 as fallb
 
 test('ui: buildAlternativeCardHTML renders compact card with differentiator and delta', () => {
   const primary = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 14,
     exactJourney: { totalMinutes: 14 },
@@ -1690,7 +1718,7 @@ test('ui: buildAlternativeCardHTML renders compact card with differentiator and 
   };
 
   const busAlt = {
-    identity: 'bus:2:1106:1204',
+    identity: createBusIdentity('2', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 16,
     exactJourney: { totalMinutes: 16, lastMileDegraded: false },
@@ -1712,7 +1740,7 @@ test('ui: buildAlternativeCardHTML renders compact card with differentiator and 
 
   // Walk alternative
   const walkAlt = {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: 18,
     exactJourney: { totalMinutes: 18 },
@@ -1725,7 +1753,7 @@ test('ui: buildAlternativeCardHTML renders compact card with differentiator and 
 
   // Degraded last mile mark ~
   const degradedAlt = {
-    identity: 'bus:5:1106:1204',
+    identity: createBusIdentity('5', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 15,
     exactJourney: { totalMinutes: 15, lastMileDegraded: true },
@@ -1736,7 +1764,7 @@ test('ui: buildAlternativeCardHTML renders compact card with differentiator and 
 
   // Negative delta (when alt is faster than current primary)
   const fasterAlt = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 12,
     exactJourney: { totalMinutes: 12 },
@@ -1748,14 +1776,14 @@ test('ui: buildAlternativeCardHTML renders compact card with differentiator and 
 
 test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and alternatives', () => {
   const cWalk = {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: 18,
     exactJourney: { totalMinutes: 18 },
   };
 
   const cBus = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 14,
     exactJourney: {
@@ -1803,14 +1831,14 @@ test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and a
 
 test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', () => {
   const cWalk = {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: 18,
     exactJourney: { totalMinutes: 18 },
   };
 
   const cBus = {
-    identity: 'bus:1:1106:1204',
+    identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
     estimatedMinutes: 14,
     exactJourney: { totalMinutes: 14 },
@@ -1819,9 +1847,10 @@ test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', (
   };
 
   // Mock minimal DOM for tap-to-promote test
+  // data-identity is the serialized string form (DOM boundary)
   const listeners = [];
   const mockButton = {
-    getAttribute: (attr) => (attr === 'data-identity' ? 'walk:direct' : null),
+    getAttribute: (attr) => (attr === 'data-identity' ? serializeIdentity(cWalk.identity) : null),
     addEventListener: (event, handler) => listeners.push(handler),
   };
   const mockDecision = {
@@ -1845,7 +1874,8 @@ test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', (
     assert.equal(listeners.length, 1);
     // Simulate user clicking alternative (Walk)
     listeners[0]();
-    assert.equal(promoted?.identity, 'walk:direct');
+    // promoted.identity is a VO — compare with isSameIdentity
+    assert.equal(isSameIdentity(promoted?.identity, createWalkIdentity()), true);
     assert.equal(promotedIdx, 1);
   } finally {
     delete globalThis.document;

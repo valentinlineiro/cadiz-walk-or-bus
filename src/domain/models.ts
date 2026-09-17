@@ -1,3 +1,5 @@
+import type { JourneyIdentity } from './identity.js';
+
 export interface Coordinates {
   lat: number;
   lon: number;
@@ -80,23 +82,32 @@ export interface CandidateEstimate {
   lastMileMinutes?: number;
 }
 
+/**
+ * Closed metadata shape — no open index signature.
+ * Additional fields surfaced from infrastructure must be added explicitly.
+ */
 export interface CandidateMetadata {
   line?: string;
   destination?: string;
   boardingStop?: Stop;
   alightStop?: Stop;
   alightDistanceMeters?: number;
-  [key: string]: any;
+  origin?: Coordinates;
+  path?: Stop[];
 }
 
+/**
+ * A low-cost planning hypothesis produced before exact routing.
+ * The identity is a structured Value Object, not a serialized string.
+ * There is no back-reference to EvaluatedJourney — evaluation is a one-way transformation.
+ */
 export interface JourneyCandidate {
-  identity: string;
+  identity: JourneyIdentity;
   mode: 'walk' | 'bus';
   estimatedMinutes: number;
-  dataQuality: 'live' | 'degraded';
+  dataQuality: 'live' | 'degraded' | 'estimated';
   estimate: CandidateEstimate;
   metadata?: CandidateMetadata;
-  exactJourney?: EvaluatedJourney | null;
 }
 
 export interface EvaluatedJourneyBreakdown {
@@ -114,15 +125,19 @@ export interface EvaluatedJourneyRoutes {
   walkRoute?: Route | null;
 }
 
+/**
+ * A journey with physically resolved routes and exact timings.
+ * The one-way transformation is: JourneyCandidate → evaluate → EvaluatedJourney.
+ * There is no back-reference to JourneyCandidate — that mapping belongs in Application.
+ */
 export interface EvaluatedJourney {
-  identity: string;
+  identity: JourneyIdentity;
   mode: 'walk' | 'bus';
   totalMinutes: number;
   dataQuality: 'live' | 'degraded';
   breakdown: EvaluatedJourneyBreakdown;
   routes: EvaluatedJourneyRoutes;
   metadata?: CandidateMetadata;
-  candidate?: JourneyCandidate;
 }
 
 export interface DecisionAlternative {
@@ -137,6 +152,10 @@ export interface Decision {
   alternatives: DecisionAlternative[];
 }
 
+/**
+ * Serialized form of a decision record for persistence (localStorage, etc.).
+ * Identity fields are serialized strings at this boundary (infrastructure concern).
+ */
 export interface DecisionRecord {
   id?: string;
   timestamp: number;
@@ -161,4 +180,3 @@ export interface DecisionRecord {
     deltaMinutes: number;
   } | null;
 }
-

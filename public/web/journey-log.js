@@ -48,13 +48,13 @@ function normalizeEntryOnRead(item) {
   const choiceParts = parseIdentity(choiceId);
 
   if (typeof choice === 'string') {
-    const isWalk = choiceParts.mode === 'walk';
+    const isWalk = choiceParts?.mode === 'walk';
     choice = {
       identity: choice,
       mode: isWalk ? 'walk' : 'bus',
-      busLine: (choiceParts.mode === 'bus' ? choiceParts.line : null) || (item.recommendation.busLine ?? null),
-      boardingStopId: (choiceParts.mode === 'bus' ? choiceParts.boardingStopId : null) || null,
-      alightStopId: (choiceParts.mode === 'bus' ? choiceParts.alightStopId : null) || null,
+      busLine: (choiceParts?.mode === 'bus' ? choiceParts.line : null) || (item.recommendation.busLine ?? null),
+      boardingStopId: (choiceParts?.mode === 'bus' ? choiceParts.boardingStopId : null) || null,
+      alightStopId: (choiceParts?.mode === 'bus' ? choiceParts.alightStopId : null) || null,
       totalMinutes: item.recommendation.totalMinutes ?? 0,
       deltaMinutes: 0,
       divergenceType: 'none',
@@ -63,9 +63,9 @@ function normalizeEntryOnRead(item) {
     choice = {
       identity: choiceId,
       mode: choice.mode === 'walk' ? 'walk' : 'bus',
-      busLine: choice.busLine != null ? String(choice.busLine) : (choiceParts.mode === 'bus' ? choiceParts.line || null : null),
-      boardingStopId: choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts.mode === 'bus' ? choiceParts.boardingStopId || null : null),
-      alightStopId: choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts.mode === 'bus' ? choiceParts.alightStopId || null : null),
+      busLine: choice.busLine != null ? String(choice.busLine) : (choiceParts?.mode === 'bus' ? choiceParts.line || null : null),
+      boardingStopId: choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts?.mode === 'bus' ? choiceParts.boardingStopId || null : null),
+      alightStopId: choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts?.mode === 'bus' ? choiceParts.alightStopId || null : null),
       totalMinutes: Number(choice.totalMinutes) || 0,
       deltaMinutes: Number.isFinite(Number(choice.deltaMinutes)) ? Number(choice.deltaMinutes) : 0,
       divergenceType: choice.divergenceType || 'none',
@@ -80,10 +80,10 @@ function normalizeEntryOnRead(item) {
   const recParts = parseIdentity(recIdentity);
   const recBoarding = item.recommendation.boardingStopId != null
     ? String(item.recommendation.boardingStopId)
-    : (recParts.mode === 'bus' ? recParts.boardingStopId || null : null);
+    : (recParts?.mode === 'bus' ? recParts.boardingStopId || null : null);
   const recAlight = item.recommendation.alightStopId != null
     ? String(item.recommendation.alightStopId)
-    : (recParts.mode === 'bus' ? recParts.alightStopId || null : null);
+    : (recParts?.mode === 'bus' ? recParts.alightStopId || null : null);
 
   return {
     ...item,
@@ -91,7 +91,7 @@ function normalizeEntryOnRead(item) {
       identity: recIdentity,
       kind: item.recommendation.kind,
       walkMinutes: item.recommendation.walkMinutes ?? null,
-      busLine: item.recommendation.busLine ?? (recParts[1] || null),
+      busLine: item.recommendation.busLine ?? (recParts?.[1] || null),
       boardingStopId: recBoarding,
       alightStopId: recAlight,
       totalMinutes: item.recommendation.totalMinutes ?? null,
@@ -152,22 +152,22 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
     choice = {
       identity: choiceId,
       mode: entry.choice.mode === 'walk' ? 'walk' : 'bus',
-      busLine: entry.choice.busLine != null ? String(entry.choice.busLine) : (parts.mode === 'bus' ? parts.line || null : null),
-      boardingStopId: entry.choice.boardingStopId != null ? String(entry.choice.boardingStopId) : (parts.mode === 'bus' ? parts.boardingStopId || null : null),
-      alightStopId: entry.choice.alightStopId != null ? String(entry.choice.alightStopId) : (parts.mode === 'bus' ? parts.alightStopId || null : null),
+      busLine: entry.choice.busLine != null ? String(entry.choice.busLine) : (parts?.mode === 'bus' ? parts.line || null : null),
+      boardingStopId: entry.choice.boardingStopId != null ? String(entry.choice.boardingStopId) : (parts?.mode === 'bus' ? parts.boardingStopId || null : null),
+      alightStopId: entry.choice.alightStopId != null ? String(entry.choice.alightStopId) : (parts?.mode === 'bus' ? parts.alightStopId || null : null),
       totalMinutes: Number(entry.choice.totalMinutes) || 0,
       deltaMinutes: Number.isFinite(Number(entry.choice.deltaMinutes)) ? Number(entry.choice.deltaMinutes) : 0,
       divergenceType: entry.choice.divergenceType || 'none',
     };
   } else if (typeof entry.choice === 'string') {
     const parts = parseIdentity(entry.choice);
-    const isWalk = parts.mode === 'walk';
+    const isWalk = parts?.mode === 'walk';
     choice = {
       identity: entry.choice,
       mode: isWalk ? 'walk' : 'bus',
-      busLine: (parts.mode === 'bus' ? parts.line : null) || (entry.recommendation?.busLine ?? null),
-      boardingStopId: (parts.mode === 'bus' ? parts.boardingStopId : null) || null,
-      alightStopId: (parts.mode === 'bus' ? parts.alightStopId : null) || null,
+      busLine: (parts?.mode === 'bus' ? parts.line : null) || (entry.recommendation?.busLine ?? null),
+      boardingStopId: (parts?.mode === 'bus' ? parts.boardingStopId : null) || null,
+      alightStopId: (parts?.mode === 'bus' ? parts.alightStopId : null) || null,
       totalMinutes: entry.recommendation?.totalMinutes ?? 0,
       deltaMinutes: 0,
       divergenceType: 'none',
@@ -182,10 +182,10 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
   const recParts = parseIdentity(recIdentity);
   const recBoarding = entry.recommendation.boardingStopId != null
     ? String(entry.recommendation.boardingStopId)
-    : (recParts.mode === 'bus' ? recParts.boardingStopId || null : null);
+    : (recParts?.mode === 'bus' ? recParts.boardingStopId || null : null);
   const recAlight = entry.recommendation.alightStopId != null
     ? String(entry.recommendation.alightStopId)
-    : (recParts.mode === 'bus' ? recParts.alightStopId || null : null);
+    : (recParts?.mode === 'bus' ? recParts.alightStopId || null : null);
 
   const normalized = {
     id: entry.id || `${timestamp}-${Math.random().toString(36).slice(2, 7)}`,

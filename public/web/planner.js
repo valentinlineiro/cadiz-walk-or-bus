@@ -8,7 +8,7 @@ import {
 import {
   createWalkIdentity,
   createBusIdentity,
-  parseIdentity,
+  serializeIdentity,
   isSameIdentity,
 } from './identity.js';
 import { isStructurallyDiverse, filterDiverseAlternatives } from './diversity.js';
@@ -94,12 +94,14 @@ export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
   }
 
   // Deduplicate by structural identity: keep the candidate with lowest estimatedMinutes
+  // serializeIdentity() provides a stable string key for the Map — identity objects are not primitives.
   const byIdentity = new Map();
   for (const c of candidates) {
-    if (!c || typeof c.estimatedMinutes !== 'number') continue;
-    const existing = byIdentity.get(c.identity);
+    if (!c || typeof c.estimatedMinutes !== 'number' || !c.identity) continue;
+    const key = serializeIdentity(c.identity);
+    const existing = byIdentity.get(key);
     if (!existing || c.estimatedMinutes < existing.estimatedMinutes) {
-      byIdentity.set(c.identity, c);
+      byIdentity.set(key, c);
     }
   }
 
