@@ -12,11 +12,7 @@ import { appendEntry, getRecentDestinations, classifyDivergence } from './journe
 import { computeLastMile } from './last-mile.js';
 import { serializeIdentity, parseIdentity, isSameIdentity } from './identity.js';
 import {
-  createWalkCandidate,
-  createBusCandidates,
-  selectCandidates,
   formatAlternativeDiff,
-  cheapWalkToStop,
 } from './planner.js';
 import { FindBestJourneysUseCase, RecordUserChoiceUseCase } from './application/index.js';
 
@@ -37,7 +33,10 @@ const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 const routingBridge = {
   routeWalking: (from, to) => walkRoute(fetch, from, to),
-  routeBus: (boarding, alight, path) => busRoute(fetch, path ?? [boarding, alight]),
+  routeBus: async (boarding, alight, path) => {
+    const coordinates = await busRoute(fetch, path ?? [boarding, alight]);
+    return coordinates ? { coordinates } : null;
+  },
 };
 
 const transitBridge = {
@@ -622,6 +621,7 @@ function applyCandidateToMap(cand) {
     showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
     showAlightStop(cand.metadata?.alightStop ?? null);
     const busGeometry = cand.routes?.busRoute?.coordinates
+      ?? (Array.isArray(cand.routes?.busRoute) ? cand.routes.busRoute : null)
       ?? cand.exactJourney?.busRoute
       ?? cand.metadata?.path?.map((s) => [s.lat, s.lon])
       ?? null;
