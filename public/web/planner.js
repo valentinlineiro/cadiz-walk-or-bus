@@ -1,18 +1,22 @@
 import { haversineMeters } from './topology.js';
+import {
+  WALK_METERS_PER_MINUTE,
+  BUS_METERS_PER_MINUTE,
+  DEFAULT_PLANNING_POLICY,
+} from './constants.js';
+import {
+  createWalkIdentity,
+  createBusIdentity,
+  serializeIdentity,
+} from './identity.js';
+import { isStructurallyDiverse, filterDiverseAlternatives } from './diversity.js';
 
-const WALK_METERS_PER_MINUTE = 80;
-const BUS_METERS_PER_MINUTE = 250;
-
-export const DEFAULT_PLANNING_POLICY = {
-  maxCandidates: 3,
-  maxAlternatives: 2,
-  similarityMaxDeltaMinutes: 5,
-};
+export { DEFAULT_PLANNING_POLICY, isStructurallyDiverse, filterDiverseAlternatives };
 
 export function createWalkCandidate({ walkMinutes, origin, destination }) {
   const mins = Math.max(0, Math.round(walkMinutes ?? 0));
   return {
-    identity: 'walk:direct',
+    identity: createWalkIdentity(),
     mode: 'walk',
     estimatedMinutes: mins,
     dataQuality: 'live',
@@ -53,7 +57,7 @@ export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolve
     const lineStr = String(arr.line ?? '');
 
     candidates.push({
-      identity: `bus:${lineStr}:${stopId}:${alightId}`,
+      identity: createBusIdentity(lineStr, stopId, alightId),
       mode: 'bus',
       estimatedMinutes: totalEstimated,
       dataQuality: arr.minutes != null ? 'live' : 'estimated',
@@ -77,76 +81,6 @@ export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolve
   return candidates;
 }
 
-export function isStructurallyDiverse(
-  candidate,
-  hero,
-  thresholds = { accessWalkMinutes: 3, alightDistanceMeters: 250 },
-) {
-  if (!candidate || !hero) return false;
-  if (candidate.identity === hero.identity) return false;
-
-  // 1. Modal diversity
-  if (candidate.mode !== hero.mode) {
-    return true;
-  }
-
-  // 2. Line diversity (for bus)
-  if (candidate.mode === 'bus' && hero.mode === 'bus') {
-    const candLine = candidate.metadata?.line ?? (candidate.identity.startsWith('bus:') ? candidate.identity.split(':')[1] : null);
-    const heroLine = hero.metadata?.line ?? (hero.identity.startsWith('bus:') ? hero.identity.split(':')[1] : null);
-
-    if (candLine && heroLine && candLine !== heroLine) {
-      return true;
-    }
-
-    // 3. Access diversity (same line)
-    const accessWalkThreshold = thresholds?.accessWalkMinutes ?? 3;
-    const candWalk = candidate.exactJourney?.walkToStopRoute?.minutes ?? candidate.exactJourney?.walkToStopMinutes ?? candidate.estimate?.walkToStopMinutes ?? 0;
-    const heroWalk = hero.exactJourney?.walkToStopRoute?.minutes ?? hero.exactJourney?.walkToStopMinutes ?? hero.estimate?.walkToStopMinutes ?? 0;
-    if (Math.abs(candWalk - heroWalk) >= accessWalkThreshold) {
-      return true;
-    }
-
-    const alightDistThreshold = thresholds?.alightDistanceMeters ?? 250;
-    const candAlightMeters = candidate.metadata?.alightDistanceMeters ?? 0;
-    const heroAlightMeters = hero.metadata?.alightDistanceMeters ?? 0;
-
-    if (Math.abs(candAlightMeters - heroAlightMeters) >= alightDistThreshold) {
-      return true;
-    }
-
-    return false;
-  }
-
-  return false;
-}
-
-export function filterDiverseAlternatives(candidates, hero, policy = DEFAULT_PLANNING_POLICY) {
-  if (!hero || !Array.isArray(candidates)) return [];
-  const maxDelta = policy.similarityMaxDeltaMinutes ?? 5;
-  const maxAlts = policy.maxAlternatives ?? 2;
-  const maxCandidates = policy.maxCandidates ?? 3;
-  const allowedAlternatives = Math.min(maxAlts, Math.max(0, maxCandidates - 1));
-  if (allowedAlternatives <= 0) return [];
-
-  const admitted = [];
-  for (const cand of candidates) {
-    if (admitted.length >= allowedAlternatives) break;
-    if (!cand || cand.identity === hero.identity) continue;
-    if (cand.estimatedMinutes - hero.estimatedMinutes > maxDelta) continue;
-
-    // Must be structurally diverse from the Hero
-    if (!isStructurallyDiverse(cand, hero)) continue;
-
-    // Must also be structurally diverse from any already admitted alternative
-    if (admitted.some((alt) => !isStructurallyDiverse(cand, alt))) continue;
-
-    admitted.push(cand);
-  }
-
-  return admitted;
-}
-
 export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
   if (!Array.isArray(candidates) || candidates.length === 0) {
     return { primary: null, alternatives: [] };
@@ -158,12 +92,14 @@ export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
   }
 
   // Deduplicate by structural identity: keep the candidate with lowest estimatedMinutes
+  // serializeIdentity() provides a stable string key for the Map — identity objects are not primitives.
   const byIdentity = new Map();
   for (const c of candidates) {
-    if (!c || typeof c.estimatedMinutes !== 'number') continue;
-    const existing = byIdentity.get(c.identity);
+    if (!c || typeof c.estimatedMinutes !== 'number' || !c.identity) continue;
+    const key = serializeIdentity(c.identity);
+    const existing = byIdentity.get(key);
     if (!existing || c.estimatedMinutes < existing.estimatedMinutes) {
-      byIdentity.set(c.identity, c);
+      byIdentity.set(key, c);
     }
   }
 

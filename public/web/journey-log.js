@@ -1,3 +1,8 @@
+import { parseIdentity, isSameIdentity } from './identity.js';
+import { classifyDivergence } from './diversity.js';
+
+export { classifyDivergence };
+
 const STORAGE_KEY = 'cadiz_journey_log';
 export const MAX_LOG = 200;
 export const DEDUP_WINDOW_MS = 5 * 60 * 1000;
@@ -36,57 +41,20 @@ export function formatRecommendationSub(rec) {
   return null;
 }
 
-export function classifyDivergence(choice, recommendation) {
-  if (!choice || !recommendation) return 'none';
-  const choiceId = choice.identity || '';
-  const recId = recommendation.identity || '';
-  if (choiceId && recId && choiceId === recId) return 'none';
-
-  const choiceMode = choice.mode || (choiceId.startsWith('walk') ? 'walk' : choiceId.startsWith('bus') ? 'bus' : null);
-  const recMode = recommendation.kind || recommendation.mode || (recId.startsWith('walk') ? 'walk' : recId.startsWith('bus') ? 'bus' : null);
-
-  if (choiceMode && recMode && choiceMode !== recMode) {
-    return 'mode';
-  }
-
-  if (choiceMode === 'bus' && recMode === 'bus') {
-    const choiceParts = choiceId.startsWith('bus:') ? choiceId.split(':') : [];
-    const recParts = recId.startsWith('bus:') ? recId.split(':') : [];
-
-    const choiceLine = choice.busLine != null ? String(choice.busLine) : (choiceParts[1] || null);
-    const recLine = recommendation.busLine != null ? String(recommendation.busLine) : (recParts[1] || null);
-
-    if (choiceLine && recLine && choiceLine !== recLine) {
-      return 'line';
-    }
-
-    const choiceBoard = choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts[2] || null);
-    const recBoard = recommendation.boardingStopId != null ? String(recommendation.boardingStopId) : (recParts[2] || null);
-    const choiceAlight = choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts[3] || null);
-    const recAlight = recommendation.alightStopId != null ? String(recommendation.alightStopId) : (recParts[3] || null);
-
-    if ((choiceBoard && recBoard && choiceBoard !== recBoard) || (choiceAlight && recAlight && choiceAlight !== recAlight)) {
-      return 'access';
-    }
-  }
-
-  return 'none';
-}
-
 function normalizeEntryOnRead(item) {
   if (!item || !item.recommendation) return null;
   let choice = item.choice ?? null;
   const choiceId = typeof choice === 'string' ? choice : (choice && typeof choice === 'object' ? String(choice.identity || '') : '');
-  const choiceParts = choiceId.startsWith('bus:') ? choiceId.split(':') : [];
+  const choiceParts = parseIdentity(choiceId);
 
   if (typeof choice === 'string') {
-    const isWalk = choice.startsWith('walk');
+    const isWalk = choiceParts?.mode === 'walk';
     choice = {
       identity: choice,
       mode: isWalk ? 'walk' : 'bus',
-      busLine: choiceParts[1] || (item.recommendation.busLine ?? null),
-      boardingStopId: choiceParts[2] || null,
-      alightStopId: choiceParts[3] || null,
+      busLine: (choiceParts?.mode === 'bus' ? choiceParts.line : null) || (item.recommendation.busLine ?? null),
+      boardingStopId: (choiceParts?.mode === 'bus' ? choiceParts.boardingStopId : null) || null,
+      alightStopId: (choiceParts?.mode === 'bus' ? choiceParts.alightStopId : null) || null,
       totalMinutes: item.recommendation.totalMinutes ?? 0,
       deltaMinutes: 0,
       divergenceType: 'none',
@@ -95,9 +63,9 @@ function normalizeEntryOnRead(item) {
     choice = {
       identity: choiceId,
       mode: choice.mode === 'walk' ? 'walk' : 'bus',
-      busLine: choice.busLine != null ? String(choice.busLine) : (choiceParts[1] || null),
-      boardingStopId: choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts[2] || null),
-      alightStopId: choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts[3] || null),
+      busLine: choice.busLine != null ? String(choice.busLine) : (choiceParts?.mode === 'bus' ? choiceParts.line || null : null),
+      boardingStopId: choice.boardingStopId != null ? String(choice.boardingStopId) : (choiceParts?.mode === 'bus' ? choiceParts.boardingStopId || null : null),
+      alightStopId: choice.alightStopId != null ? String(choice.alightStopId) : (choiceParts?.mode === 'bus' ? choiceParts.alightStopId || null : null),
       totalMinutes: Number(choice.totalMinutes) || 0,
       deltaMinutes: Number.isFinite(Number(choice.deltaMinutes)) ? Number(choice.deltaMinutes) : 0,
       divergenceType: choice.divergenceType || 'none',
@@ -109,13 +77,13 @@ function normalizeEntryOnRead(item) {
       ? 'walk:direct'
       : (item.recommendation.busLine ? `bus:${item.recommendation.busLine}` : 'bus:unknown'));
 
-  const recParts = recIdentity.startsWith('bus:') ? recIdentity.split(':') : [];
+  const recParts = parseIdentity(recIdentity);
   const recBoarding = item.recommendation.boardingStopId != null
     ? String(item.recommendation.boardingStopId)
-    : (recParts[2] || null);
+    : (recParts?.mode === 'bus' ? recParts.boardingStopId || null : null);
   const recAlight = item.recommendation.alightStopId != null
     ? String(item.recommendation.alightStopId)
-    : (recParts[3] || null);
+    : (recParts?.mode === 'bus' ? recParts.alightStopId || null : null);
 
   return {
     ...item,
@@ -123,7 +91,7 @@ function normalizeEntryOnRead(item) {
       identity: recIdentity,
       kind: item.recommendation.kind,
       walkMinutes: item.recommendation.walkMinutes ?? null,
-      busLine: item.recommendation.busLine ?? (recParts[1] || null),
+      busLine: item.recommendation.busLine ?? (recParts?.mode === 'bus' ? recParts.line || null : null),
       boardingStopId: recBoarding,
       alightStopId: recAlight,
       totalMinutes: item.recommendation.totalMinutes ?? null,
@@ -180,26 +148,26 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
   let choice = null;
   if (entry.choice && typeof entry.choice === 'object') {
     const choiceId = String(entry.choice.identity || '');
-    const parts = choiceId.startsWith('bus:') ? choiceId.split(':') : [];
+    const parts = parseIdentity(choiceId);
     choice = {
       identity: choiceId,
       mode: entry.choice.mode === 'walk' ? 'walk' : 'bus',
-      busLine: entry.choice.busLine != null ? String(entry.choice.busLine) : (parts[1] || null),
-      boardingStopId: entry.choice.boardingStopId != null ? String(entry.choice.boardingStopId) : (parts[2] || null),
-      alightStopId: entry.choice.alightStopId != null ? String(entry.choice.alightStopId) : (parts[3] || null),
+      busLine: entry.choice.busLine != null ? String(entry.choice.busLine) : (parts?.mode === 'bus' ? parts.line || null : null),
+      boardingStopId: entry.choice.boardingStopId != null ? String(entry.choice.boardingStopId) : (parts?.mode === 'bus' ? parts.boardingStopId || null : null),
+      alightStopId: entry.choice.alightStopId != null ? String(entry.choice.alightStopId) : (parts?.mode === 'bus' ? parts.alightStopId || null : null),
       totalMinutes: Number(entry.choice.totalMinutes) || 0,
       deltaMinutes: Number.isFinite(Number(entry.choice.deltaMinutes)) ? Number(entry.choice.deltaMinutes) : 0,
       divergenceType: entry.choice.divergenceType || 'none',
     };
   } else if (typeof entry.choice === 'string') {
-    const isWalk = entry.choice.startsWith('walk');
-    const parts = entry.choice.startsWith('bus:') ? entry.choice.split(':') : [];
+    const parts = parseIdentity(entry.choice);
+    const isWalk = parts?.mode === 'walk';
     choice = {
       identity: entry.choice,
       mode: isWalk ? 'walk' : 'bus',
-      busLine: parts[1] || (entry.recommendation?.busLine ?? null),
-      boardingStopId: parts[2] || null,
-      alightStopId: parts[3] || null,
+      busLine: (parts?.mode === 'bus' ? parts.line : null) || (entry.recommendation?.busLine ?? null),
+      boardingStopId: (parts?.mode === 'bus' ? parts.boardingStopId : null) || null,
+      alightStopId: (parts?.mode === 'bus' ? parts.alightStopId : null) || null,
       totalMinutes: entry.recommendation?.totalMinutes ?? 0,
       deltaMinutes: 0,
       divergenceType: 'none',
@@ -211,13 +179,13 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
       ? 'walk:direct'
       : (entry.recommendation.busLine ? `bus:${entry.recommendation.busLine}` : 'bus:unknown'));
 
-  const recParts = recIdentity.startsWith('bus:') ? recIdentity.split(':') : [];
+  const recParts = parseIdentity(recIdentity);
   const recBoarding = entry.recommendation.boardingStopId != null
     ? String(entry.recommendation.boardingStopId)
-    : (recParts[2] || null);
+    : (recParts?.mode === 'bus' ? recParts.boardingStopId || null : null);
   const recAlight = entry.recommendation.alightStopId != null
     ? String(entry.recommendation.alightStopId)
-    : (recParts[3] || null);
+    : (recParts?.mode === 'bus' ? recParts.alightStopId || null : null);
 
   const normalized = {
     id: entry.id || `${timestamp}-${Math.random().toString(36).slice(2, 7)}`,
@@ -231,7 +199,7 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
       identity: recIdentity,
       kind: entry.recommendation.kind,
       walkMinutes: entry.recommendation.walkMinutes ?? null,
-      busLine: entry.recommendation.busLine ?? (recParts[1] || null),
+      busLine: entry.recommendation.busLine ?? (recParts?.mode === 'bus' ? recParts.line || null : null),
       boardingStopId: recBoarding,
       alightStopId: recAlight,
       totalMinutes: entry.recommendation.totalMinutes ?? null,

@@ -9,6 +9,8 @@ import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { appendEntry, getRecentDestinations, classifyDivergence } from './journey-log.js';
+import { computeLastMile } from './last-mile.js';
+import { serializeIdentity, parseIdentity, isSameIdentity } from './identity.js';
 import {
   createWalkCandidate,
   createBusCandidates,
@@ -253,7 +255,7 @@ export function buildAlternativeCardHTML(alt, primary) {
   const degradedMark = alt.exactJourney?.lastMileDegraded ? '~' : '';
 
   return `
-    <button type="button" class="alternative-card" data-identity="${escapeHTML(alt.identity)}">
+    <button type="button" class="alternative-card" data-identity="${escapeHTML(serializeIdentity(alt.identity))}">
       <div class="alt-left">
         <div class="alt-title"><span class="icon">${modeIcon}</span>${escapeHTML(modeTitle)}</div>
         <div class="alt-desc">${escapeHTML(diff)}</div>
@@ -339,8 +341,11 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
       const buttons = decision.querySelectorAll('.alternative-card');
       buttons.forEach((btn) => {
         btn.addEventListener('click', () => {
-          const identity = btn.getAttribute('data-identity');
-          const nextIndex = selectedCandidates.findIndex((c) => c.identity === identity);
+          const rawIdentity = btn.getAttribute('data-identity');
+          const parsedIdentity = parseIdentity(rawIdentity);
+          const nextIndex = parsedIdentity
+            ? selectedCandidates.findIndex((c) => isSameIdentity(c.identity, parsedIdentity))
+            : -1;
           if (nextIndex !== -1) {
             renderDecisionWithAlternatives(selectedCandidates, nextIndex, onPromote);
             if (typeof onPromote === 'function') {
@@ -401,13 +406,8 @@ export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = f
   `;
 }
 
-// walkRoute() returns null on nearly every realistic failure (it only
-// throws on malformed JSON from a 200 response) — so "degraded" must be
-// derived from a missing `minutes`, not from the throw path alone.
-export function computeLastMile(lastMile, distanceMeters) {
-  if (lastMile?.minutes != null) return { lastMileMinutes: lastMile.minutes, lastMileDegraded: false };
-  return { lastMileMinutes: Math.round(distanceMeters / 80), lastMileDegraded: true };
-}
+// computeLastMile moved to domain (src/domain/last-mile.ts); re-exported here for transitional compatibility
+export { computeLastMile };
 
 
 
@@ -763,17 +763,17 @@ async function routeToDestination(dest) {
       const divergenceType = classifyDivergence(promoted, winningHero);
 
       const winningBoardingStopId = winningHero.mode === 'bus'
-        ? (winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[2] : null))
+        ? String(winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.boardingStopId : '') ?? '')
         : null;
       const winningAlightStopId = winningHero.mode === 'bus'
-        ? (winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[3] : null))
+        ? String(winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.alightStopId : '') ?? '')
         : null;
 
       const promotedBoardingStopId = promoted.mode === 'bus'
-        ? (promoted.metadata?.boardingStop?.stop ?? promoted.metadata?.boardingStop?.number ?? (promoted.identity.startsWith('bus:') ? promoted.identity.split(':')[2] : null))
+        ? String(promoted.metadata?.boardingStop?.stop ?? promoted.metadata?.boardingStop?.number ?? (promoted.identity?.mode === 'bus' ? promoted.identity.boardingStopId : '') ?? '')
         : null;
       const promotedAlightStopId = promoted.mode === 'bus'
-        ? (promoted.metadata?.alightStop?.stop ?? promoted.metadata?.alightStop?.number ?? (promoted.identity.startsWith('bus:') ? promoted.identity.split(':')[3] : null))
+        ? String(promoted.metadata?.alightStop?.stop ?? promoted.metadata?.alightStop?.number ?? (promoted.identity?.mode === 'bus' ? promoted.identity.alightStopId : '') ?? '')
         : null;
 
       try {
@@ -782,20 +782,20 @@ async function routeToDestination(dest) {
           timestamp: Date.now(),
           destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
           recommendation: {
-            identity: winningHero.identity,
+            identity: serializeIdentity(winningHero.identity),
             kind: winningHero.mode,
             walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
             busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
-            boardingStopId: winningBoardingStopId,
-            alightStopId: winningAlightStopId,
+            boardingStopId: winningBoardingStopId || null,
+            alightStopId: winningAlightStopId || null,
             totalMinutes: heroTotal,
           },
           choice: {
-            identity: promoted.identity,
+            identity: serializeIdentity(promoted.identity),
             mode: promoted.mode,
             busLine: promoted.mode === 'bus' ? (promoted.metadata?.line ?? null) : null,
-            boardingStopId: promotedBoardingStopId,
-            alightStopId: promotedAlightStopId,
+            boardingStopId: promotedBoardingStopId || null,
+            alightStopId: promotedAlightStopId || null,
             totalMinutes: promotedTotal,
             deltaMinutes,
             divergenceType,
@@ -807,7 +807,7 @@ async function routeToDestination(dest) {
   };
 
   const promote = (cand) => {
-    const idx = finalSelected.findIndex((c) => c.identity === cand.identity);
+    const idx = finalSelected.findIndex((c) => isSameIdentity(c.identity, cand.identity));
     if (idx !== -1) {
       renderDecisionWithAlternatives(finalSelected, idx, onPromote);
       onPromote(finalSelected[idx]);
@@ -825,10 +825,10 @@ async function routeToDestination(dest) {
 
   if (winningHero && destCoords && destLabel) {
     const winningBoardingStopId = winningHero.mode === 'bus'
-      ? (winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[2] : null))
+      ? String(winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.boardingStopId : '') ?? '')
       : null;
     const winningAlightStopId = winningHero.mode === 'bus'
-      ? (winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[3] : null))
+      ? String(winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity?.mode === 'bus' ? winningHero.identity.alightStopId : '') ?? '')
       : null;
 
     try {
@@ -837,12 +837,12 @@ async function routeToDestination(dest) {
         timestamp: Date.now(),
         destination: { label: destLabel, lat: destCoords.lat, lon: destCoords.lon },
         recommendation: {
-          identity: winningHero.identity,
+          identity: serializeIdentity(winningHero.identity),
           kind: winningHero.mode,
           walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
           busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
-          boardingStopId: winningBoardingStopId,
-          alightStopId: winningAlightStopId,
+          boardingStopId: winningBoardingStopId || null,
+          alightStopId: winningAlightStopId || null,
           totalMinutes: winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes,
         },
         choice: null,
