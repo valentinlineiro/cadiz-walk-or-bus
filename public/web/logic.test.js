@@ -17,7 +17,7 @@ import {
   planningCardsHTML,
   renderDecisionWithAlternatives,
 } from './ui.js';
-import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations } from './journey-log.js';
+import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations, classifyDivergence } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
 import {
@@ -27,6 +27,8 @@ import {
   selectCandidates,
   formatAlternativeDiff,
   cheapWalkToStop,
+  isStructurallyDiverse,
+  filterDiverseAlternatives,
 } from './planner.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
@@ -695,7 +697,7 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   assert.equal(log.length, 1);
   assert.equal(log[0].timestamp, baseTime + 120000);
   assert.equal(log[0].recommendation.kind, 'bus');
-  assert.equal(log[0].choice, 'bus:1:1106:1204');
+  assert.equal(log[0].choice?.identity ?? log[0].choice, 'bus:1:1106:1204');
 
   // Same destination after 6 minutes (> 5 min window) -> appends new entry (LIFO)
   const entry1Later = {
@@ -727,6 +729,176 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   log = getLog(mockStorage);
   assert.equal(log.length, 200);
   assert.equal(log[0].id, 'bulk-204');
+});
+
+test('journey-log: classifyDivergence identifies none, mode, line, and access divergences', () => {
+  const recBus = {
+    identity: 'bus:1:1106:1204',
+    kind: 'bus',
+    busLine: '1',
+    boardingStopId: '1106',
+    alightStopId: '1204',
+  };
+
+  // Same identity -> none
+  assert.equal(classifyDivergence({ identity: 'bus:1:1106:1204', mode: 'bus' }, recBus), 'none');
+
+  // Divergence to walk -> mode
+  assert.equal(classifyDivergence({ identity: 'walk:direct', mode: 'walk' }, recBus), 'mode');
+
+  // Divergence to another bus line -> line
+  assert.equal(
+    classifyDivergence({ identity: 'bus:2:1106:1205', mode: 'bus', busLine: '2' }, recBus),
+    'line',
+  );
+
+  // Same line, different stop -> access
+  assert.equal(
+    classifyDivergence({ identity: 'bus:1:1107:1204', mode: 'bus', busLine: '1', boardingStopId: '1107' }, recBus),
+    'access',
+  );
+
+  // Divergence from walk recommendation to bus choice -> mode
+  const recWalk = { identity: 'walk:direct', kind: 'walk' };
+  assert.equal(
+    classifyDivergence({ identity: 'bus:1:1106:1204', mode: 'bus', busLine: '1' }, recWalk),
+    'mode',
+  );
+
+  // Null inputs -> none
+  assert.equal(classifyDivergence(null, recBus), 'none');
+  assert.equal(classifyDivergence({ identity: 'bus:1' }, null), 'none');
+});
+
+test('journey-log: getLog normalizes legacy v1 entries with string choice safely', () => {
+  const legacyData = [
+    {
+      id: 'legacy-1',
+      timestamp: 1700000000000,
+      destination: { label: 'Plaza Mina', lat: 36.534, lon: -6.297 },
+      recommendation: { kind: 'bus', busLine: '1', totalMinutes: 14 },
+      choice: 'bus:2:1106:1205',
+    },
+    {
+      id: 'legacy-2',
+      timestamp: 1700000060000,
+      destination: { label: 'Hospital', lat: 36.52, lon: -6.28 },
+      recommendation: { kind: 'walk', walkMinutes: 10, totalMinutes: 10 },
+      choice: null,
+    },
+  ];
+
+  const mockStorage = {
+    getItem: () => JSON.stringify(legacyData),
+    setItem: () => {},
+  };
+
+  const log = getLog(mockStorage);
+  assert.equal(log.length, 2);
+
+  // Legacy string choice normalized to structured DecisionAlternative
+  assert.equal(typeof log[0].choice, 'object');
+  assert.equal(log[0].choice.identity, 'bus:2:1106:1205');
+  assert.equal(log[0].choice.mode, 'bus');
+  assert.equal(log[0].choice.busLine, '2');
+  assert.equal(log[0].choice.divergenceType, 'none');
+  assert.equal(log[0].recommendation.identity, 'bus:1');
+
+  // Legacy null choice remains null
+  assert.equal(log[1].choice, null);
+  assert.equal(log[1].recommendation.identity, 'walk:direct');
+});
+
+test('journey-log: appendEntry preserves and updates structured choice', () => {
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  const t0 = 1700000000000;
+  // Step 1: initial evaluation with implicit acceptance (choice: null)
+  appendEntry(
+    {
+      id: 'e1',
+      timestamp: t0,
+      destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
+      recommendation: { identity: 'bus:1:1106:1204', kind: 'bus', busLine: '1', totalMinutes: 14 },
+      choice: null,
+    },
+    mockStorage,
+  );
+
+  let log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].choice, null);
+
+  // Step 2: explicit promotion of alternative within 5 minutes -> choice updated
+  appendEntry(
+    {
+      id: 'e1-promote',
+      timestamp: t0 + 30000,
+      destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
+      recommendation: {
+        identity: 'bus:1:1106:1204',
+        kind: 'bus',
+        busLine: '1',
+        boardingStopId: '1106',
+        alightStopId: '1204',
+        totalMinutes: 14,
+      },
+      choice: {
+        identity: 'bus:1:1107:1204',
+        mode: 'bus',
+        busLine: '1',
+        boardingStopId: '1107',
+        alightStopId: '1204',
+        totalMinutes: 15,
+        deltaMinutes: 1,
+        divergenceType: 'access',
+      },
+    },
+    mockStorage,
+  );
+
+  log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].recommendation.boardingStopId, '1106');
+  assert.equal(log[0].recommendation.alightStopId, '1204');
+  assert.equal(log[0].choice.identity, 'bus:1:1107:1204');
+  assert.equal(log[0].choice.mode, 'bus');
+  assert.equal(log[0].choice.boardingStopId, '1107');
+  assert.equal(log[0].choice.alightStopId, '1204');
+  assert.equal(log[0].choice.deltaMinutes, 1);
+  assert.equal(log[0].choice.divergenceType, 'access');
+
+  // Step 3: promotion with negative deltaMinutes preserves negative value without clamping to 0
+  appendEntry(
+    {
+      id: 'e1-promote-faster',
+      timestamp: t0 + 40000,
+      destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
+      recommendation: {
+        identity: 'bus:1:1106:1204',
+        kind: 'bus',
+        busLine: '1',
+        totalMinutes: 14,
+      },
+      choice: {
+        identity: 'bus:1:1105:1204',
+        mode: 'bus',
+        busLine: '1',
+        totalMinutes: 12,
+        deltaMinutes: -2,
+        divergenceType: 'access',
+      },
+    },
+    mockStorage,
+  );
+
+  log = getLog(mockStorage);
+  assert.equal(log.length, 1);
+  assert.equal(log[0].choice.deltaMinutes, -2);
 });
 
 test('journey-log: getRecentDestinations groups by destination and ranks by recency desc', () => {
@@ -952,6 +1124,294 @@ test('planner: two-stage selection re-ranks candidates after exact routing refin
   assert.equal(prunedSelection.primary.identity, 'bus:2');
   assert.equal(prunedSelection.alternatives.length, 1);
   assert.equal(prunedSelection.alternatives[0].identity, 'walk');
+});
+
+test('planner: isStructurallyDiverse validates modal, line, and access diversity against Hero', () => {
+  const heroBus = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+
+  const heroWalk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimate: { walkToStopMinutes: 0 },
+  };
+
+  // 1. Modal diversity
+  assert.equal(isStructurallyDiverse(heroWalk, heroBus), true);
+  assert.equal(isStructurallyDiverse(heroBus, heroWalk), true);
+
+  // 2. Line diversity (for bus)
+  const busLine2 = {
+    identity: 'bus:2:1106:1205',
+    mode: 'bus',
+    metadata: { line: '2' },
+  };
+  assert.equal(isStructurallyDiverse(busLine2, heroBus), true);
+
+  // Identical candidate -> not diverse
+  assert.equal(isStructurallyDiverse(heroBus, heroBus), false);
+
+  // 3. Access diversity: same line L1
+  // A: Walk to stop diff < 3m, same alight -> redundant (false)
+  const redundantAdjacentBus = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 3 }, // diff |3 - 2| = 1 < 3
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1107' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+  assert.equal(isStructurallyDiverse(redundantAdjacentBus, heroBus), false);
+
+  // B: Walk to stop diff >= 3m (e.g. walk 6m vs 2m) -> diverse (true)
+  const walkAccessBus = {
+    identity: 'bus:1:1120:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 6 }, // diff |6 - 2| = 4 >= 3
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1120' },
+      alightStop: { stop: '1204' },
+      alightDistanceMeters: 100,
+    },
+  };
+  assert.equal(isStructurallyDiverse(walkAccessBus, heroBus), true);
+
+  // C: Alight stop diff >= 250m -> diverse (true)
+  const alightCorridorBus = {
+    identity: 'bus:1:1106:1208',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 2 },
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1106' },
+      alightStop: { stop: '1208' },
+      alightDistanceMeters: 450, // diff |450 - 100| = 350 >= 250
+    },
+  };
+  assert.equal(isStructurallyDiverse(alightCorridorBus, heroBus), true);
+
+  // C2: Alight distance diff >= 250m is diverse purely geometrically even if alight stop ID is identical
+  const alightSameIdGeometricDiff = {
+    identity: 'bus:1:1105:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 3 }, // walk diff |3 - 2| = 1m (< 3m, not diverse by boarding walk)
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1105' },
+      alightStop: { stop: '1204' }, // same alight stop ID
+      alightDistanceMeters: 400, // diff |400 - 100| = 300 >= 250m -> diverse!
+    },
+  };
+  assert.equal(isStructurallyDiverse(alightSameIdGeometricDiff, heroBus), true);
+
+  // Null guards
+  assert.equal(isStructurallyDiverse(null, heroBus), false);
+  assert.equal(isStructurallyDiverse(heroBus, null), false);
+});
+
+test('planner: selectCandidates filters out redundant same-line alternatives in favor of useful diversity', () => {
+  // Hero is Bus L1 (14m)
+  const hero = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    estimate: { walkToStopMinutes: 2 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // c2: redundant marquee variant on line 1 (15m, 1m walk diff, same alight)
+  const c2Redundant = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // c3: Walk alternative (17m)
+  const c3Walk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 17,
+    estimate: { walkToStopMinutes: 0 },
+  };
+
+  // c4: Line 2 alternative (18m)
+  const c4BusL2 = {
+    identity: 'bus:2:1106:1205',
+    mode: 'bus',
+    estimatedMinutes: 18,
+    metadata: { line: '2' },
+  };
+
+  const res = selectCandidates([hero, c2Redundant, c3Walk, c4BusL2]);
+  assert.equal(res.primary.identity, 'bus:1:1106:1204');
+  assert.equal(res.alternatives.length, 2);
+  // c2Redundant must be pruned because it's not diverse from hero (same line, adjacent stop)
+  assert.equal(res.alternatives[0].identity, 'walk:direct');
+  assert.equal(res.alternatives[1].identity, 'bus:2:1106:1205');
+});
+
+test('planner: selectCandidates ensures diversity among multiple admitted alternatives', () => {
+  // Hero is Walk (14m)
+  const heroWalk = {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: 14,
+  };
+
+  // b1: Bus L1 at Stop A (15m)
+  const b1 = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    estimate: { walkToStopMinutes: 2 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // b2: Bus L1 at adjacent Stop B (16m) - redundant with b1!
+  const b2Redundant = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimatedMinutes: 16,
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // b3: Bus L2 at Stop C (17m) - diverse from both walk and L1
+  const b3BusL2 = {
+    identity: 'bus:2:1110:1206',
+    mode: 'bus',
+    estimatedMinutes: 17,
+    metadata: { line: '2' },
+  };
+
+  const res = selectCandidates([heroWalk, b1, b2Redundant, b3BusL2]);
+  assert.equal(res.primary.identity, 'walk:direct');
+  assert.equal(res.alternatives.length, 2);
+  assert.equal(res.alternatives[0].identity, 'bus:1:1106:1204');
+  // b2Redundant must not be admitted because it is structurally redundant with b1 (already admitted)
+  assert.equal(res.alternatives[1].identity, 'bus:2:1110:1206');
+});
+
+test('planner: candidate diverse from cheap hero becomes redundant against final exact hero and is pruned', () => {
+  // Cheap phase:
+  // Provisional Hero: Bus L2 (12m)
+  // Candidate B: Bus L1 at Stop 1106 (14m, walk 2m, alight 1204)
+  // Candidate C: Bus L1 at Stop 1107 (15m, walk 3m, alight 1204) - adjacent stop, 1m walk diff
+  const busL2 = {
+    identity: 'bus:2:2001:1205',
+    mode: 'bus',
+    estimatedMinutes: 12,
+    metadata: { line: '2' },
+  };
+  const busL1_A = {
+    identity: 'bus:1:1106:1204',
+    mode: 'bus',
+    estimatedMinutes: 14,
+    estimate: { walkToStopMinutes: 2 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+  const busL1_B = {
+    identity: 'bus:1:1107:1204',
+    mode: 'bus',
+    estimatedMinutes: 15,
+    estimate: { walkToStopMinutes: 3 },
+    metadata: { line: '1', alightStop: { stop: '1204' }, alightDistanceMeters: 100 },
+  };
+
+  // Against cheap hero (Bus L2), both L1 candidates are diverse by line (L1 vs L2)
+  assert.equal(isStructurallyDiverse(busL1_A, busL2), true);
+  assert.equal(isStructurallyDiverse(busL1_B, busL2), true);
+
+  // Exact routing re-ranking:
+  // Bus L1_A arrives sooner than estimated -> exact total 11m (becomes final Hero)
+  // Bus L2 has longer travel time -> exact total 16m
+  // Bus L1_B exact total remains 15m
+  busL1_A.exactJourney = { totalMinutes: 11, walkToStopMinutes: 2 };
+  busL1_A.estimatedMinutes = 11;
+
+  busL2.exactJourney = { totalMinutes: 16 };
+  busL2.estimatedMinutes = 16;
+
+  busL1_B.exactJourney = { totalMinutes: 15, walkToStopMinutes: 3 };
+  busL1_B.estimatedMinutes = 15;
+
+  // Final selection evaluated against final Hero (busL1_A):
+  const finalSelection = selectCandidates([busL1_A, busL2, busL1_B]);
+  assert.equal(finalSelection.primary.identity, 'bus:1:1106:1204'); // Final Hero
+
+  // busL1_B is redundant against final Hero (same line L1, adjacent stop |3-2|=1m < 3m) -> pruned!
+  // busL2 is diverse from final Hero (line 2 vs line 1, delta 16-11 = 5m <= 5m) -> admitted!
+  assert.equal(finalSelection.alternatives.length, 1);
+  assert.equal(finalSelection.alternatives[0].identity, 'bus:2:2001:1205');
+});
+
+test('ui: renderDecisionWithAlternatives wires hero card tap to onPromote with none divergence', () => {
+  // Mock DOM
+  const prevDoc = globalThis.document;
+  const heroCard = {
+    addEventListener(event, fn) {
+      this.onClick = fn;
+    },
+  };
+  const decisionEl = {
+    innerHTML: '',
+    className: '',
+    classList: {
+      remove(cls) { this[cls] = false; },
+      add(cls) { this[cls] = true; },
+    },
+    querySelectorAll(selector) {
+      return [];
+    },
+    querySelector(selector) {
+      if (selector === '.decision-card') {
+        return heroCard;
+      }
+      return null;
+    },
+  };
+
+  globalThis.document = {
+    getElementById(id) {
+      if (id === 'decision') return decisionEl;
+      return null;
+    },
+  };
+
+  let promotedItem = null;
+  const candidates = [
+    { identity: 'bus:1', mode: 'bus', estimatedMinutes: 12 },
+    { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 15 },
+  ];
+
+  renderDecisionWithAlternatives(candidates, 0, (cand, idx) => {
+    promotedItem = cand;
+  });
+
+  assert.equal(typeof heroCard.onClick, 'function');
+  heroCard.onClick();
+
+  assert.equal(promotedItem?.identity, 'bus:1');
+
+  // Verify classifyDivergence of hero against hero is 'none'
+  assert.equal(classifyDivergence(promotedItem, candidates[0]), 'none');
+
+  globalThis.document = prevDoc;
 });
 
 test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
