@@ -889,6 +889,29 @@ test('planner: selectCandidates respects custom policy overrides', () => {
   assert.equal(resLimit.alternatives[0].identity, 'bus:2');
 });
 
+test('planner: selectCandidates enforces maxCandidates as a hard budget on total candidates', () => {
+  const c1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 10 };
+  const c2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 11 };
+  const c3 = { identity: 'bus:3', mode: 'bus', estimatedMinutes: 12 };
+  const c4 = { identity: 'bus:4', mode: 'bus', estimatedMinutes: 13 };
+
+  // maxCandidates = 2 with maxAlternatives = 5: allowed alternatives must be min(5, 2 - 1) = 1
+  const res2 = selectCandidates([c1, c2, c3, c4], { maxCandidates: 2, maxAlternatives: 5, similarityMaxDeltaMinutes: 5 });
+  assert.equal(res2.primary.identity, 'bus:1');
+  assert.equal(res2.alternatives.length, 1);
+  assert.equal(res2.alternatives[0].identity, 'bus:2');
+
+  // maxCandidates = 1 with maxAlternatives = 2: 0 alternatives
+  const res1 = selectCandidates([c1, c2, c3], { maxCandidates: 1, maxAlternatives: 2, similarityMaxDeltaMinutes: 5 });
+  assert.equal(res1.primary.identity, 'bus:1');
+  assert.equal(res1.alternatives.length, 0);
+
+  // maxCandidates = 0: null primary and empty alternatives
+  const res0 = selectCandidates([c1, c2], { maxCandidates: 0, maxAlternatives: 2, similarityMaxDeltaMinutes: 5 });
+  assert.equal(res0.primary, null);
+  assert.deepEqual(res0.alternatives, []);
+});
+
 test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
   const primary = {
     identity: 'bus:1:1106:1204',

@@ -29,6 +29,7 @@ let destLabel = null;
 let lastWalkRoute = null;
 let walkToStopCache = new Map();
 let lastNear = [];
+let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 // Inline SVG glyphs — no emoji as primary iconography.
@@ -398,65 +399,7 @@ export function computeLastMile(lastMile, distanceMeters) {
   return { lastMileMinutes: Math.round(distanceMeters / 80), lastMileDegraded: true };
 }
 
-async function renderSheet(near, walkRouteObj, walkToStopRouteObj) {
-  const destNameEl = document.getElementById('dest-name');
-  const decision = document.getElementById('decision');
-  const walk = walkRouteObj?.minutes ?? null;
-  if (walk == null) {
-    setSheetState('IDLE');
-    showAlightStop(null);
-    showBusRoute(null);
-    showWalkRoute(null);
-    return;
-  }
-  destNameEl.textContent = destLabel ?? '';
-  const walkToStop = walkToStopRouteObj?.minutes ?? null;
-  const f = near.find((s) => s.stop === focused);
-  const resolveAlight = makeAlightResolver(f, destCoords);
-  const arrivals = arrivalsByStop.get(focused) ?? [];
-  const v = verdict(walk, walkToStop, arrivals, resolveAlight);
-  const hasAlightPath = v.kind === 'bus' && v.bus.alight?.stop && v.bus.alight.path?.length >= 2;
-  let lastMile = null;
-  let lastMileMinutes = null;
-  let lastMileDegraded = false;
-  if (hasAlightPath) {
-    try {
-      lastMile = await walkRoute(fetch, { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon }, destCoords);
-    } catch {
-      lastMile = null;
-    }
-    // Fallback last-mile estimate: straight-line distance / average walking speed (80 m/min).
-    // Flagged `degraded` — decisionCardHTML renders it with a `~` prefix, never as a routed duration.
-    ({ lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, v.bus.alight.distanceMeters));
-  }
 
-  decision.innerHTML = decisionCardHTML(v, lastMileMinutes, lastMileDegraded);
-  decision.classList.remove('hidden');
-
-  showAlightStop(v.bus?.alight?.stop ?? null);
-
-  if (hasAlightPath) {
-    const routedBus = await busRoute(fetch, v.bus.alight.path).catch(() => null);
-    showBusRoute(routedBus ?? v.bus.alight.path.map((s) => [s.lat, s.lon]));
-    const segments = [];
-    if (walkToStopRouteObj?.coordinates?.length) segments.push(walkToStopRouteObj.coordinates);
-    if (lastMile?.coordinates?.length) segments.push(lastMile.coordinates);
-    showWalkRoute(segments);
-  } else {
-    showBusRoute(null);
-    showWalkRoute(walkRouteObj?.coordinates ?? null);
-  }
-
-  fitRoute([
-    me,
-    destCoords,
-    f ? { lat: f.lat, lon: f.lon } : null,
-    v.bus?.alight?.stop ? { lat: v.bus.alight.stop.lat, lon: v.bus.alight.stop.lon } : null,
-  ]);
-
-  updateFavToggle();
-  return v;
-}
 
 function hideFavToggle() {
   document.getElementById('fav-toggle')?.classList.add('hidden');
@@ -738,44 +681,43 @@ async function routeToDestination(dest) {
   const { primary, alternatives } = selectCandidates([walkCandidate, ...allBusCandidates]);
   const selected = primary ? [primary, ...alternatives] : [walkCandidate];
 
-  // 4. Exact OSRM routing ONLY for selected 1..3 candidates
-  for (const cand of selected) {
-    if (cand.mode === 'bus') {
-      const boardStop = cand.metadata?.boardingStop;
-      const alightStop = cand.metadata?.alightStop;
-      const walkToStopRoute = boardStop ? await getWalkToStopRoute(boardStop) : null;
-      if (id !== requestId) return;
+  // 4. Exact OSRM routing concurrently ONLY for selected 1..3 candidates
+  await Promise.all(
+    selected.map(async (cand) => {
+      if (cand.mode === 'bus') {
+        const boardStop = cand.metadata?.boardingStop;
+        const alightStop = cand.metadata?.alightStop;
 
-      let lastMile = null;
-      if (alightStop) {
-        try {
-          lastMile = await walkRoute(fetch, { lat: alightStop.lat, lon: alightStop.lon }, destCoords);
-        } catch {
-          lastMile = null;
+        const [walkToStopRoute, lastMile, routedBus] = await Promise.all([
+          boardStop ? getWalkToStopRoute(boardStop) : Promise.resolve(null),
+          alightStop
+            ? walkRoute(fetch, { lat: alightStop.lat, lon: alightStop.lon }, destCoords).catch(() => null)
+            : Promise.resolve(null),
+          cand.metadata?.path?.length >= 2
+            ? busRoute(fetch, cand.metadata.path).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        const { lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, cand.metadata?.alightDistanceMeters ?? 0);
+        const walkToStopMinutes = walkToStopRoute?.minutes ?? cand.estimate.walkToStopMinutes;
+        const totalMinutes = walkToStopMinutes + cand.estimate.waitMinutes + cand.estimate.rideMinutes + lastMileMinutes;
+
+        if (lastMileDegraded) {
+          cand.dataQuality = 'degraded';
         }
-        if (id !== requestId) return;
+
+        cand.exactJourney = {
+          totalMinutes,
+          walkToStopRoute,
+          busRoute: routedBus ?? cand.metadata?.path?.map((s) => [s.lat, s.lon]) ?? null,
+          lastMileRoute: lastMile,
+          lastMileMinutes,
+          lastMileDegraded,
+        };
       }
-
-      const { lastMileMinutes, lastMileDegraded } = computeLastMile(lastMile, cand.metadata?.alightDistanceMeters ?? 0);
-      const walkToStopMinutes = walkToStopRoute?.minutes ?? cand.estimate.walkToStopMinutes;
-      const totalMinutes = walkToStopMinutes + cand.estimate.waitMinutes + cand.estimate.rideMinutes + lastMileMinutes;
-
-      let routedBus = null;
-      if (cand.metadata?.path?.length >= 2) {
-        routedBus = await busRoute(fetch, cand.metadata.path).catch(() => null);
-        if (id !== requestId) return;
-      }
-
-      cand.exactJourney = {
-        totalMinutes,
-        walkToStopRoute,
-        busRoute: routedBus ?? cand.metadata?.path?.map((s) => [s.lat, s.lon]) ?? null,
-        lastMileRoute: lastMile,
-        lastMileMinutes,
-        lastMileDegraded,
-      };
-    }
-  }
+    })
+  );
+  if (id !== requestId) return;
 
   // Boarding stops of selected bus candidates for map pins
   const nearStops = [];
@@ -810,6 +752,19 @@ async function routeToDestination(dest) {
       } catch {}
     }
     updateFavToggle();
+  };
+
+  const promote = (cand) => {
+    const idx = selected.findIndex((c) => c.identity === cand.identity);
+    if (idx !== -1) {
+      renderDecisionWithAlternatives(selected, idx, onPromote);
+      onPromote(selected[idx]);
+    }
+  };
+
+  currentPlanningSession = {
+    selected,
+    onPromote: promote,
   };
 
   // 5. Render Hero primary and alternatives
@@ -935,14 +890,18 @@ export async function loadScenario(name) {
 export function initUI() {
   initMap(
     async (stop) => {
-      // Only stops already offered (eligible direction, beats walking) have
-      // a pin to tap, so switch focus among lastNear rather than recompute.
+      if (currentPlanningSession && destCoords) {
+        const match = currentPlanningSession.selected.find(
+          (c) => c.mode === 'bus' && c.metadata?.boardingStop?.stop === stop
+        );
+        if (match) {
+          currentPlanningSession.onPromote(match);
+          return;
+        }
+      }
       focused = stop;
       if (!destCoords) return;
       showStops(lastNear, eligibleArrivalsByStop(lastNear), focused);
-      const f = lastNear.find((s) => s.stop === focused);
-      const walkToStopRoute = f ? await getWalkToStopRoute(f) : null;
-      await renderSheet(lastNear, lastWalkRoute, walkToStopRoute);
     },
     async (coords) => {
       if (!me) return;

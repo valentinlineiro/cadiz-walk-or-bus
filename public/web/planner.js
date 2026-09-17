@@ -29,7 +29,7 @@ export function createWalkCandidate({ walkMinutes, origin, destination }) {
   };
 }
 
-export function createBusCandidates({ arrivals, stop, destCoords, walkToStopMinutes, resolveAlight }) {
+export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolveAlight }) {
   if (!Array.isArray(arrivals) || arrivals.length === 0 || !stop || typeof resolveAlight !== 'function') {
     return [];
   }
@@ -56,7 +56,7 @@ export function createBusCandidates({ arrivals, stop, destCoords, walkToStopMinu
       identity: `bus:${lineStr}:${stopId}:${alightId}`,
       mode: 'bus',
       estimatedMinutes: totalEstimated,
-      dataQuality: 'live',
+      dataQuality: arr.minutes != null ? 'live' : 'estimated',
       estimate: {
         walkToStopMinutes: walkToStop,
         waitMinutes: arr.minutes,
@@ -82,6 +82,11 @@ export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
     return { primary: null, alternatives: [] };
   }
 
+  const maxCandidates = policy.maxCandidates ?? 3;
+  if (maxCandidates <= 0) {
+    return { primary: null, alternatives: [] };
+  }
+
   // Deduplicate by structural identity: keep the candidate with lowest estimatedMinutes
   const byIdentity = new Map();
   for (const c of candidates) {
@@ -103,13 +108,14 @@ export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
   const primary = unique[0];
   const maxDelta = policy.similarityMaxDeltaMinutes ?? 5;
   const maxAlts = policy.maxAlternatives ?? 2;
+  const allowedAlternatives = Math.min(maxAlts, Math.max(0, maxCandidates - 1));
 
   const alternatives = [];
   for (let i = 1; i < unique.length; i++) {
+    if (alternatives.length >= allowedAlternatives) break;
     const cand = unique[i];
     if (cand.estimatedMinutes - primary.estimatedMinutes <= maxDelta) {
       alternatives.push(cand);
-      if (alternatives.length >= maxAlts) break;
     }
   }
 
