@@ -41,6 +41,12 @@ import {
   parseIdentity,
   isSameIdentity,
 } from './identity.js';
+import { computeLastMile as domainComputeLastMile } from './last-mile.js';
+import {
+  isStructurallyDiverse as domainIsStructurallyDiverse,
+  filterDiverseAlternatives as domainFilterDiverseAlternatives,
+  classifyDivergence as domainClassifyDivergence,
+} from './diversity.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
 
@@ -82,6 +88,142 @@ test('domain identity: creates, parses, and compares JourneyIdentity value objec
   assert.equal(isSameIdentity('bus:1:1106:1204', 'bus:2:1106:1204'), false);
   assert.equal(isSameIdentity(null, 'walk:direct'), false);
   assert.equal(isSameIdentity('walk:direct', null), false);
+});
+
+test('domain last-mile: computes routed and degraded last-mile durations with explicit flags', () => {
+  // exact route finite
+  const exact = domainComputeLastMile({ minutes: 6, coordinates: [] }, 600);
+  assert.deepEqual(exact, { lastMileMinutes: 6, lastMileDegraded: false });
+
+  // null route with distance
+  const fallback = domainComputeLastMile(null, 400);
+  assert.deepEqual(fallback, { lastMileMinutes: 5, lastMileDegraded: true });
+
+  // route without finite minutes
+  const noMinutes = domainComputeLastMile({ minutes: null }, 800);
+  assert.deepEqual(noMinutes, { lastMileMinutes: 10, lastMileDegraded: true });
+
+  // null or negative distance
+  const noDist = domainComputeLastMile(null, -10);
+  assert.deepEqual(noDist, { lastMileMinutes: 0, lastMileDegraded: true });
+
+  // custom pace
+  const fastPace = domainComputeLastMile(null, 500, 100);
+  assert.deepEqual(fastPace, { lastMileMinutes: 5, lastMileDegraded: true });
+});
+
+test('domain diversity: pure rules classify divergence and filter diverse alternatives', () => {
+  // Modal divergence
+  assert.equal(
+    domainClassifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'walk', identity: 'walk:direct' }),
+    'mode',
+  );
+
+  // Line divergence
+  assert.equal(
+    domainClassifyDivergence({ mode: 'bus', busLine: '2', identity: 'bus:2:10:20' }, { kind: 'bus', busLine: '1', identity: 'bus:1:10:20' }),
+    'line',
+  );
+
+  // Access divergence (boarding stop differs)
+  assert.equal(
+    domainClassifyDivergence({ mode: 'bus', busLine: '1', boardingStopId: '11', alightStopId: '20', identity: 'bus:1:11:20' }, { kind: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '20', identity: 'bus:1:10:20' }),
+    'access',
+  );
+
+  // Access divergence (alight stop differs)
+  assert.equal(
+    domainClassifyDivergence({ mode: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '21', identity: 'bus:1:10:21' }, { kind: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '20', identity: 'bus:1:10:20' }),
+    'access',
+  );
+
+  // None (exact match)
+  assert.equal(
+    domainClassifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'bus', identity: 'bus:1:10:20' }),
+    'none',
+  );
+
+  // Structural diversity filter with hero
+  const hero = { identity: 'bus:1:10:20', mode: 'bus', estimatedMinutes: 20, metadata: { line: '1' } };
+  const redundant = { identity: 'bus:1:10:20b', mode: 'bus', estimatedMinutes: 21, metadata: { line: '1' }, estimate: { walkToStopMinutes: 0 } };
+  const diverseLine = { identity: 'bus:2:10:20', mode: 'bus', estimatedMinutes: 22, metadata: { line: '2' } };
+  const diverseWalk = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 24 };
+
+  const admitted = domainFilterDiverseAlternatives([redundant, diverseLine, diverseWalk], hero);
+  assert.equal(admitted.length, 2);
+  assert.equal(admitted[0].identity, 'bus:2:10:20');
+  assert.equal(admitted[1].identity, 'walk:direct');
+});
+
+test('domain models: conform to structured Decision, EvaluatedJourney, and Candidate contracts', () => {
+  const candidate = {
+    identity: createBusIdentity('1', '10', '20'),
+    mode: 'bus',
+    estimatedMinutes: 18,
+    dataQuality: 'live',
+    estimate: {
+      walkToStopMinutes: 4,
+      waitMinutes: 3,
+      rideMinutes: 7,
+      lastMileMinutes: 4,
+    },
+    metadata: {
+      line: '1',
+      destination: 'CORTADURA',
+      alightDistanceMeters: 320,
+    },
+  };
+
+  const evaluated = {
+    identity: candidate.identity,
+    mode: candidate.mode,
+    totalMinutes: 18,
+    dataQuality: candidate.dataQuality,
+    breakdown: {
+      walkToStopMinutes: 4,
+      waitMinutes: 3,
+      rideMinutes: 7,
+      lastMileMinutes: 4,
+      lastMileDegraded: false,
+    },
+    routes: {
+      walkToStopRoute: null,
+      busRoute: null,
+      lastMileRoute: null,
+    },
+    metadata: candidate.metadata,
+    candidate,
+  };
+
+  const alternative = {
+    journey: {
+      identity: createWalkIdentity(),
+      mode: 'walk',
+      totalMinutes: 22,
+      dataQuality: 'live',
+      breakdown: {
+        walkToStopMinutes: 0,
+        waitMinutes: 0,
+        rideMinutes: 0,
+        lastMileMinutes: 22,
+        lastMileDegraded: false,
+      },
+      routes: { walkRoute: null },
+    },
+    differentiator: 'Ruta directa a pie',
+    deltaMinutes: 4,
+    divergenceType: 'mode',
+  };
+
+  const decision = {
+    hero: evaluated,
+    alternatives: [alternative],
+  };
+
+  assert.equal(decision.hero.totalMinutes, 18);
+  assert.equal(decision.alternatives.length, 1);
+  assert.equal(decision.alternatives[0].divergenceType, 'mode');
+  assert.equal(decision.alternatives[0].deltaMinutes, 4);
 });
 
 test('decide prefers bus only when strictly faster', () => {

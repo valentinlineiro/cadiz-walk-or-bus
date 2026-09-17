@@ -5,8 +5,9 @@ import {
   type PlanningPolicy,
 } from './constants.js';
 import { isSameIdentity, parseIdentity } from './identity.js';
+import type { DivergenceType } from './models.js';
 
-export type DivergenceType = 'none' | 'mode' | 'line' | 'access';
+export type { DivergenceType };
 
 export interface StructurallyDiverseItem {
   identity?: string;
