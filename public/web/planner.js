@@ -1,0 +1,115 @@
+const WALK_METERS_PER_MINUTE = 80;
+const BUS_METERS_PER_MINUTE = 250;
+
+export const DEFAULT_PLANNING_POLICY = {
+  maxCandidates: 3,
+  maxAlternatives: 2,
+  similarityMaxDeltaMinutes: 5,
+};
+
+export function createWalkCandidate({ walkMinutes, origin, destination }) {
+  const mins = Math.max(0, Math.round(walkMinutes ?? 0));
+  return {
+    identity: 'walk:direct',
+    mode: 'walk',
+    estimatedMinutes: mins,
+    dataQuality: 'live',
+    estimate: {
+      walkToStopMinutes: 0,
+      waitMinutes: 0,
+      rideMinutes: 0,
+      lastMileMinutes: mins,
+    },
+    metadata: {
+      origin,
+      destination,
+    },
+  };
+}
+
+export function createBusCandidates({ arrivals, stop, destCoords, walkToStopMinutes, resolveAlight }) {
+  if (!Array.isArray(arrivals) || arrivals.length === 0 || !stop || typeof resolveAlight !== 'function') {
+    return [];
+  }
+
+  const walkToStop = Math.max(0, Math.round(walkToStopMinutes ?? 0));
+  const candidates = [];
+
+  for (const arr of arrivals) {
+    // Temporal reachability: bus must not arrive before user can reach the stop
+    if (arr.minutes == null || arr.minutes < walkToStop) continue;
+
+    const alight = resolveAlight(arr);
+    if (!alight || !alight.stop) continue;
+
+    const rideMins = alight.rideMeters != null ? Math.round(alight.rideMeters / BUS_METERS_PER_MINUTE) : 0;
+    const lastMileMins = alight.distanceMeters != null ? Math.round(alight.distanceMeters / WALK_METERS_PER_MINUTE) : 0;
+    const totalEstimated = walkToStop + arr.minutes + rideMins + lastMileMins;
+
+    const stopId = String(stop.stop ?? stop.number ?? '');
+    const alightId = String(alight.stop.stop ?? alight.stop.number ?? '');
+    const lineStr = String(arr.line ?? '');
+
+    candidates.push({
+      identity: `bus:${lineStr}:${stopId}:${alightId}`,
+      mode: 'bus',
+      estimatedMinutes: totalEstimated,
+      dataQuality: 'live',
+      estimate: {
+        walkToStopMinutes: walkToStop,
+        waitMinutes: arr.minutes,
+        rideMinutes: rideMins,
+        lastMileMinutes: lastMileMins,
+      },
+      metadata: {
+        line: lineStr,
+        destination: arr.destination,
+        boardingStop: stop,
+        alightStop: alight.stop,
+        path: alight.path ?? [],
+        alightDistanceMeters: alight.distanceMeters,
+      },
+    });
+  }
+
+  return candidates;
+}
+
+export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return { primary: null, alternatives: [] };
+  }
+
+  // Deduplicate by structural identity: keep the candidate with lowest estimatedMinutes
+  const byIdentity = new Map();
+  for (const c of candidates) {
+    if (!c || typeof c.estimatedMinutes !== 'number') continue;
+    const existing = byIdentity.get(c.identity);
+    if (!existing || c.estimatedMinutes < existing.estimatedMinutes) {
+      byIdentity.set(c.identity, c);
+    }
+  }
+
+  const unique = Array.from(byIdentity.values());
+  if (unique.length === 0) {
+    return { primary: null, alternatives: [] };
+  }
+
+  // Sort strictly by estimatedMinutes ascending
+  unique.sort((a, b) => a.estimatedMinutes - b.estimatedMinutes);
+
+  const primary = unique[0];
+  const maxDelta = policy.similarityMaxDeltaMinutes ?? 5;
+  const maxAlts = policy.maxAlternatives ?? 2;
+
+  const alternatives = [];
+  for (let i = 1; i < unique.length; i++) {
+    const cand = unique[i];
+    if (cand.estimatedMinutes - primary.estimatedMinutes <= maxDelta) {
+      alternatives.push(cand);
+      if (alternatives.length >= maxAlts) break;
+    }
+  }
+
+  return { primary, alternatives };
+}

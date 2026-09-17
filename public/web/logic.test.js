@@ -11,6 +11,12 @@ import { decisionCardHTML, errorCardHTML, escapeHTML, computeLastMile } from './
 import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
+import {
+  DEFAULT_PLANNING_POLICY,
+  createWalkCandidate,
+  createBusCandidates,
+  selectCandidates,
+} from './planner.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
 
@@ -802,4 +808,73 @@ test('journey-log: getRecentDestinations groups by destination and ranks by rece
   assert.equal(recent2[0].label, 'Destino C');
   assert.equal(recent2[1].label, 'Destino A');
 });
+
+test('planner: createWalkCandidate produces normalized candidate', () => {
+  const walk = createWalkCandidate({
+    walkMinutes: 18,
+    origin: { lat: 36.52, lon: -6.28 },
+    destination: { lat: 36.53, lon: -6.29, label: 'Plaza Mina' },
+  });
+  assert.equal(walk.mode, 'walk');
+  assert.equal(walk.identity, 'walk:direct');
+  assert.equal(walk.estimatedMinutes, 18);
+  assert.equal(walk.dataQuality, 'live');
+  assert.deepEqual(walk.estimate, { walkToStopMinutes: 0, waitMinutes: 0, rideMinutes: 0, lastMileMinutes: 18 });
+});
+
+test('planner: selectCandidates is mode-agnostic: selects minimum as primary and alternatives within similarity delta', () => {
+  // Case 1: Bus is primary (14m), Walk (18m) and another Bus (16m) are alternatives within 5m
+  const c1 = { identity: 'bus:1:A:X', mode: 'bus', estimatedMinutes: 14 };
+  const c2 = { identity: 'bus:2:B:Y', mode: 'bus', estimatedMinutes: 16 };
+  const c3 = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 18 };
+  const c4 = { identity: 'bus:5:A:Z', mode: 'bus', estimatedMinutes: 22 }; // > 14 + 5 -> pruned
+
+  const res1 = selectCandidates([c4, c2, c3, c1]);
+  assert.equal(res1.primary.identity, 'bus:1:A:X');
+  assert.equal(res1.alternatives.length, 2);
+  assert.equal(res1.alternatives[0].identity, 'bus:2:B:Y'); // +2m
+  assert.equal(res1.alternatives[1].identity, 'walk:direct'); // +4m
+
+  // Case 2: Walk is primary (15m), Bus (19m) is competitive alternative
+  const w1 = { identity: 'walk:direct', mode: 'walk', estimatedMinutes: 15 };
+  const b1 = { identity: 'bus:1:A:X', mode: 'bus', estimatedMinutes: 19 };
+  const b2 = { identity: 'bus:2:B:Y', mode: 'bus', estimatedMinutes: 23 }; // > 15 + 5 -> pruned
+
+  const res2 = selectCandidates([b2, b1, w1]);
+  assert.equal(res2.primary.identity, 'walk:direct');
+  assert.equal(res2.alternatives.length, 1);
+  assert.equal(res2.alternatives[0].identity, 'bus:1:A:X');
+});
+
+test('planner: selectCandidates deduplicates identical structural identities, keeping the fastest', () => {
+  // Two buses on same line, same boarding stop, same alight stop (e.g. 1st bus vs 2nd bus)
+  const early = { identity: 'bus:1:1106:1204', mode: 'bus', estimatedMinutes: 14 };
+  const later = { identity: 'bus:1:1106:1204', mode: 'bus', estimatedMinutes: 18 };
+  const other = { identity: 'bus:2:1106:1205', mode: 'bus', estimatedMinutes: 16 };
+
+  const res = selectCandidates([later, early, other]);
+  assert.equal(res.primary.identity, 'bus:1:1106:1204');
+  assert.equal(res.primary.estimatedMinutes, 14);
+  assert.equal(res.alternatives.length, 1);
+  assert.equal(res.alternatives[0].identity, 'bus:2:1106:1205');
+});
+
+test('planner: selectCandidates respects custom policy overrides', () => {
+  const c1 = { identity: 'bus:1', mode: 'bus', estimatedMinutes: 10 };
+  const c2 = { identity: 'bus:2', mode: 'bus', estimatedMinutes: 13 };
+  const c3 = { identity: 'bus:3', mode: 'bus', estimatedMinutes: 14 };
+
+  // Custom policy: similarity max delta 2m (c2 and c3 pruned)
+  const strictPolicy = { maxCandidates: 3, maxAlternatives: 2, similarityMaxDeltaMinutes: 2 };
+  const res = selectCandidates([c1, c2, c3], strictPolicy);
+  assert.equal(res.primary.identity, 'bus:1');
+  assert.equal(res.alternatives.length, 0);
+
+  // Custom policy: maxAlternatives = 1
+  const limitPolicy = { maxCandidates: 2, maxAlternatives: 1, similarityMaxDeltaMinutes: 5 };
+  const resLimit = selectCandidates([c1, c2, c3], limitPolicy);
+  assert.equal(resLimit.alternatives.length, 1);
+  assert.equal(resLimit.alternatives[0].identity, 'bus:2');
+});
+
 
