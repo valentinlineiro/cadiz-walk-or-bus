@@ -762,6 +762,20 @@ async function routeToDestination(dest) {
       const deltaMinutes = Math.max(0, promotedTotal - heroTotal);
       const divergenceType = classifyDivergence(promoted, winningHero);
 
+      const winningBoardingStopId = winningHero.mode === 'bus'
+        ? (winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[2] : null))
+        : null;
+      const winningAlightStopId = winningHero.mode === 'bus'
+        ? (winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[3] : null))
+        : null;
+
+      const promotedBoardingStopId = promoted.mode === 'bus'
+        ? (promoted.metadata?.boardingStop?.stop ?? promoted.metadata?.boardingStop?.number ?? (promoted.identity.startsWith('bus:') ? promoted.identity.split(':')[2] : null))
+        : null;
+      const promotedAlightStopId = promoted.mode === 'bus'
+        ? (promoted.metadata?.alightStop?.stop ?? promoted.metadata?.alightStop?.number ?? (promoted.identity.startsWith('bus:') ? promoted.identity.split(':')[3] : null))
+        : null;
+
       try {
         appendEntry({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -772,12 +786,16 @@ async function routeToDestination(dest) {
             kind: winningHero.mode,
             walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
             busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
+            boardingStopId: winningBoardingStopId,
+            alightStopId: winningAlightStopId,
             totalMinutes: heroTotal,
           },
           choice: {
             identity: promoted.identity,
             mode: promoted.mode,
             busLine: promoted.mode === 'bus' ? (promoted.metadata?.line ?? null) : null,
+            boardingStopId: promotedBoardingStopId,
+            alightStopId: promotedAlightStopId,
             totalMinutes: promotedTotal,
             deltaMinutes,
             divergenceType,
@@ -806,6 +824,13 @@ async function routeToDestination(dest) {
   applyCandidateToMap(finalSelected[0]);
 
   if (winningHero && destCoords && destLabel) {
+    const winningBoardingStopId = winningHero.mode === 'bus'
+      ? (winningHero.metadata?.boardingStop?.stop ?? winningHero.metadata?.boardingStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[2] : null))
+      : null;
+    const winningAlightStopId = winningHero.mode === 'bus'
+      ? (winningHero.metadata?.alightStop?.stop ?? winningHero.metadata?.alightStop?.number ?? (winningHero.identity.startsWith('bus:') ? winningHero.identity.split(':')[3] : null))
+      : null;
+
     try {
       appendEntry({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -816,6 +841,8 @@ async function routeToDestination(dest) {
           kind: winningHero.mode,
           walkMinutes: walkCandidate?.exactJourney?.totalMinutes ?? walkCandidate?.estimatedMinutes ?? null,
           busLine: winningHero.mode === 'bus' ? (winningHero.metadata?.line ?? null) : null,
+          boardingStopId: winningBoardingStopId,
+          alightStopId: winningAlightStopId,
           totalMinutes: winningHero.exactJourney?.totalMinutes ?? winningHero.estimatedMinutes,
         },
         choice: null,

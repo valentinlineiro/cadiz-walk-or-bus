@@ -839,14 +839,23 @@ test('journey-log: appendEntry preserves and updates structured choice', () => {
       id: 'e1-promote',
       timestamp: t0 + 30000,
       destination: { label: 'Plaza San Antonio', lat: 36.535, lon: -6.298 },
-      recommendation: { identity: 'bus:1:1106:1204', kind: 'bus', busLine: '1', totalMinutes: 14 },
+      recommendation: {
+        identity: 'bus:1:1106:1204',
+        kind: 'bus',
+        busLine: '1',
+        boardingStopId: '1106',
+        alightStopId: '1204',
+        totalMinutes: 14,
+      },
       choice: {
-        identity: 'walk:direct',
-        mode: 'walk',
-        busLine: null,
-        totalMinutes: 17,
-        deltaMinutes: 3,
-        divergenceType: 'mode',
+        identity: 'bus:1:1107:1204',
+        mode: 'bus',
+        busLine: '1',
+        boardingStopId: '1107',
+        alightStopId: '1204',
+        totalMinutes: 15,
+        deltaMinutes: 1,
+        divergenceType: 'access',
       },
     },
     mockStorage,
@@ -854,10 +863,14 @@ test('journey-log: appendEntry preserves and updates structured choice', () => {
 
   log = getLog(mockStorage);
   assert.equal(log.length, 1);
-  assert.equal(log[0].choice.identity, 'walk:direct');
-  assert.equal(log[0].choice.mode, 'walk');
-  assert.equal(log[0].choice.deltaMinutes, 3);
-  assert.equal(log[0].choice.divergenceType, 'mode');
+  assert.equal(log[0].recommendation.boardingStopId, '1106');
+  assert.equal(log[0].recommendation.alightStopId, '1204');
+  assert.equal(log[0].choice.identity, 'bus:1:1107:1204');
+  assert.equal(log[0].choice.mode, 'bus');
+  assert.equal(log[0].choice.boardingStopId, '1107');
+  assert.equal(log[0].choice.alightStopId, '1204');
+  assert.equal(log[0].choice.deltaMinutes, 1);
+  assert.equal(log[0].choice.divergenceType, 'access');
 });
 
 test('journey-log: getRecentDestinations groups by destination and ranks by recency desc', () => {
@@ -1161,6 +1174,20 @@ test('planner: isStructurallyDiverse validates modal, line, and access diversity
     },
   };
   assert.equal(isStructurallyDiverse(alightCorridorBus, heroBus), true);
+
+  // C2: Alight distance diff >= 250m is diverse purely geometrically even if alight stop ID is identical
+  const alightSameIdGeometricDiff = {
+    identity: 'bus:1:1105:1204',
+    mode: 'bus',
+    estimate: { walkToStopMinutes: 3 }, // walk diff |3 - 2| = 1m (< 3m, not diverse by boarding walk)
+    metadata: {
+      line: '1',
+      boardingStop: { stop: '1105' },
+      alightStop: { stop: '1204' }, // same alight stop ID
+      alightDistanceMeters: 400, // diff |400 - 100| = 300 >= 250m -> diverse!
+    },
+  };
+  assert.equal(isStructurallyDiverse(alightSameIdGeometricDiff, heroBus), true);
 
   // Null guards
   assert.equal(isStructurallyDiverse(null, heroBus), false);

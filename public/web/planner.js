@@ -110,10 +110,8 @@ export function isStructurallyDiverse(
     const alightDistThreshold = thresholds?.alightDistanceMeters ?? 250;
     const candAlightMeters = candidate.metadata?.alightDistanceMeters ?? 0;
     const heroAlightMeters = hero.metadata?.alightDistanceMeters ?? 0;
-    const candAlightId = String(candidate.metadata?.alightStop?.stop ?? candidate.metadata?.alightStop?.number ?? (candidate.identity.startsWith('bus:') ? candidate.identity.split(':')[3] : ''));
-    const heroAlightId = String(hero.metadata?.alightStop?.stop ?? hero.metadata?.alightStop?.number ?? (hero.identity.startsWith('bus:') ? hero.identity.split(':')[3] : ''));
 
-    if (candAlightId !== heroAlightId && Math.abs(candAlightMeters - heroAlightMeters) >= alightDistThreshold) {
+    if (Math.abs(candAlightMeters - heroAlightMeters) >= alightDistThreshold) {
       return true;
     }
 
