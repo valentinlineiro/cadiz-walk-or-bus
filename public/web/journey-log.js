@@ -66,8 +66,8 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
     !entry ||
     !entry.destination ||
     typeof entry.destination.label !== 'string' ||
-    !Number.isFinite(entry.destination.lat) ||
-    !Number.isFinite(entry.destination.lon) ||
+    !Number.isFinite(Number(entry.destination.lat)) ||
+    !Number.isFinite(Number(entry.destination.lon)) ||
     !entry.recommendation ||
     typeof entry.recommendation.kind !== 'string'
   ) {

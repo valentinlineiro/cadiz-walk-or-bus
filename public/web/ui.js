@@ -464,9 +464,9 @@ function renderQuickPicks() {
   let destinations = [];
   try { favorites = getFavorites(); } catch { favorites = []; }
   try {
-    destinations = getTopDestinations(5).filter((d) => !isFavorite(d));
+    destinations = getTopDestinations(20).filter((d) => !isFavorite(d)).slice(0, 5);
     if (destinations.length === 0) {
-      destinations = getRecent().filter((r) => !isFavorite(r));
+      destinations = getRecent().filter((r) => !isFavorite(r)).slice(0, 5);
     }
   } catch {
     destinations = [];
