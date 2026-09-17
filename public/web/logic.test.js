@@ -8,7 +8,7 @@ import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { decisionCardHTML, errorCardHTML, escapeHTML, computeLastMile } from './ui.js';
-import { getLog, appendEntry, formatRecommendationSub } from './journey-log.js';
+import { getLog, appendEntry, formatRecommendationSub, getTopDestinations } from './journey-log.js';
 
 import { findAlightStop } from './topology.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
@@ -709,5 +709,96 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   log = getLog(mockStorage);
   assert.equal(log.length, 200);
   assert.equal(log[0].id, 'bulk-204');
+});
+
+test('journey-log: getTopDestinations groups by destination, ranks by frequency desc, then recency desc', () => {
+  const store = new Map();
+  const mockStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+  };
+
+  assert.deepEqual(getTopDestinations(5, mockStorage), []);
+
+  const t0 = 1700000000000;
+  // Destino A: 2 visits (t0 + 10m, t0 + 20m)
+  // Destino B: 3 visits (t0 + 1m, t0 + 2m, t0 + 3m)
+  // Destino C: 2 visits (t0 + 30m, t0 + 40m - more recent than A)
+  const logEntries = [
+    {
+      id: 'c2',
+      timestamp: t0 + 4000000,
+      destination: { label: 'Destino C', lat: 36.53, lon: -6.29 },
+      recommendation: { kind: 'walk', walkMinutes: 8 },
+      choice: null,
+    },
+    {
+      id: 'a2',
+      timestamp: t0 + 2000000,
+      destination: { label: 'Destino A', lat: 36.51, lon: -6.27 },
+      recommendation: { kind: 'bus', busLine: '1', totalMinutes: 18 },
+      choice: null,
+    },
+    {
+      id: 'c1',
+      timestamp: t0 + 3000000,
+      destination: { label: 'Destino C', lat: 36.53, lon: -6.29 },
+      recommendation: { kind: 'walk', walkMinutes: 10 },
+      choice: null,
+    },
+    {
+      id: 'b3',
+      timestamp: t0 + 300000,
+      destination: { label: 'Destino B', lat: 36.52, lon: -6.28 },
+      recommendation: { kind: 'bus', busLine: '2', totalMinutes: 20 },
+      choice: null,
+    },
+    {
+      id: 'b2',
+      timestamp: t0 + 200000,
+      destination: { label: 'Destino B', lat: 36.52, lon: -6.28 },
+      recommendation: { kind: 'bus', busLine: '2', totalMinutes: 22 },
+      choice: null,
+    },
+    {
+      id: 'a1',
+      timestamp: t0 + 1000000,
+      destination: { label: 'Destino A', lat: 36.51, lon: -6.27 },
+      recommendation: { kind: 'walk', walkMinutes: 15 },
+      choice: null,
+    },
+    {
+      id: 'b1',
+      timestamp: t0 + 100000,
+      destination: { label: 'Destino B', lat: 36.52, lon: -6.28 },
+      recommendation: { kind: 'bus', busLine: '2', totalMinutes: 25 },
+      choice: null,
+    },
+  ];
+
+  mockStorage.setItem('cadiz_journey_log', JSON.stringify(logEntries));
+
+  const top = getTopDestinations(5, mockStorage);
+  assert.equal(top.length, 3);
+  // Destino B has 3 visits -> rank 1
+  assert.equal(top[0].label, 'Destino B');
+  assert.equal(top[0].count, 3);
+  assert.equal(top[0].sub, 'última vez: BUS L2 · 20′');
+
+  // Destino C has 2 visits, latest timestamp t0 + 4000000 -> rank 2 (beats A on recency)
+  assert.equal(top[1].label, 'Destino C');
+  assert.equal(top[1].count, 2);
+  assert.equal(top[1].sub, 'última vez: ANDAR · 8′');
+
+  // Destino A has 2 visits, latest timestamp t0 + 2000000 -> rank 3
+  assert.equal(top[2].label, 'Destino A');
+  assert.equal(top[2].count, 2);
+  assert.equal(top[2].sub, 'última vez: BUS L1 · 18′');
+
+  // Test limit (n = 2)
+  const top2 = getTopDestinations(2, mockStorage);
+  assert.equal(top2.length, 2);
+  assert.equal(top2[0].label, 'Destino B');
+  assert.equal(top2[1].label, 'Destino C');
 });
 

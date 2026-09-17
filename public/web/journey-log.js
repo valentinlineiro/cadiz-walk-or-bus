@@ -124,3 +124,36 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
   }
   return updated;
 }
+
+export function getTopDestinations(n = 5, storageImpl) {
+  const entries = getLog(storageImpl);
+  if (entries.length === 0) return [];
+
+  const grouped = [];
+  for (const entry of entries) {
+    const existing = grouped.find((g) => sameDestination(g, entry.destination));
+    if (existing) {
+      existing.count += 1;
+      // Since getLog returns LIFO, the first seen is already the most recent
+    } else {
+      grouped.push({
+        label: entry.destination.label,
+        lat: entry.destination.lat,
+        lon: entry.destination.lon,
+        count: 1,
+        lastTimestamp: entry.timestamp,
+        lastRecommendation: entry.recommendation,
+        sub: formatRecommendationSub(entry.recommendation),
+      });
+    }
+  }
+
+  grouped.sort((a, b) => {
+    if (b.count !== a.count) {
+      return b.count - a.count; // primary: frequency desc
+    }
+    return b.lastTimestamp - a.lastTimestamp; // tie-breaker: recency desc
+  });
+
+  return grouped.slice(0, n);
+}
