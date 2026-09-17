@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.js';
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
+import { LocalStorageJourneyLogAdapter } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
+
 
 test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
   const fakeFetch = async (url) => {
@@ -275,4 +277,132 @@ test('NominatimGeocodingAdapter: short-circuits empty and single-character queri
   assert.equal(fetchCalled, false);
 });
 
+class MockStorage {
+  constructor() {
+    this.store = new Map();
+  }
+  getItem(key) {
+    return this.store.get(key) ?? null;
+  }
+  setItem(key, value) {
+    this.store.set(key, String(value));
+  }
+  removeItem(key) {
+    this.store.delete(key);
+  }
+  clear() {
+    this.store.clear();
+  }
+}
+
+test('LocalStorageJourneyLogAdapter: append persists valid DecisionRecord and survives corrupt storage', () => {
+  const storage = new MockStorage();
+  storage.setItem('cadiz_journey_log', 'invalid json {{{');
+
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const record = {
+    id: '1001-abc',
+    timestamp: 1700000000000,
+    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
+    recommendation: {
+      identity: 'walk:direct',
+      kind: 'walk',
+      walkMinutes: 15,
+      busLine: null,
+      boardingStopId: null,
+      alightStopId: null,
+      totalMinutes: 15,
+    },
+    choice: null,
+  };
+
+  adapter.append(record);
+  const log = adapter.getLog();
+  assert.equal(log.length, 1);
+  assert.equal(log[0].id, '1001-abc');
+  assert.equal(log[0].destination.label, 'Plaza Mina');
+});
+
+test('LocalStorageJourneyLogAdapter: deduplicates evaluations within 5 minutes for same destination', () => {
+  const storage = new MockStorage();
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+
+  const baseRecord = {
+    destination: { label: 'Hospital', lat: 36.505, lon: -6.275 },
+    recommendation: {
+      identity: 'walk:direct',
+      kind: 'walk',
+      walkMinutes: 20,
+      totalMinutes: 20,
+    },
+    choice: null,
+  };
+
+  adapter.append({ ...baseRecord, id: '1', timestamp: 1700000000000 });
+  // Same destination 2 minutes later
+  adapter.append({ ...baseRecord, id: '2', timestamp: 1700000120000 });
+
+  const log = adapter.getLog();
+  assert.equal(log.length, 1);
+  assert.equal(log[0].id, '2'); // updated to latest
+});
+
+test('LocalStorageJourneyLogAdapter: getRecentDestinations groups by coords and orders by recency desc', () => {
+  const storage = new MockStorage();
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+
+  adapter.append({
+    id: '1',
+    timestamp: 1000,
+    destination: { label: 'Dest A', lat: 36.50, lon: -6.28 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
+    choice: null,
+  });
+  adapter.append({
+    id: '2',
+    timestamp: 2000,
+    destination: { label: 'Dest B', lat: 36.52, lon: -6.29 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 12 },
+    choice: null,
+  });
+
+  const recent = adapter.getRecentDestinations(5);
+  assert.equal(recent.length, 2);
+  assert.equal(recent[0].label, 'Dest B');
+  assert.equal(recent[1].label, 'Dest A');
+});
+
+test('LocalStorageJourneyLogAdapter: getTopDestinations groups by coords and ranks by count desc with recency tiebreaker', () => {
+  const storage = new MockStorage();
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+
+  adapter.append({
+    id: '1',
+    timestamp: 1000,
+    destination: { label: 'Dest A', lat: 36.50, lon: -6.28 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
+    choice: null,
+  });
+  adapter.append({
+    id: '2',
+    timestamp: 2000,
+    destination: { label: 'Dest B', lat: 36.52, lon: -6.29 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 12 },
+    choice: null,
+  });
+  adapter.append({
+    id: '3',
+    timestamp: 10000000,
+    destination: { label: 'Dest B', lat: 36.52, lon: -6.29 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 12 },
+    choice: null,
+  });
+
+  const top = adapter.getTopDestinations(5);
+  assert.equal(top.length, 2);
+  assert.equal(top[0].label, 'Dest B');
+  assert.equal(top[0].count, 2);
+  assert.equal(top[1].label, 'Dest A');
+  assert.equal(top[1].count, 1);
+});
 
