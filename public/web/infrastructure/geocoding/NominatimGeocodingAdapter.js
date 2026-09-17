@@ -4,7 +4,9 @@ export class NominatimGeocodingAdapter {
     constructor(fetchImpl = globalThis.fetch) {
         this.fetchImpl = fetchImpl;
     }
-    async search(query, limit = 3) {
+    async search(query, limit = 5) {
+        if (!query || query.trim().length < 2)
+            return [];
         const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
         let r;
         try {
@@ -38,6 +40,8 @@ export class NominatimGeocodingAdapter {
         });
     }
     async geocode(query) {
+        if (!query || !query.trim())
+            return null;
         const hits = await this.search(query, 1);
         return hits.length > 0 ? { lat: hits[0].lat, lon: hits[0].lon, name: hits[0].label } : null;
     }

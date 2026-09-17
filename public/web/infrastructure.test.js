@@ -258,3 +258,21 @@ test('NominatimGeocodingAdapter: returns empty array or null on network error', 
   assert.equal(geocodeResult, null);
 });
 
+test('NominatimGeocodingAdapter: short-circuits empty and single-character queries without calling fetch', async () => {
+  let fetchCalled = false;
+  const fakeFetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called');
+  };
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch);
+
+  assert.deepEqual(await adapter.search(''), []);
+  assert.deepEqual(await adapter.search('   '), []);
+  assert.deepEqual(await adapter.search('a'), []);
+  assert.equal(await adapter.geocode(''), null);
+  assert.equal(await adapter.geocode('   '), null);
+  assert.equal(fetchCalled, false);
+});
+
+

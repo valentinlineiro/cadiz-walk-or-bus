@@ -6,7 +6,9 @@ export const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
 export class NominatimGeocodingAdapter implements GeocodingPort {
   constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
 
-  async search(query: string, limit = 3): Promise<GeocodingResult[]> {
+  async search(query: string, limit: number = 5): Promise<GeocodingResult[]> {
+    if (!query || query.trim().length < 2) return [];
+
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
     let r: Response;
     try {
@@ -39,6 +41,8 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
   }
 
   async geocode(query: string): Promise<(Coordinates & { name?: string }) | null> {
+    if (!query || !query.trim()) return null;
+
     const hits = await this.search(query, 1);
     return hits.length > 0 ? { lat: hits[0].lat, lon: hits[0].lon, name: hits[0].label } : null;
   }
