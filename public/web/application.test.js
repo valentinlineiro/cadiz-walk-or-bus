@@ -1,7 +1,113 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RecordUserChoiceUseCase, FindBestJourneysUseCase } from './application/index.js';
+import {
+  RecordUserChoiceUseCase,
+  FindBestJourneysUseCase,
+  GetEligibleArrivalsUseCase,
+  GetQuickVerdictUseCase,
+  SearchDestinationsUseCase,
+} from './application/index.js';
 import { createWalkIdentity, createBusIdentity } from './identity.js';
+
+test('SearchDestinationsUseCase: delegates query and limit to GeocodingPort', async () => {
+  let capturedQuery = null;
+  let capturedLimit = null;
+  const fakeGeocoding = {
+    search: async (query, limit) => {
+      capturedQuery = query;
+      capturedLimit = limit;
+      return [{ label: 'Plaza Mina', sub: 'Cádiz', lat: 36.535, lon: -6.297 }];
+    },
+    geocode: async () => null,
+  };
+
+  const useCase = new SearchDestinationsUseCase(fakeGeocoding);
+  const results = await useCase.execute('Plaza Mina', 3);
+
+  assert.equal(capturedQuery, 'Plaza Mina');
+  assert.equal(capturedLimit, 3);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].label, 'Plaza Mina');
+});
+
+test('GetQuickVerdictUseCase: returns null when direct walking fails', async () => {
+  let transitCalls = 0;
+  const useCase = new GetQuickVerdictUseCase({
+    routing: {
+      routeWalking: async () => null,
+      routeBus: async () => { throw new Error('routeBus should not be called'); },
+    },
+    transit: {
+      getStops: async () => {
+        transitCalls += 1;
+        return [{ stop: '1', lat: 36.52, lon: -6.28 }];
+      },
+      getLines: async () => null,
+      getArrivals: async () => [],
+    },
+  });
+
+  const result = await useCase.execute({
+    origin: { lat: 36.52, lon: -6.28 },
+    destination: { lat: 36.535, lon: -6.297 },
+  });
+
+  assert.equal(result, null);
+  assert.equal(transitCalls, 1);
+});
+
+test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
+  let routeBusCalls = 0;
+  const useCase = new GetQuickVerdictUseCase({
+    routing: {
+      routeWalking: async (from) => ({ minutes: from.lat === 36.52 ? 12 : 5, coordinates: [] }),
+      routeBus: async () => {
+        routeBusCalls += 1;
+        return null;
+      },
+    },
+    transit: {
+      getStops: async () => [{ stop: '1', lat: 36.525, lon: -6.28 }],
+      getLines: async () => null,
+      getArrivals: async () => [],
+    },
+  });
+
+  const result = await useCase.execute({
+    origin: { lat: 36.52, lon: -6.28 },
+    destination: { lat: 36.535, lon: -6.297 },
+  });
+
+  assert.deepEqual(result, { kind: 'walk', totalMinutes: 12 });
+  assert.equal(routeBusCalls, 0);
+});
+
+test('GetEligibleArrivalsUseCase: filters arrivals and resolves alighting in Application', async () => {
+  const stops = [
+    { stop: '1', lat: 36.520, lon: -6.280 },
+    { stop: '2', lat: 36.535, lon: -6.297 },
+  ];
+  const useCase = new GetEligibleArrivalsUseCase({
+    transit: {
+      getStops: async () => stops,
+      getLines: async () => ({ '1': { Centro: ['1', '2'] } }),
+      getArrivals: async () => [
+        { line: '1', destination: 'Centro', minutes: 4 },
+        { line: '9', destination: 'Wrong direction', minutes: 2 },
+      ],
+    },
+  });
+
+  const result = await useCase.execute({
+    stops: [stops[0]],
+    destination: { lat: 36.536, lon: -6.298 },
+  });
+  const arrivals = result.get('1');
+
+  assert.equal(arrivals.length, 1);
+  assert.equal(arrivals[0].line, '1');
+  assert.equal(arrivals[0].alight.stop.stop, '2');
+});
 
 class FakeJourneyLog {
   constructor() {
@@ -510,4 +616,3 @@ test('FindBestJourneysUseCase: flags degraded last-mile when pedestrian routing 
   assert.equal(decision.hero.breakdown.lastMileDegraded, true);
   assert.ok(decision.hero.breakdown.lastMileMinutes > 0);
 });
-
