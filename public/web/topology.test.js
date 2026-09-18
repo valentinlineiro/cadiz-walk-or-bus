@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { matchDirection, findAlightStop, haversineMeters, diversifyByLine, stopLineMap } from './topology.js';
+import { matchDirection, findAlightStop, haversineMeters, diversifyByLine, stopLineMap } from './domain/topology.js';
 
 test('matchDirection matches exact, case-insensitive, substring, and keyword', () => {
   const dirs = {

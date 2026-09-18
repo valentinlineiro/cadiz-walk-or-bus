@@ -7,7 +7,7 @@ import {
   GetQuickVerdictUseCase,
   SearchDestinationsUseCase,
 } from './application/index.js';
-import { createWalkIdentity, createBusIdentity } from './identity.js';
+import { createWalkIdentity, createBusIdentity } from './domain/identity.js';
 import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
 import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
 import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
