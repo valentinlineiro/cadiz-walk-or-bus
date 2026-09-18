@@ -1,14 +1,40 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, normalize, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
-const violations = [];
+const scriptPath = fileURLToPath(import.meta.url);
+const root = dirname(dirname(scriptPath));
+
+const LEGACY_FILES = [
+  'public/web/api.js',
+  'public/web/journey-log.js',
+  'public/web/decision.js',
+  'public/web/last-mile.js',
+  'public/web/constants.js',
+  'public/web/diversity.js',
+  'public/web/identity.js',
+  'public/web/models.js',
+  'public/web/planner.js',
+  'public/web/topology.js',
+  'src/domain/decision.ts',
+  'public/web/domain/decision.js',
+];
+
+const PERMITTED_COMPOSITION_SEAMS = [
+  'setTransitAdapter',
+  'setCachedStops',
+  'setCachedLines',
+];
 
 function filesUnder(relativeDir, extension) {
   const directory = join(root, relativeDir);
   return readdirSync(directory, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(extension))
     .map((entry) => join(entry.parentPath ?? entry.path, entry.name));
+}
+
+function relativePath(path) {
+  return relative(root, path).replaceAll('\\', '/');
 }
 
 function importsOf(path) {
@@ -23,55 +49,121 @@ function relativeTarget(from, specifier) {
   if (!specifier.startsWith('.')) return null;
   const base = normalize(join(dirname(from), specifier));
   const sourceBase = base.endsWith('.js') ? base.slice(0, -3) : base;
-  for (const candidate of [base, sourceBase, `${sourceBase}.ts`, `${sourceBase}.js`, join(sourceBase, 'index.ts'), join(sourceBase, 'index.js')]) {
+  for (const candidate of [
+    base,
+    sourceBase,
+    `${sourceBase}.ts`,
+    `${sourceBase}.js`,
+    join(sourceBase, 'index.ts'),
+    join(sourceBase, 'index.js'),
+  ]) {
     if (existsSync(candidate)) return candidate;
   }
   return null;
 }
 
-function assertLayerImports(relativeDir, allowedRoots) {
-  for (const path of filesUnder(relativeDir, '.ts')) {
+function importViolations(relativeDir, extension, allowedRoots, skip = () => false) {
+  const violations = [];
+  for (const path of filesUnder(relativeDir, extension)) {
+    if (skip(path)) continue;
     for (const specifier of importsOf(path)) {
       const target = relativeTarget(path, specifier);
       if (!target) continue;
-      const targetRelative = relative(root, target);
+      const targetRelative = relativePath(target);
       if (!allowedRoots.some((allowed) => targetRelative === allowed || targetRelative.startsWith(`${allowed}/`))) {
-        violations.push(`${relative(root, path)} imports outside its layer: ${specifier}`);
+        violations.push(`${relativePath(path)} imports outside its layer: ${specifier}`);
       }
     }
   }
+  return violations;
 }
 
-assertLayerImports('src/domain', ['src/domain']);
-assertLayerImports('src/application', ['src/application', 'src/domain']);
+export function findCompositionRoots() {
+  return filesUnder('public/web', '.js')
+    .filter((path) => !path.endsWith('.test.js'))
+    .filter((path) => importsOf(path).some((specifier) => specifier.includes('/infrastructure/')))
+    .map(relativePath);
+}
 
-const uiPath = join(root, 'public/web/ui.js');
-for (const specifier of importsOf(uiPath)) {
-  if (specifier.includes('/infrastructure/') || ['./api.js', './journey-log.js', './decision.js'].includes(specifier)) {
-    violations.push(`public/web/ui.js imports forbidden module: ${specifier}`);
+export function findServiceWorkerShellProblems() {
+  const source = readFileSync(join(root, 'public/sw.js'), 'utf8');
+  const shellUrls = [...source.matchAll(/['"](\/[^'"]*)['"]/g)].map((match) => match[1]);
+  const problems = [];
+  for (const url of shellUrls) {
+    if (url === '/') continue;
+    if (!existsSync(join(root, 'public', url.slice(1)))) {
+      problems.push(`service worker caches missing file: ${url}`);
+    }
   }
+  return problems;
 }
 
-for (const relativePath of [
-  'public/web/api.js',
-  'public/web/journey-log.js',
-  'public/web/decision.js',
-  'public/web/last-mile.js',
-  'src/domain/decision.ts',
-  'public/web/domain/decision.js',
-]) {
-  if (existsSync(join(root, relativePath))) violations.push(`legacy module remains: ${relativePath}`);
+function findUiBoundaryProblems() {
+  const uiPath = join(root, 'public/web/ui.js');
+  const forbiddenSpecifiers = ['./api.js', './journey-log.js', './decision.js', './last-mile.js'];
+  return importsOf(uiPath)
+    .filter((specifier) => specifier.includes('/infrastructure/') || forbiddenSpecifiers.includes(specifier))
+    .map((specifier) => `public/web/ui.js imports forbidden module: ${specifier}`);
 }
 
-const serviceWorker = readFileSync(join(root, 'public/sw.js'), 'utf8');
-for (const legacyUrl of ['/web/api.js', '/web/decision.js', '/web/journey-log.js', '/web/last-mile.js']) {
-  if (serviceWorker.includes(legacyUrl)) violations.push(`service worker caches ${legacyUrl}`);
+function findCompositionSeamProblems() {
+  const compositionPath = join(root, 'public/web/application/composition.js');
+  const source = readFileSync(compositionPath, 'utf8');
+  const problems = [];
+  for (const seam of PERMITTED_COMPOSITION_SEAMS) {
+    const occurrences = source.match(new RegExp(`\\b${seam}\\b`, 'g'))?.length ?? 0;
+    if (occurrences !== 1) {
+      problems.push(`composition seam ${seam} must have exactly one declaration`);
+    }
+  }
+  return problems;
 }
 
-if (violations.length > 0) {
-  console.error('Architecture gate failed:');
-  for (const violation of violations) console.error(`- ${violation}`);
-  process.exitCode = 1;
-} else {
-  console.log('Architecture gate passed.');
+export function collectArchitectureViolations() {
+  const violations = [];
+
+  violations.push(...importViolations('src/domain', '.ts', ['src/domain']));
+  violations.push(...importViolations('src/application', '.ts', ['src/application', 'src/domain']));
+  violations.push(...importViolations('src/infrastructure', '.ts', [
+    'src/infrastructure',
+    'src/application/ports',
+    'src/domain',
+  ]));
+
+  violations.push(...importViolations('public/web/domain', '.js', ['public/web/domain']));
+  violations.push(...importViolations('public/web/application', '.js', [
+    'public/web/application',
+    'public/web/domain',
+  ], (path) => relativePath(path) === 'public/web/application/composition.js'));
+  violations.push(...importViolations('public/web/infrastructure', '.js', [
+    'public/web/infrastructure',
+    'public/web/application/ports',
+    'public/web/domain',
+  ]));
+
+  violations.push(...findUiBoundaryProblems());
+
+  const roots = findCompositionRoots();
+  if (roots.length !== 1 || roots[0] !== 'public/web/application/composition.js') {
+    violations.push(`expected one composition root, found: ${roots.join(', ') || 'none'}`);
+  }
+
+  for (const relativeFile of LEGACY_FILES) {
+    if (existsSync(join(root, relativeFile))) violations.push(`legacy module remains: ${relativeFile}`);
+  }
+
+  violations.push(...findCompositionSeamProblems());
+  violations.push(...findServiceWorkerShellProblems());
+  return violations;
+}
+
+if (process.argv[1] === scriptPath) {
+  const violations = collectArchitectureViolations();
+  if (violations.length > 0) {
+    console.error('Architecture gate failed:');
+    for (const violation of violations) console.error(`- ${violation}`);
+    process.exitCode = 1;
+  } else {
+    console.log('Architecture gate passed.');
+  }
 }
