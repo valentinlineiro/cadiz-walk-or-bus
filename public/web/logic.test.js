@@ -1821,6 +1821,8 @@ test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and a
   assert.ok(html1.includes('Ruta directa a pie'));
   assert.ok(html1.includes('data-identity="bus:1:1106:1204"'));
   assert.ok(html1.includes('-4′'));
+  const htmlWalkPromoted = planningCardsHTML([cBus, { ...cWalk, estimatedMinutes: 19, exactJourney: { totalMinutes: 19 } }], 1, { walkMinutes: 19 });
+  assert.ok(htmlWalkPromoted.includes('El bus es 5′ más rápido que ir andando.'));
 
   const slowerBus = { ...cBus, exactJourney: { ...cBus.exactJourney, totalMinutes: 22 }, estimatedMinutes: 22 };
   const htmlWalkWins = planningCardsHTML([slowerBus, cWalk], 1, { walkMinutes: 18 });
@@ -1929,7 +1931,7 @@ test('ui: promoting an alternative preserves the comparison context', () => {
   try {
     renderDecisionWithAlternatives([cBus, cWalk], 0, () => {}, { walkMinutes: 18 });
     listeners[0]();
-    assert.match(mockDecision.innerHTML, /Bus te ahorra 4′ frente a ir andando\./);
+    assert.match(mockDecision.innerHTML, /El bus es 4′ más rápido que ir andando\./);
   } finally {
     delete globalThis.document;
   }
