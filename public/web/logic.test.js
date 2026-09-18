@@ -308,29 +308,21 @@ test('nearestStops returns 3 closest with _km', () => {
   assert.ok(n[0]._km < 0.05);
 });
 
-test('isInCadiz returns true for Cádiz center', () => {
-  assert.equal(isInCadiz(36.5271, -6.2885), true);
+test('isInCadiz returns true for Cádiz landmarks inside service polygon', () => {
+  assert.equal(isInCadiz(36.5271, -6.2885), true, 'Cádiz center');
+  assert.equal(isInCadiz(36.5350, -6.2970), true, 'Plaza Mina');
+  assert.equal(isInCadiz(36.5280, -6.3180), true, 'Castillo San Sebastián');
+  assert.equal(isInCadiz(36.4950, -6.2700), true, 'Cortadura');
 });
 
-test('isInCadiz returns false for Madrid', () => {
-  assert.equal(isInCadiz(40.4168, -3.7038), false);
-});
-
-test('isInCadiz returns true on bbox boundary (SW corner)', () => {
-  assert.equal(isInCadiz(36.40, -6.35), true);
-});
-
-test('isInCadiz returns true on bbox boundary (NE corner)', () => {
-  assert.equal(isInCadiz(36.60, -6.20), true);
-});
-
-test('isInCadiz returns false just north of bbox', () => {
-  // 36.601 is just outside the northern edge
-  assert.equal(isInCadiz(36.601, -6.2885), false);
-});
-
-test('isInCadiz returns false one step west of bbox', () => {
-  assert.equal(isInCadiz(36.5271, -6.351), false);
+test('isInCadiz returns false for locations outside service polygon', () => {
+  assert.equal(isInCadiz(40.4168, -3.7038), false, 'Madrid');
+  assert.equal(isInCadiz(36.4650, -6.1980), false, 'San Fernando Plaza del Rey');
+  assert.equal(isInCadiz(36.5280, -6.1900), false, 'Puerto Real');
+  assert.equal(isInCadiz(36.5980, -6.2300), false, 'El Puerto de Santa María');
+  assert.equal(isInCadiz(36.40, -6.35), false, 'Atlantic Ocean SW');
+  assert.equal(isInCadiz(36.60, -6.20), false, 'Mainland NE');
+  assert.equal(isInCadiz(36.5271, -6.351), false, 'Ocean west of Cádiz');
 });
 
 test('transition follows the locating→ready→deciding flow', () => {

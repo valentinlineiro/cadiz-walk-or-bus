@@ -15,6 +15,7 @@ export function decide(arrivals, walkMinutes) {
 }
 
 export function parseArrivals(html) {
+  if (typeof html !== 'string') return [];
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
   const arrivals = [];
   for (const row of rows) {
@@ -23,12 +24,21 @@ export function parseArrivals(html) {
     );
     if (cells.length < 3) continue;
     const [line, destination, arrival] = cells;
-    // Only relative "Xmin" entries are usable for a right-now decision;
-    // absolute clock-time entries (e.g. "18:31") are a later trip, not
-    // relevant to "wait or walk right now" -- skipped, not misread.
+    if (!line || !destination) continue;
+
+    let minutes;
     const relMatch = arrival.match(/^(\d+)\s*min$/i);
-    if (!line || !destination || !relMatch) continue;
-    arrivals.push({ line, destination, minutes: Number(relMatch[1]) });
+    if (relMatch) {
+      minutes = Number(relMatch[1]);
+    } else if (/^inminente$/i.test(arrival.trim())) {
+      // In the municipal panel, "Inminente" signifies the vehicle is arriving at the platform (< 1 min wait)
+      minutes = 0;
+    } else {
+      // Absolute clock times (e.g. "15:30"), out-of-service ("Sin servicio"), bounds ("> 45 min"), or empty cells are ignored
+      continue;
+    }
+
+    arrivals.push({ line, destination, minutes });
   }
   return arrivals;
 }

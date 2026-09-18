@@ -32,11 +32,22 @@ export class ResilientTransitAdapter {
         }
     }
     async getArrivals(stopId) {
+        let liveArrivals = [];
+        let realtimeFailed = false;
         try {
-            return await withTimeout(this.realtime.getArrivals(stopId), this.timeoutMs);
+            liveArrivals = await withTimeout(this.realtime.getArrivals(stopId), this.timeoutMs);
         }
         catch {
-            return this.scheduled.getArrivals(stopId);
+            realtimeFailed = true;
+        }
+        if (!realtimeFailed && liveArrivals.length > 0) {
+            return liveArrivals;
+        }
+        try {
+            return await this.scheduled.getArrivals(stopId);
+        }
+        catch {
+            return [];
         }
     }
 }

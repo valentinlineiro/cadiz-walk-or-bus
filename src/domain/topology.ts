@@ -2,6 +2,47 @@ import type { Coordinates, Stop, AlightResolution, LinesTopology } from './model
 
 const R = 6371000; // meters
 
+export const CADIZ_SERVICE_AREA_POLYGON: [number, number][] = [
+  [36.545, -6.280], // Dique de Levante
+  [36.545, -6.295], // Punta de San Felipe
+  [36.539, -6.303], // Baluarte de la Candelaria / Alameda
+  [36.536, -6.313], // Castillo Santa Catalina
+  [36.532, -6.313], // La Caleta
+  [36.527, -6.326], // Castillo San Sebastián (westernmost tip)
+  [36.524, -6.300], // Campo del Sur
+  [36.518, -6.290], // Santa María del Mar
+  [36.500, -6.283], // Playa Victoria
+  [36.480, -6.275], // Cortadura playa
+  [36.465, -6.240], // Torregorda
+  [36.460, -6.220], // Río Arillo boundary
+  [36.468, -6.213], // Río Arillo inland (border with San Fernando)
+  [36.480, -6.245], // Santibáñez / Bahía
+  [36.490, -6.263], // Cortadura bay side
+  [36.495, -6.253], // Zona Franca interior
+  [36.505, -6.256], // Zona Franca exterior
+  [36.512, -6.262], // Puntales
+  [36.520, -6.268], // Barriada de la Paz
+  [36.527, -6.272], // Astilleros / Navantia Cádiz
+  [36.533, -6.278], // Muelle Pesquero
+  [36.545, -6.280], // Closing point
+];
+
+export function isPointInCadiz(lat: number, lon: number, poly: [number, number][] = CADIZ_SERVICE_AREA_POLYGON): boolean {
+  if (typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) {
+    return false;
+  }
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    const intersect = ((yi > lon) !== (yj > lon)) &&
+      (lat < (xj - xi) * (lon - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+
 export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;

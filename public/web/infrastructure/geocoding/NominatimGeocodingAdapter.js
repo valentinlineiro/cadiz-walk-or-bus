@@ -1,4 +1,41 @@
+import { isPointInCadiz } from '../../domain/topology.js';
 export const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
+const EXTERNAL_REGIONS = new Set([
+    'madrid',
+    'barcelona',
+    'sevilla',
+    'paris',
+    'valencia',
+    'malaga',
+    'granada',
+    'cordoba',
+    'bilbao',
+    'zaragoza',
+    'toledo',
+    'londres',
+    'london',
+    'roma',
+    'rome',
+    'san fernando',
+    'puerto real',
+    'el puerto de santa maria',
+    'el puerto',
+    'chiclana',
+    'chiclana de la frontera',
+    'jerez',
+    'jerez de la frontera',
+    'rota',
+]);
+const STREET_PREFIX_REGEX = /^(calle|c\/|cl|plaza|plza|pza|avda|avenida|av|paseo|pº|glorieta|gta|parque|alameda|jardin|hotel|barrio|playa|muelle|dique|baluarte|castillo|mercado|teatro|hospital)\b/i;
+function normalizeSearchText(str) {
+    return str
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ');
+}
 export class NominatimGeocodingAdapter {
     fetchImpl;
     constructor(fetchImpl = globalThis.fetch) {
@@ -7,6 +44,12 @@ export class NominatimGeocodingAdapter {
     async search(query, limit = 5) {
         if (!query || query.trim().length < 2)
             return [];
+        const normQuery = normalizeSearchText(query);
+        const hasStreetPrefix = STREET_PREFIX_REGEX.test(query.trim());
+        // Reject queries that are bare external cities/territories without an explicit street/poi prefix
+        if (!hasStreetPrefix && EXTERNAL_REGIONS.has(normQuery)) {
+            return [];
+        }
         const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
         let r;
         try {
@@ -26,7 +69,15 @@ export class NominatimGeocodingAdapter {
         }
         if (!Array.isArray(hits))
             return [];
-        return hits.map((hit) => {
+        return hits
+            .filter((hit) => {
+            const lat = Number(hit.lat);
+            const lon = Number(hit.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                return false;
+            return isPointInCadiz(lat, lon);
+        })
+            .map((hit) => {
             const displayName = String(hit.display_name ?? '');
             const main = hit.name || displayName.split(',')[0].trim();
             const parts = displayName.split(',').map((p) => p.trim());
@@ -37,7 +88,8 @@ export class NominatimGeocodingAdapter {
                 lat: Number(hit.lat),
                 lon: Number(hit.lon),
             };
-        });
+        })
+            .slice(0, limit);
     }
     async geocode(query) {
         if (!query || !query.trim())

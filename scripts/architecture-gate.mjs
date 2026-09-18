@@ -95,6 +95,20 @@ export function findServiceWorkerShellProblems() {
       problems.push(`service worker caches missing file: ${url}`);
     }
   }
+
+  const gtfsPath = join(root, 'public/fixtures/gtfs-cadiz.snapshot.json');
+  if (existsSync(gtfsPath)) {
+    try {
+      const gtfs = JSON.parse(readFileSync(gtfsPath, 'utf8'));
+      const swFeedVersionMatch = source.match(/GTFS_FEED_VERSION\s*=\s*['"]([^'"]+)['"]/);
+      if (!swFeedVersionMatch) {
+        problems.push('service worker must declare GTFS_FEED_VERSION matching gtfs-cadiz.snapshot.json');
+      } else if (swFeedVersionMatch[1] !== gtfs.feedVersion) {
+        problems.push(`service worker GTFS_FEED_VERSION ('${swFeedVersionMatch[1]}') does not match gtfs-cadiz.snapshot.json feedVersion ('${gtfs.feedVersion}')`);
+      }
+    } catch {}
+  }
+
   return problems;
 }
 

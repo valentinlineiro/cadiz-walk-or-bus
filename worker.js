@@ -14,6 +14,7 @@ export function decide(arrivals, walkMinutes) {
 }
 
 export function parseArrivals(html) {
+  if (typeof html !== 'string') return [];
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
   const arrivals = [];
   for (const row of rows) {
@@ -22,9 +23,19 @@ export function parseArrivals(html) {
     );
     if (cells.length < 3) continue;
     const [line, destination, arrival] = cells;
+    if (!line || !destination) continue;
+
+    let minutes;
     const relMatch = arrival.match(/^(\d+)\s*min$/i);
-    if (!line || !destination || !relMatch) continue;
-    arrivals.push({ line, destination, minutes: Number(relMatch[1]) });
+    if (relMatch) {
+      minutes = Number(relMatch[1]);
+    } else if (/^inminente$/i.test(arrival.trim())) {
+      minutes = 0;
+    } else {
+      continue;
+    }
+
+    arrivals.push({ line, destination, minutes });
   }
   return arrivals;
 }

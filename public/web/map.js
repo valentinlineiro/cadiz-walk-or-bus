@@ -1,4 +1,4 @@
-let map, me, destPin, alightPin, walkLine, busLine, pins = new Map();
+let map, me, meAccuracy, destPin, alightPin, walkLine, busLine, pins = new Map();
 
 // Inline SVG glyphs — no emoji on the map, each marker a distinct shape.
 const SVG = {
@@ -17,10 +17,29 @@ export function initMap(onPin, onMapClick) {
   }
 }
 
-export function showMe(lat, lon) {
+export function showMe(lat, lon, accuracy) {
   if (!me) me = L.circleMarker([lat, lon], { radius: 9, color: '#fff', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }).addTo(map);
   else me.setLatLng([lat, lon]);
-  map.setView([lat, lon], 15);
+
+  if (typeof accuracy === 'number' && accuracy > 25) {
+    if (!meAccuracy) {
+      meAccuracy = L.circle([lat, lon], {
+        radius: accuracy,
+        color: '#2563eb',
+        weight: 1,
+        fillColor: '#2563eb',
+        fillOpacity: 0.12,
+      }).addTo(map);
+    } else {
+      meAccuracy.setLatLng([lat, lon]);
+      meAccuracy.setRadius(accuracy);
+    }
+  } else if (meAccuracy) {
+    map.removeLayer(meAccuracy);
+    meAccuracy = null;
+  }
+
+  map.setView([lat, lon], accuracy > 1500 ? 13 : 15);
 }
 
 export function showDestination(lat, lon, label) {

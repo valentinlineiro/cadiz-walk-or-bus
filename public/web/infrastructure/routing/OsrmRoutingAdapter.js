@@ -11,7 +11,10 @@ export class OsrmRoutingAdapter {
             r = await this.fetchImpl(url);
         }
         catch {
-            return null;
+            return { status: 'service_failure', coordinates: [] };
+        }
+        if (r.status >= 500) {
+            return { status: 'service_failure', coordinates: [] };
         }
         if (!r.ok)
             return null;
@@ -20,10 +23,10 @@ export class OsrmRoutingAdapter {
             data = await r.json();
         }
         catch {
-            return null;
+            return { status: 'service_failure', coordinates: [] };
         }
         const [route] = data.routes ?? [];
-        if (!route)
+        if (!route || data.code === 'NoRoute')
             return null;
         // Reject degenerate routes shorter than straight line
         if (route.distance < haversineMeters(from.lat, from.lon, to.lat, to.lon) * 0.95) {
@@ -35,7 +38,7 @@ export class OsrmRoutingAdapter {
             : Math.ceil(route.duration / 60);
         const rawCoords = route.geometry?.coordinates ?? [];
         const coordinates = rawCoords.map(([lon, lat]) => [lat, lon]);
-        return { minutes, coordinates };
+        return { status: 'available', minutes, coordinates };
     }
     async busRouteHop(from, to) {
         const straightLine = () => [[from.lat, from.lon], [to.lat, to.lon]];

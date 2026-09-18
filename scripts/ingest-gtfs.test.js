@@ -29,3 +29,24 @@ test('buildSnapshot filters the selected agency and preserves GTFS schedules and
     { stop: 'B', arrivalSeconds: 29400, departureSeconds: 29400 },
   ]);
 });
+
+test('syncServiceWorkerFeedVersion updates sw.js feed version guaranteeing cache invalidation', async () => {
+  const { syncServiceWorkerFeedVersion } = await import('./ingest-gtfs.mjs');
+  const tempSw = 'const GTFS_FEED_VERSION = "nap-2026-09-18";\nconst CACHE_VERSION = `v10-${GTFS_FEED_VERSION}`;\n';
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const os = await import('node:os');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-test-'));
+  const tmpSwPath = path.join(tmpDir, 'sw.js');
+  fs.writeFileSync(tmpSwPath, tempSw, 'utf8');
+
+  const changed = syncServiceWorkerFeedVersion(tmpSwPath, 'nap-2026-09-25');
+  assert.equal(changed, true);
+
+  const updatedContent = fs.readFileSync(tmpSwPath, 'utf8');
+  assert.ok(updatedContent.includes("GTFS_FEED_VERSION = 'nap-2026-09-25'"));
+  assert.ok(updatedContent.includes('const CACHE_VERSION = `v10-${GTFS_FEED_VERSION}`'));
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});

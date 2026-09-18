@@ -53,6 +53,7 @@ export interface Verdict {
 export interface Route {
   minutes?: number;
   coordinates: [number, number][];
+  status?: 'available' | 'unavailable' | 'service_failure';
 }
 
 export interface LinesTopology {
@@ -152,9 +153,9 @@ export interface DecisionAlternative {
 }
 
 export interface Decision {
-  hero: EvaluatedJourney;
+  hero: EvaluatedJourney | null;
   alternatives: DecisionAlternative[];
-  walkMinutes: number;
+  walkMinutes: number | null;
 }
 
 /**

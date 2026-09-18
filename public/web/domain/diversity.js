@@ -83,7 +83,8 @@ export function filterDiverseAlternatives(candidates, hero, policy = DEFAULT_PLA
         if (isSameIdentity(cand.identity, hero.identity))
             continue;
         if (typeof cand.estimatedMinutes === 'number' && typeof hero.estimatedMinutes === 'number') {
-            if (cand.estimatedMinutes - hero.estimatedMinutes > maxDelta)
+            // Direct walk is the unique modal comparator in Walk-vs-Bus: never prune it via similarityMaxDeltaMinutes
+            if (cand.mode !== 'walk' && cand.estimatedMinutes - hero.estimatedMinutes > maxDelta)
                 continue;
         }
         // Must be structurally diverse from the Hero

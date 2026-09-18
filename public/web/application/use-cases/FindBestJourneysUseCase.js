@@ -58,28 +58,62 @@ export class FindBestJourneysUseCase {
         const { primary: cheapPrimary, alternatives: cheapAlternatives } = selectCandidates([walkCandidate, ...busCandidates], policy);
         const selected = cheapPrimary ? [cheapPrimary, ...cheapAlternatives] : [walkCandidate];
         // 3. CONCURRENT EXACT ROUTING (Only for admitted <= 3 candidates)
-        const evaluatedJourneys = await Promise.all(selected.map(async (cand) => {
+        const rawEvaluated = await Promise.all(selected.map(async (cand) => {
             if (cand.mode === 'walk') {
-                const routedWalk = await this.ports.routing.routeWalking(origin, destination).catch(() => null);
-                if (!routedWalk || typeof routedWalk.minutes !== 'number') {
-                    throw new Error('Sin ruta andando');
+                let routedWalk = null;
+                let isServiceFailure = false;
+                try {
+                    routedWalk = await this.ports.routing.routeWalking(origin, destination);
+                    if (routedWalk && routedWalk.status === 'service_failure') {
+                        isServiceFailure = true;
+                        routedWalk = null;
+                    }
                 }
-                const totalMins = routedWalk.minutes;
-                return {
-                    identity: cand.identity,
-                    mode: 'walk',
-                    totalMinutes: totalMins,
-                    dataQuality: 'live',
-                    breakdown: {
-                        walkToStopMinutes: 0,
-                        waitMinutes: 0,
-                        rideMinutes: 0,
-                        lastMileMinutes: totalMins,
-                        lastMileDegraded: false,
-                    },
-                    routes: { walkRoute: routedWalk },
-                    metadata: cand.metadata,
-                };
+                catch {
+                    isServiceFailure = true;
+                    routedWalk = null;
+                }
+                if (routedWalk && typeof routedWalk.minutes === 'number' && routedWalk.status !== 'unavailable') {
+                    const totalMins = routedWalk.minutes;
+                    return {
+                        identity: cand.identity,
+                        mode: 'walk',
+                        totalMinutes: totalMins,
+                        dataQuality: 'live',
+                        breakdown: {
+                            walkToStopMinutes: 0,
+                            waitMinutes: 0,
+                            rideMinutes: 0,
+                            lastMileMinutes: totalMins,
+                            lastMileDegraded: false,
+                        },
+                        routes: { walkRoute: routedWalk },
+                        metadata: cand.metadata,
+                    };
+                }
+                else if (isServiceFailure) {
+                    // Service failure (OSRM timeout, 5xx, network error): degraded walk candidate
+                    const totalMins = cand.estimatedMinutes;
+                    return {
+                        identity: cand.identity,
+                        mode: 'walk',
+                        totalMinutes: totalMins,
+                        dataQuality: 'degraded',
+                        breakdown: {
+                            walkToStopMinutes: 0,
+                            waitMinutes: 0,
+                            rideMinutes: 0,
+                            lastMileMinutes: totalMins,
+                            lastMileDegraded: true,
+                        },
+                        routes: { walkRoute: null },
+                        metadata: cand.metadata,
+                    };
+                }
+                else {
+                    // Route unavailable (ocean, inaccessible pedestrian): candidate cannot be reached on foot
+                    return null;
+                }
             }
             // Bus candidate exact legs
             const boardStop = cand.metadata?.boardingStop;
@@ -115,6 +149,14 @@ export class FindBestJourneysUseCase {
                 metadata: cand.metadata,
             };
         }));
+        const evaluatedJourneys = rawEvaluated.filter((j) => j !== null);
+        if (evaluatedJourneys.length === 0) {
+            return {
+                hero: null,
+                alternatives: [],
+                walkMinutes: null,
+            };
+        }
         // 4. EXACT RE-RANKING (Definitive Hero Selection)
         const reRankItems = evaluatedJourneys.map((j) => ({
             identity: j.identity,
@@ -165,7 +207,7 @@ export class FindBestJourneysUseCase {
         return {
             hero: finalHero,
             alternatives,
-            walkMinutes: exactWalk?.totalMinutes ?? walkCandidate.estimatedMinutes,
+            walkMinutes: exactWalk ? exactWalk.totalMinutes : null,
         };
     }
 }

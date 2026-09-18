@@ -171,7 +171,10 @@ export function escapeHTML(str) {
     .replace(/'/g, '&#39;');
 }
 
-export function errorCardHTML(query) {
+export function errorCardHTML(query, customMessage) {
+  if (customMessage) {
+    return `<div class="decision-error">${escapeHTML(customMessage)}</div>`;
+  }
   const q = query ? ` «${escapeHTML(query)}»` : '';
   return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
 }
@@ -418,7 +421,7 @@ function updateFavToggle() {
 
 // A failed search must not leave the previous destination's verdict on
 // screen looking current — clear the sheet instead of leaving it stale.
-function showSearchError(query) {
+function showSearchError(query, customMessage) {
   destCoords = null;
   destLabel = null;
   clearRoute();
@@ -428,7 +431,7 @@ function showSearchError(query) {
   const decision = document.getElementById('decision');
   if (decision) {
     decision.classList.remove('hidden');
-    decision.innerHTML = errorCardHTML(query);
+    decision.innerHTML = errorCardHTML(query, customMessage);
   }
   hideFavToggle();
 }
@@ -617,10 +620,19 @@ function applyCandidateToMap(cand) {
 async function routeToDestination(dest) {
   if (!me) return;
   if (!isInCadiz(dest.lat, dest.lon)) {
-    console.warn('[D2] destination outside Cádiz bbox — aborting route', dest);
+    console.warn('[D2] destination outside Cádiz service area — aborting route', dest);
+    destCoords = null;
+    destLabel = null;
+    clearRoute();
+    setSheetState('VERDICT');
+    setState('FAILED', 'Destino fuera de Cádiz');
+    showSearchError(dest.label, 'El destino seleccionado está fuera del área de servicio de Cádiz.');
     return;
   }
-  if (!isInCadiz(me.lat, me.lon)) return; // origin guard: user outside Cádiz
+  // If user origin is outside Cádiz, fallback to CADIZ center for manual exploration
+  if (!isInCadiz(me.lat, me.lon)) {
+    me = { ...CADIZ };
+  }
   const id = ++requestId;
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
@@ -641,13 +653,23 @@ async function routeToDestination(dest) {
       destination: { ...destCoords, label: destLabel },
     });
   } catch {
-    if (id === requestId) setState('FAILED', 'Sin ruta andando → Andar');
+    if (id === requestId) {
+      destCoords = null;
+      destLabel = null;
+      clearRoute();
+      setState('FAILED', 'Sin ruta disponible');
+      showSearchError(dest.label, 'No se pudo calcular una ruta para este destino.');
+    }
     return;
   }
   if (id !== requestId) return;
 
   if (!decision || !decision.hero) {
-    setState('FAILED', 'Sin ruta andando → Andar');
+    destCoords = null;
+    destLabel = null;
+    clearRoute();
+    setState('FAILED', 'Sin ruta disponible');
+    showSearchError(dest.label, 'No hay ruta viable a pie ni en autobús para este destino.');
     return;
   }
 
@@ -670,10 +692,12 @@ async function routeToDestination(dest) {
     }
   }
   lastNear = nearStops;
-  arrivalsByStop = await getEligibleArrivalsUseCase.execute({
+  const eligibleArrivals = await getEligibleArrivalsUseCase.execute({
     stops: nearStops,
     destination: destCoords,
   });
+  if (id !== requestId) return;
+  arrivalsByStop = eligibleArrivals;
 
   const recordSelection = (promoted, started = false) => {
     applyCandidateToMap(promoted);
@@ -842,6 +866,16 @@ export function initUI() {
       if (!me) return;
       closeDropdown();
       const input = document.getElementById('q');
+      if (!isInCadiz(coords.lat, coords.lon)) {
+        if (input) input.value = '';
+        destCoords = null;
+        destLabel = null;
+        clearRoute();
+        setSheetState('VERDICT');
+        setState('FAILED', 'Punto fuera de Cádiz');
+        showSearchError('Punto en el mapa', 'El punto seleccionado está fuera del área de servicio de Cádiz.');
+        return;
+      }
       if (input) input.value = 'Destino en mapa';
       const dest = {
         lat: coords.lat,
@@ -1015,11 +1049,11 @@ function locate() {
       settled = true;
       clearTimeout(autoFallbackId);
       skipBtn?.classList.add('hidden');
-      const { latitude, longitude } = pos.coords;
+      const { latitude, longitude, accuracy } = pos.coords;
       if (!isInCadiz(latitude, longitude)) {
-        me = { lat: latitude, lon: longitude };
+        me = { ...CADIZ };
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
-        showMe(me.lat, me.lon);
+        showMe(latitude, longitude, accuracy);
         Promise.all([cachedTransitPort.getStops(), cachedTransitPort.getLines()])
           .then(([s, l]) => {
             stops = s;
@@ -1029,9 +1063,13 @@ function locate() {
           .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
         return;
       }
-      me = { lat: latitude, lon: longitude };
-      setState('LOCATED', 'Cargando paradas y líneas…');
-      showMe(me.lat, me.lon);
+      me = { lat: latitude, lon: longitude, accuracy };
+      const isLowAccuracy = typeof accuracy === 'number' && accuracy > 1500;
+      const statusMsg = isLowAccuracy
+        ? `Ubicación aproximada (±${Math.round(accuracy / 1000)} km)`
+        : (typeof accuracy === 'number' && accuracy > 200 ? `Ubicación aproximada (±${Math.round(accuracy)} m)` : 'Cargando paradas y líneas…');
+      setState(isLowAccuracy ? 'LOW_ACCURACY' : 'LOCATED', statusMsg);
+      showMe(me.lat, me.lon, accuracy);
       try {
         stops = await cachedTransitPort.getStops();
         lines = await cachedTransitPort.getLines();

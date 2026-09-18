@@ -8,6 +8,7 @@ import type {
   EvaluatedJourney,
   JourneyCandidate,
   LinesTopology,
+  Route,
   Stop,
 } from '../../domain/models.js';
 import type { JourneyIdentity } from '../../domain/identity.js';
@@ -104,29 +105,61 @@ export class FindBestJourneysUseCase {
     const selected: JourneyCandidate[] = cheapPrimary ? [cheapPrimary, ...cheapAlternatives] : [walkCandidate];
 
     // 3. CONCURRENT EXACT ROUTING (Only for admitted <= 3 candidates)
-    const evaluatedJourneys: EvaluatedJourney[] = await Promise.all(
-      selected.map(async (cand: JourneyCandidate): Promise<EvaluatedJourney> => {
+    const rawEvaluated = await Promise.all(
+      selected.map(async (cand: JourneyCandidate): Promise<EvaluatedJourney | null> => {
         if (cand.mode === 'walk') {
-          const routedWalk = await this.ports.routing.routeWalking(origin, destination).catch(() => null);
-          if (!routedWalk || typeof routedWalk.minutes !== 'number') {
-            throw new Error('Sin ruta andando');
+          let routedWalk: Route | null = null;
+          let isServiceFailure = false;
+          try {
+            routedWalk = await this.ports.routing.routeWalking(origin, destination);
+            if (routedWalk && routedWalk.status === 'service_failure') {
+              isServiceFailure = true;
+              routedWalk = null;
+            }
+          } catch {
+            isServiceFailure = true;
+            routedWalk = null;
           }
-          const totalMins = routedWalk.minutes;
-          return {
-            identity: cand.identity,
-            mode: 'walk',
-            totalMinutes: totalMins,
-            dataQuality: 'live',
-            breakdown: {
-              walkToStopMinutes: 0,
-              waitMinutes: 0,
-              rideMinutes: 0,
-              lastMileMinutes: totalMins,
-              lastMileDegraded: false,
-            },
-            routes: { walkRoute: routedWalk },
-            metadata: cand.metadata,
-          };
+
+          if (routedWalk && typeof routedWalk.minutes === 'number' && routedWalk.status !== 'unavailable') {
+            const totalMins = routedWalk.minutes;
+            return {
+              identity: cand.identity,
+              mode: 'walk',
+              totalMinutes: totalMins,
+              dataQuality: 'live',
+              breakdown: {
+                walkToStopMinutes: 0,
+                waitMinutes: 0,
+                rideMinutes: 0,
+                lastMileMinutes: totalMins,
+                lastMileDegraded: false,
+              },
+              routes: { walkRoute: routedWalk },
+              metadata: cand.metadata,
+            };
+          } else if (isServiceFailure) {
+            // Service failure (OSRM timeout, 5xx, network error): degraded walk candidate
+            const totalMins = cand.estimatedMinutes;
+            return {
+              identity: cand.identity,
+              mode: 'walk',
+              totalMinutes: totalMins,
+              dataQuality: 'degraded',
+              breakdown: {
+                walkToStopMinutes: 0,
+                waitMinutes: 0,
+                rideMinutes: 0,
+                lastMileMinutes: totalMins,
+                lastMileDegraded: true,
+              },
+              routes: { walkRoute: null },
+              metadata: cand.metadata,
+            };
+          } else {
+            // Route unavailable (ocean, inaccessible pedestrian): candidate cannot be reached on foot
+            return null;
+          }
         }
 
         // Bus candidate exact legs
@@ -171,6 +204,17 @@ export class FindBestJourneysUseCase {
         };
       }),
     );
+    const evaluatedJourneys: EvaluatedJourney[] = rawEvaluated.filter(
+      (j): j is EvaluatedJourney => j !== null,
+    );
+
+    if (evaluatedJourneys.length === 0) {
+      return {
+        hero: null,
+        alternatives: [],
+        walkMinutes: null,
+      };
+    }
 
     // 4. EXACT RE-RANKING (Definitive Hero Selection)
     const reRankItems: ReRankItem[] = evaluatedJourneys.map((j) => ({
@@ -231,7 +275,7 @@ export class FindBestJourneysUseCase {
     return {
       hero: finalHero,
       alternatives,
-      walkMinutes: exactWalk?.totalMinutes ?? walkCandidate.estimatedMinutes,
+      walkMinutes: exactWalk ? exactWalk.totalMinutes : null,
     };
   }
 }

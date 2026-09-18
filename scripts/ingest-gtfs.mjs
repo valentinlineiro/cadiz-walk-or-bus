@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -170,6 +170,20 @@ function cliArgs(argv) {
   return args;
 }
 
+export function syncServiceWorkerFeedVersion(swPath, feedVersion) {
+  if (!existsSync(swPath)) return false;
+  const content = readFileSync(swPath, 'utf8');
+  const updated = content.replace(
+    /GTFS_FEED_VERSION\s*=\s*['"][^'"]*['"]/,
+    `GTFS_FEED_VERSION = '${feedVersion}'`,
+  );
+  if (updated !== content) {
+    writeFileSync(swPath, updated);
+    return true;
+  }
+  return false;
+}
+
 if (pathToFileURL(resolve(process.argv[1] ?? '')).href === import.meta.url) {
   const args = cliArgs(process.argv);
   const snapshot = buildSnapshot(readZipFiles(args.input), {
@@ -179,4 +193,8 @@ if (pathToFileURL(resolve(process.argv[1] ?? '')).href === import.meta.url) {
   });
   mkdirSync(dirname(args.output), { recursive: true });
   writeFileSync(args.output, `${JSON.stringify(snapshot, null, 2)}\n`);
+
+  // Automatically synchronize public/sw.js with the new feed version
+  const swPath = resolve(dirname(args.output), '..', 'sw.js');
+  syncServiceWorkerFeedVersion(swPath, args['feed-version']);
 }

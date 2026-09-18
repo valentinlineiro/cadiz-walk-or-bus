@@ -116,7 +116,7 @@ test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and
     transit,
     routing: {
       routeWalking: async (from, to) => ({
-        minutes: !from.stop && !to.stop ? 30 : (to.stop ? 2 : 1),
+        minutes: !from.stop && !to.stop ? 200 : (to.stop ? 2 : 1),
         coordinates: [],
       }),
       routeBus: async () => ({ minutes: 8, coordinates: [] }),
@@ -491,7 +491,7 @@ test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 can
   assert.ok(decision.alternatives.length <= 2);
 });
 
-test('FindBestJourneysUseCase: throws Sin ruta andando when pedestrian routing fails (contract preservation)', async () => {
+test('FindBestJourneysUseCase: handles pedestrian routing failure gracefully without throwing Sin ruta andando', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.524, lon: -6.280, label: 'Plaza San Antonio' };
 
@@ -526,15 +526,12 @@ test('FindBestJourneysUseCase: throws Sin ruta andando when pedestrian routing f
     transit: fakeTransit,
   });
 
-  await assert.rejects(
-    async () => {
-      await useCase.execute({ origin, destination });
-    },
-    {
-      name: 'Error',
-      message: 'Sin ruta andando',
-    },
-  );
+  const decision = await useCase.execute({ origin, destination });
+  assert.deepEqual(decision, {
+    hero: null,
+    alternatives: [],
+    walkMinutes: null,
+  });
 });
 
 test('FindBestJourneysUseCase: exact re-ranking promotes post-routing fastest candidate to Hero', async () => {

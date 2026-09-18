@@ -761,7 +761,7 @@ test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight se
   assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
 });
 
-test('ResilientTransitAdapter: falls back on realtime errors but not on a valid empty response', async () => {
+test('ResilientTransitAdapter: falls back on realtime errors and on empty realtime response (Bug 7)', async () => {
   let scheduledCalls = 0;
   const scheduled = {
     getStops: async () => [{ stop: 'A', lat: 36.52, lon: -6.28 }],
@@ -778,9 +778,20 @@ test('ResilientTransitAdapter: falls back on realtime errors but not on a valid 
   assert.equal((await adapter.getArrivals('A'))[0].source, 'scheduled');
   assert.equal(scheduledCalls, 1);
 
+  // Bug 7: When realtime returns empty array [], fallback to scheduled GTFS if available
   const emptyRealtime = { ...realtime, getArrivals: async () => [] };
   const emptyAdapter = new ResilientTransitAdapter(emptyRealtime, scheduled, 50);
   scheduledCalls = 0;
-  assert.deepEqual(await emptyAdapter.getArrivals('A'), []);
-  assert.equal(scheduledCalls, 0, 'scheduled source must not be queried for valid realtime emptiness');
+  const fallbackArrivals = await emptyAdapter.getArrivals('A');
+  assert.equal(fallbackArrivals[0].source, 'scheduled');
+  assert.equal(scheduledCalls, 1, 'scheduled source must be queried when realtime returns empty array');
+
+  // When both realtime and scheduled are empty, returns empty array
+  const emptyScheduled = {
+    ...scheduled,
+    getArrivals: async () => [],
+  };
+  const bothEmptyAdapter = new ResilientTransitAdapter(emptyRealtime, emptyScheduled, 50);
+  assert.deepEqual(await bothEmptyAdapter.getArrivals('A'), []);
 });
+
