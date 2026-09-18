@@ -1,6 +1,24 @@
-# cadiz-walk-or-bus
+# Cádiz: ¿andar o bus?
 
-Wait for the bus, or walk, right now, in Cadiz.
+Una PWA para decidir si te compensa andar o esperar el bus urbano en Cádiz.
+
+## Qué hace
+
+La aplicación compara el tiempo de caminar con las próximas llegadas de bus y
+presenta una recomendación principal, alternativas y una explicación breve.
+
+- Usa llegadas realtime cuando el servicio municipal está disponible.
+- Usa horarios GTFS programados cuando realtime no está disponible.
+- Permite buscar un destino y usar el GPS como origen.
+- Está pensada para móvil y puede instalarse como PWA.
+
+## Cómo usarlo
+
+Abre la aplicación, permite el GPS si quieres usar tu posición, busca un
+destino y selecciona una opción. La aplicación calcula la recomendación con
+los datos disponibles en ese momento.
+
+También conserva el artefacto de línea de comandos original:
 
 Given a bus stop, a route, and how long it takes you to walk to your
 destination, tells you the soonest bus and whether it beats walking.
@@ -20,23 +38,69 @@ Data source: Cadiz's own live transit arrival panel
 (`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=<stop>&route=<route>`)
 — the same source BusCadiz uses. `stop`/`route` are the transit system's
 internal numeric IDs (e.g. `1106`/`110001`), not the display line number
-(e.g. "1") — a stop/route lookup by name is not built yet (see below).
+(e.g. "1").
 
-## What this is (and isn't) yet
+## Estado
 
-First minimum-scope artifact of a GO decision, not a finished app:
+La aplicación está preparada para la beta pública de Cádiz. La arquitectura y
+la planificación v1 están estabilizadas; la publicación depende de completar
+el release gate de producción, experiencia móvil y operación.
 
-- No stop/route name lookup — you need the internal IDs. Finding those
-  for an arbitrary origin/destination is the next uncertainty.
-- Only relative arrival times ("Xmin") are read; absolute clock-time
-  entries further out are skipped (they're a later trip, not relevant to
-  a right-now decision).
-- Waiting-for-the-bus cost is just its arrival time — the bus's own
-  travel time to your destination isn't modeled yet.
-- No walking-time calculation — you provide it.
+## Beta scope
 
-## Test
+The public beta supports:
+
+- Cádiz.
+- Walking.
+- Urban bus.
+- Realtime arrivals.
+- Scheduled GTFS fallback.
+- Destination search.
+- GPS-assisted origin selection.
+- PWA use on supported mobile browsers.
+- One hero recommendation and up to three exact candidates in total.
+
+The beta does not support:
+
+- Accounts or authentication.
+- Notifications.
+- Personalization, ML, or automatic learning.
+- Multiple cities.
+- Other transport modes or operators.
+
+Scheduled arrivals are not realtime predictions and may be less precise.
+
+## Limitaciones
+
+- Arrival data depends on the municipal service and the checked-in GTFS
+  snapshot.
+- Walking and routing estimates depend on the available geocoding and routing
+  services.
+- The application does not require or provide user accounts.
+
+## Datos y atribuciones
+
+Transit data comes from Cádiz's municipal realtime panel and the official NAP
+GTFS feed used to build the scheduled snapshot. Map, geocoding, and routing
+providers must be credited in the deployed application according to their
+respective terms and licenses.
+
+## Development
+
+Install dependencies and run the checks:
 
 ```
+npm install
+npm run typecheck
+npm run build
 npm test
 ```
+
+Run the Worker locally with Wrangler:
+
+```
+npm run dev
+```
+
+The release process and public-beta checklist live in
+[`docs/RELEASE.md`](docs/RELEASE.md).

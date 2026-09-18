@@ -20,14 +20,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build runtime modules
-        run: npm run build
-
-      - name: Run test suite
-        run: npm test
+      - name: Run release check
+        run: npm run release:check
 
   deploy:
     name: Deploy to Cloudflare Workers
