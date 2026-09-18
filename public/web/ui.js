@@ -306,7 +306,7 @@ export function planningCardsHTML(selectedCandidates, activeIndex = 0, context =
   return `${heroHTML}${explanationHTML}\n${altsHTML}`;
 }
 
-export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null, context = {}) {
+export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null, context = {}, onStart = null) {
   const html = planningCardsHTML(selectedCandidates, activeIndex, context);
   if (typeof document !== 'undefined') {
     const decision = document.getElementById('decision');
@@ -322,7 +322,7 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
             ? selectedCandidates.findIndex((c) => isSameIdentity(c.identity, parsedIdentity))
             : -1;
           if (nextIndex !== -1) {
-            renderDecisionWithAlternatives(selectedCandidates, nextIndex, onPromote);
+            renderDecisionWithAlternatives(selectedCandidates, nextIndex, onPromote, context, onStart);
             if (typeof onPromote === 'function') {
               onPromote(selectedCandidates[nextIndex], nextIndex);
             }
@@ -335,12 +335,15 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
         if (startButton && typeof startButton.addEventListener === 'function') {
           startButton.addEventListener('click', (event) => {
             event?.stopPropagation?.();
-            if (typeof onPromote === 'function' && selectedCandidates[activeIndex]) {
-              onPromote(selectedCandidates[activeIndex], activeIndex);
+            if (selectedCandidates[activeIndex]) {
+              const action = typeof onStart === 'function' ? onStart : onPromote;
+              if (typeof action === 'function') {
+                action(selectedCandidates[activeIndex], activeIndex);
+              }
             }
             startButton.textContent = 'Trayecto iniciado';
             startButton.disabled = true;
-            startButton.setAttribute?.('aria-pressed', 'true');
+            startButton.setAttribute?.('aria-label', 'Trayecto iniciado');
           });
         }
         if (heroEl && typeof heroEl.addEventListener === 'function') {
@@ -668,25 +671,32 @@ async function routeToDestination(dest) {
     destination: destCoords,
   });
 
-  const onPromote = (promoted) => {
+  const recordSelection = (promoted, started = false) => {
     applyCandidateToMap(promoted);
     if (destCoords && destLabel && winningHero) {
       const chosenAlternative = decision.alternatives.find((a) => isSameIdentity(a.journey.identity, promoted.identity)) ?? null;
       try {
-        recordUserChoiceUseCase.execute({
+        const input = {
           destination: { ...destCoords, label: destLabel },
           recommendation: winningHero,
           choice: chosenAlternative,
-        });
+        };
+        if (started) {
+          recordUserChoiceUseCase.start(input);
+        } else {
+          recordUserChoiceUseCase.execute(input);
+        }
       } catch {}
     }
     updateFavToggle();
   };
+  const onPromote = (promoted) => recordSelection(promoted);
+  const onStart = (promoted) => recordSelection(promoted, true);
 
   const promote = (cand) => {
     const idx = candidatesForUI.findIndex((c) => isSameIdentity(c.identity, cand.identity));
     if (idx !== -1) {
-      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote);
+      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
       onPromote(candidatesForUI[idx]);
     }
   };
@@ -696,7 +706,7 @@ async function routeToDestination(dest) {
     onPromote: promote,
   };
 
-  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes });
+  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
   applyCandidateToMap(winningHero);
 
   if (winningHero && destCoords && destLabel) {

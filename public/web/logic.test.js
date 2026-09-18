@@ -1898,7 +1898,44 @@ test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', (
   }
 });
 
-test('ui: start journey action marks the selected route without changing navigation mode', () => {
+test('ui: promoting an alternative preserves the comparison context', () => {
+  const cBus = {
+    identity: createBusIdentity('1', '1106', '1204'),
+    mode: 'bus',
+    estimatedMinutes: 14,
+    exactJourney: { totalMinutes: 14 },
+    estimate: { waitMinutes: 2, rideMinutes: 5, lastMileMinutes: 2 },
+    metadata: { line: '1', alightStop: { name: 'Plaza Mina' } },
+  };
+  const cWalk = {
+    identity: createWalkIdentity(),
+    mode: 'walk',
+    estimatedMinutes: 18,
+    exactJourney: { totalMinutes: 18 },
+  };
+  const listeners = [];
+  const mockButton = {
+    getAttribute: (attr) => (attr === 'data-identity' ? serializeIdentity(cWalk.identity) : null),
+    addEventListener: (event, handler) => { if (event === 'click') listeners.push(handler); },
+  };
+  const mockDecision = {
+    innerHTML: '',
+    classList: { remove: () => {} },
+    querySelectorAll: (sel) => (sel === '.alternative-card' ? [mockButton] : []),
+    querySelector: () => null,
+  };
+  globalThis.document = { getElementById: (id) => id === 'decision' ? mockDecision : null };
+
+  try {
+    renderDecisionWithAlternatives([cBus, cWalk], 0, () => {}, { walkMinutes: 18 });
+    listeners[0]();
+    assert.match(mockDecision.innerHTML, /Bus te ahorra 4′ frente a ir andando\./);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('ui: start journey action persists started state without changing navigation mode', () => {
   const cWalk = {
     identity: createWalkIdentity(),
     mode: 'walk',
@@ -1923,10 +1960,18 @@ test('ui: start journey action marks the selected route without changing navigat
 
   try {
     let selected = null;
-    renderDecisionWithAlternatives([cWalk], 0, (candidate) => { selected = candidate; }, { walkMinutes: 18 });
+    let started = null;
+    renderDecisionWithAlternatives(
+      [cWalk],
+      0,
+      (candidate) => { selected = candidate; },
+      { walkMinutes: 18 },
+      (candidate) => { started = candidate; },
+    );
     assert.equal(listeners.length, 1);
     listeners[0]({ stopPropagation: () => {} });
-    assert.equal(selected, cWalk);
+    assert.equal(selected, null);
+    assert.equal(started, cWalk);
     assert.equal(startButton.textContent, 'Trayecto iniciado');
     assert.equal(startButton.disabled, true);
   } finally {
