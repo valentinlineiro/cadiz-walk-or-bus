@@ -11,7 +11,28 @@ the README and its product promise is:
 
 > ¿Me compensa andar o esperar el bus?
 
+## Release candidate
+
+A release candidate is eligible for deployment when:
+
+- CI is green.
+- Required review is complete.
+- The production build succeeds.
+- The release checklist has no unresolved blocking item.
+- Known limitations are documented.
+- Rollback to the previous known-good revision is possible.
+
 ## Release checklist
+
+### Core journey
+
+- [ ] Open the app.
+- [ ] Establish an origin.
+- [ ] Select a destination.
+- [ ] Calculate the journey.
+- [ ] Receive a walk/bus recommendation.
+- [ ] Understand why the recommendation was made.
+- [ ] Start the journey.
 
 ### Product
 
@@ -35,6 +56,28 @@ the README and its product promise is:
 - [ ] A valid empty realtime response remains authoritative and does not invoke
   the scheduled fallback.
 
+The fallback test must run against a controlled environment or test seam. Do
+not deliberately disrupt the public production service.
+
+### Data dependencies
+
+- [ ] The municipal realtime endpoint is reachable.
+- [ ] The GTFS snapshot is present and valid.
+- [ ] The GTFS snapshot freshness is known.
+- [ ] Required stop and route data is available.
+- [ ] The geocoding provider is reachable.
+- [ ] The routing provider is reachable.
+- [ ] External dependency failure behavior is documented and controlled.
+
+### PWA
+
+- [ ] The manifest is valid.
+- [ ] App icons are available.
+- [ ] The service worker registers successfully.
+- [ ] The service worker activates successfully.
+- [ ] A newly deployed version updates correctly.
+- [ ] A stale application shell does not unexpectedly survive a release.
+
 ### UX
 
 - [ ] A first-time user understands the product promise quickly.
@@ -51,6 +94,14 @@ the README and its product promise is:
   checked.
 - [ ] The application remains usable after backgrounding and reopening.
 
+### Performance
+
+- [ ] Initial application load is acceptable on mobile.
+- [ ] Destination search responds within an acceptable time.
+- [ ] Journey planning completes within an acceptable time.
+- [ ] External-service failures do not leave the UI indefinitely loading.
+- [ ] Every external operation ends in success or a recoverable error.
+
 ### Reliability
 
 - [ ] No eligible buses produces a walking result or a clear explanation.
@@ -60,6 +111,15 @@ the README and its product promise is:
 - [ ] Geocoding failure has a controlled, recoverable error state.
 - [ ] GTFS unavailability has a controlled, recoverable error state.
 - [ ] JavaScript runtime and service-worker failures are diagnosable.
+
+### Accessibility
+
+- [ ] Primary controls are keyboard accessible.
+- [ ] Buttons and inputs have meaningful labels.
+- [ ] Text remains readable on mobile.
+- [ ] Focus is visible.
+- [ ] Important errors and results are communicated clearly.
+- [ ] The recommendation is not conveyed by color alone.
 
 ### Privacy and legal
 
@@ -78,17 +138,30 @@ the README and its product promise is:
 - [ ] Observed failures have a linked issue or evidence-backed fix.
 - [ ] The release owner has recorded the deployment and rollback reference.
 
+### Automated checks
+
+- [ ] `npm run release:check` passes.
+- [ ] Machine-verifiable checks cover architecture, build, tests, required
+  static assets, manifest validity, and service-worker shell paths.
+
 ## Release process
 
-1. Open a release PR containing the intended product or operational changes.
-2. Run `npm run typecheck`, `npm run build`, and `npm test`.
+1. Prepare a release PR containing the intended product or operational changes.
+2. Run `npm run release:check`.
 3. Review this checklist and link any exceptions or failed checks.
-4. Merge to `main` only when required checks and review are complete.
+4. Complete required review and merge to `main`.
 5. Deploy through the configured deployment pipeline.
 6. Run the production smoke checks, including realtime and scheduled fallback.
 7. Record deployment, verification, and follow-up issues in GitHub.
 
 ## Rollback
+
+### Rollback readiness
+
+- [ ] The previous known-good revision is identified.
+- [ ] The deployment mechanism can redeploy it.
+- [ ] The rollback procedure has been exercised at least once in a controlled
+  environment.
 
 If production behavior is broken:
 
@@ -97,3 +170,17 @@ If production behavior is broken:
    through the normal deployment pipeline.
 3. Verify the public shell, `/stops`, `/api`, and the core planning flow.
 4. Open an issue with the failure evidence before attempting a new release.
+
+## Blocking conditions
+
+A release cannot proceed with any of the following unresolved:
+
+- Broken core journey.
+- Incorrect walk/bus recommendation.
+- Incorrect realtime/scheduled state.
+- Unrecoverable external-service failure.
+- Privacy or security issue.
+- Broken production deployment.
+
+Non-blocking findings should be recorded as GitHub issues and assigned a
+follow-up priority rather than silently ignored.
