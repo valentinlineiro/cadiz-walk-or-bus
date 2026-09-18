@@ -129,6 +129,61 @@ export function createBusCandidates({
   return candidates;
 }
 
+export interface QuickBusChoice {
+  arrival: Arrival;
+  alight: AlightResolution | null;
+  totalMinutes: number;
+}
+
+export function resolveEligibleArrivals(
+  arrivals: Arrival[],
+  resolveAlight?: ((candidate: Arrival) => AlightResolution | null) | null,
+): Arrival[] {
+  if (!Array.isArray(arrivals) || arrivals.length === 0) return [];
+  if (typeof resolveAlight !== 'function') {
+    return arrivals.map((arrival) => ({ ...arrival, alight: arrival.alight ?? null }));
+  }
+
+  return arrivals.flatMap((arrival) => {
+    const alight = resolveAlight(arrival);
+    return alight?.stop ? [{ ...arrival, alight }] : [];
+  });
+}
+
+export function chooseQuickBus(
+  arrivals: Arrival[],
+  walkToStopMinutes: number | null | undefined,
+  resolveAlight?: ((arrival: Arrival) => AlightResolution | null) | null,
+): QuickBusChoice | null {
+  const walkToStop = walkToStopMinutes ?? 0;
+  let best: QuickBusChoice | null = null;
+  let bestRank = Infinity;
+
+  for (const arrival of arrivals ?? []) {
+    if (arrival.minutes == null || (walkToStopMinutes != null && arrival.minutes < walkToStop)) continue;
+    const alight = typeof resolveAlight === 'function' ? resolveAlight(arrival) : (arrival.alight ?? null);
+    if (typeof resolveAlight === 'function' && !alight?.stop) continue;
+
+    const rideMinutes = alight?.rideMeters != null
+      ? alight.rideMeters / BUS_METERS_PER_MINUTE
+      : 0;
+    const lastMileMinutes = alight?.distanceMeters != null
+      ? alight.distanceMeters / WALK_METERS_PER_MINUTE
+      : 0;
+    const rank = arrival.minutes + rideMinutes + lastMileMinutes;
+    if (rank < bestRank) {
+      bestRank = rank;
+      best = {
+        arrival,
+        alight,
+        totalMinutes: walkToStop + arrival.minutes + Math.round(rideMinutes),
+      };
+    }
+  }
+
+  return best;
+}
+
 export interface CandidateSelectionResult<T = JourneyCandidate> {
   primary: T | null;
   alternatives: T[];

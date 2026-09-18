@@ -1,7 +1,7 @@
 import type { RoutingPort } from '../ports/RoutingPort.js';
 import type { TransitDataPort } from '../ports/TransitDataPort.js';
 import type { Arrival, Coordinates, LinesTopology, Stop } from '../../domain/models.js';
-import { verdict } from '../../domain/decision.js';
+import { chooseQuickBus } from '../../domain/planner.js';
 import { findAlightStop, nearestStops, diversifyByLine } from '../../domain/topology.js';
 
 export interface GetQuickVerdictInput {
@@ -51,14 +51,13 @@ export class GetQuickVerdictUseCase {
     for (const stop of pool) {
       const walkToStopRoute = await this.ports.routing.routeWalking(input.origin, stop);
       const arrivals = arrivalsByStop.get(stop.stop) ?? [];
-      const result = verdict(
-        walkTotal,
-        walkToStopRoute?.minutes ?? null,
+      const fastest = chooseQuickBus(
         arrivals,
+        walkToStopRoute?.minutes,
         this.makeAlightResolver(stop, input.destination, stops, lines),
       );
-      if (result.kind === 'bus' && (!best || result.bus!.total < best.totalMinutes)) {
-        best = { kind: 'bus', totalMinutes: result.bus!.total };
+      if (fastest && fastest.totalMinutes < walkTotal && (!best || fastest.totalMinutes < best.totalMinutes)) {
+        best = { kind: 'bus', totalMinutes: fastest.totalMinutes };
       }
     }
 

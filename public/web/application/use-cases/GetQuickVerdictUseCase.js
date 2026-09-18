@@ -1,4 +1,4 @@
-import { verdict } from '../../domain/decision.js';
+import { chooseQuickBus } from '../../domain/planner.js';
 import { findAlightStop, nearestStops, diversifyByLine } from '../../domain/topology.js';
 export class GetQuickVerdictUseCase {
     ports;
@@ -26,9 +26,9 @@ export class GetQuickVerdictUseCase {
         for (const stop of pool) {
             const walkToStopRoute = await this.ports.routing.routeWalking(input.origin, stop);
             const arrivals = arrivalsByStop.get(stop.stop) ?? [];
-            const result = verdict(walkTotal, walkToStopRoute?.minutes ?? null, arrivals, this.makeAlightResolver(stop, input.destination, stops, lines));
-            if (result.kind === 'bus' && (!best || result.bus.total < best.totalMinutes)) {
-                best = { kind: 'bus', totalMinutes: result.bus.total };
+            const fastest = chooseQuickBus(arrivals, walkToStopRoute?.minutes, this.makeAlightResolver(stop, input.destination, stops, lines));
+            if (fastest && fastest.totalMinutes < walkTotal && (!best || fastest.totalMinutes < best.totalMinutes)) {
+                best = { kind: 'bus', totalMinutes: fastest.totalMinutes };
             }
         }
         return best ?? { kind: 'walk', totalMinutes: walkTotal };
