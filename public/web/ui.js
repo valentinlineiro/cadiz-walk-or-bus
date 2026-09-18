@@ -187,12 +187,18 @@ export function buildAlternativeCardHTML(alt, primary) {
     ? (alt.metadata?.line ? `Bus L${escapeHTML(alt.metadata.line)}` : 'Bus')
     : 'Andar';
   const degradedMark = (alt.breakdown?.lastMileDegraded ?? alt.exactJourney?.lastMileDegraded) ? '~' : '';
+  const sourceLabel = alt.metadata?.source === 'scheduled'
+    ? 'Horario programado'
+    : alt.metadata?.source === 'realtime'
+      ? 'Tiempo real'
+      : '';
 
   return `
     <button type="button" class="alternative-card" data-identity="${escapeHTML(serializeIdentity(alt.identity))}">
       <div class="alt-left">
         <div class="alt-title"><span class="icon">${modeIcon}</span>${escapeHTML(modeTitle)}</div>
         <div class="alt-desc">${escapeHTML(diff)}</div>
+        ${sourceLabel ? `<div class="alt-source">${sourceLabel}</div>` : ''}
       </div>
       <div class="alt-right">
         <div class="alt-time">${degradedMark}${altTotal}′</div>
@@ -200,6 +206,33 @@ export function buildAlternativeCardHTML(alt, primary) {
       </div>
     </button>
   `;
+}
+
+function sourceLabelFor(source) {
+  if (source === 'scheduled') return 'Horario programado';
+  if (source === 'realtime') return 'Tiempo real';
+  return '';
+}
+
+function comparisonExplanation(hero, candidates, walkMinutes) {
+  const heroTotal = hero?.totalMinutes ?? hero?.exactJourney?.totalMinutes ?? hero?.estimatedMinutes;
+  if (!hero || typeof heroTotal !== 'number') return '';
+
+  const bus = hero.mode === 'bus'
+    ? hero
+    : candidates.find((candidate) => candidate.mode === 'bus');
+  const walkTotal = typeof walkMinutes === 'number'
+    ? walkMinutes
+    : hero.mode === 'walk'
+      ? heroTotal
+      : null;
+  const busTotal = bus?.totalMinutes ?? bus?.exactJourney?.totalMinutes ?? bus?.estimatedMinutes;
+  if (walkTotal == null || typeof busTotal !== 'number') return '';
+
+  const difference = Math.round(walkTotal - busTotal);
+  if (Math.abs(difference) <= 1) return 'Las dos opciones tardan prácticamente lo mismo.';
+  if (difference > 0) return `Bus te ahorra ${difference}′ frente a ir andando.`;
+  return `Andando llegas ${Math.abs(difference)}′ antes que esperando al bus.`;
 }
 
 export function heroCardHTML(cand) {
@@ -219,18 +252,21 @@ export function heroCardHTML(cand) {
     const lastMileMins = cand.breakdown?.lastMileMinutes ?? cand.exactJourney?.lastMileMinutes ?? cand.estimate?.lastMileMinutes;
     const lastMileDegraded = cand.breakdown?.lastMileDegraded ?? cand.exactJourney?.lastMileDegraded ?? false;
     const lastMileLabel = lastMileMins == null ? '?' : `${lastMileDegraded ? '~' : ''}${lastMileMins}`;
+    const sourceLabel = sourceLabelFor(cand.metadata?.source);
 
     return `
       <div class="decision-card bus">
         <div class="decision-mode"><span class="icon">${ICON.bus}</span>BUS</div>
         <div class="decision-wait">${totalMins}<span class="unit">′ total</span></div>
         <div class="decision-line">${contextLine}</div>
+        ${sourceLabel ? `<div class="decision-source">${sourceLabel}</div>` : ''}
         <div class="journey-timeline">
           <span class="segment walk"><span class="icon">${ICON.walk}</span>${walkToStop}′</span>
           <span class="segment wait"><span class="icon">${ICON.wait}</span>${waitMins}′</span>
           <span class="segment bus"><span class="icon">${ICON.bus}</span>${rideMins}′</span>
           <span class="segment walk"><span class="icon">${ICON.walk}</span>${lastMileLabel}′</span>
         </div>
+        <button type="button" class="start-journey">Iniciar trayecto</button>
       </div>
     `;
   }
@@ -241,20 +277,25 @@ export function heroCardHTML(cand) {
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
       <div class="decision-wait">${totalMins}<span class="unit">′</span></div>
       <div class="decision-line">Ruta directa a pie</div>
+      <button type="button" class="start-journey">Iniciar trayecto</button>
     </div>
   `;
 }
 
-export function planningCardsHTML(selectedCandidates, activeIndex = 0) {
+export function planningCardsHTML(selectedCandidates, activeIndex = 0, context = {}) {
   if (!Array.isArray(selectedCandidates) || selectedCandidates.length === 0) {
     return '';
   }
   const heroIndex = selectedCandidates[activeIndex] ? activeIndex : 0;
   const hero = selectedCandidates[heroIndex];
   const heroHTML = decisionCardHTML(hero);
+  const explanation = comparisonExplanation(hero, selectedCandidates, context.walkMinutes);
+  const explanationHTML = explanation
+    ? `<div class="decision-explanation">${escapeHTML(explanation)}</div>`
+    : '';
   const alternatives = selectedCandidates.filter((_, i) => i !== heroIndex);
   if (alternatives.length === 0) {
-    return heroHTML;
+    return `${heroHTML}${explanationHTML}`;
   }
   const altsHTML = `
     <div class="alternatives-container">
@@ -262,11 +303,11 @@ export function planningCardsHTML(selectedCandidates, activeIndex = 0) {
       ${alternatives.map((alt) => buildAlternativeCardHTML(alt, hero)).join('')}
     </div>
   `;
-  return `${heroHTML}\n${altsHTML}`;
+  return `${heroHTML}${explanationHTML}\n${altsHTML}`;
 }
 
-export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null) {
-  const html = planningCardsHTML(selectedCandidates, activeIndex);
+export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null, context = {}) {
+  const html = planningCardsHTML(selectedCandidates, activeIndex, context);
   if (typeof document !== 'undefined') {
     const decision = document.getElementById('decision');
     if (decision) {
@@ -290,6 +331,18 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
       });
       if (typeof decision.querySelector === 'function') {
         const heroEl = decision.querySelector('.decision-card');
+        const startButton = decision.querySelector('.start-journey');
+        if (startButton && typeof startButton.addEventListener === 'function') {
+          startButton.addEventListener('click', (event) => {
+            event?.stopPropagation?.();
+            if (typeof onPromote === 'function' && selectedCandidates[activeIndex]) {
+              onPromote(selectedCandidates[activeIndex], activeIndex);
+            }
+            startButton.textContent = 'Trayecto iniciado';
+            startButton.disabled = true;
+            startButton.setAttribute?.('aria-pressed', 'true');
+          });
+        }
         if (heroEl && typeof heroEl.addEventListener === 'function') {
           heroEl.addEventListener('click', () => {
             if (typeof onPromote === 'function' && selectedCandidates[activeIndex]) {
@@ -643,7 +696,7 @@ async function routeToDestination(dest) {
     onPromote: promote,
   };
 
-  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote);
+  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes });
   applyCandidateToMap(winningHero);
 
   if (winningHero && destCoords && destLabel) {

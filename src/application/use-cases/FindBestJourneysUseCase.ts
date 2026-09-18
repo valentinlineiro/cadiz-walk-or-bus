@@ -226,9 +226,12 @@ export class FindBestJourneysUseCase {
       };
     });
 
+    const exactWalk = evaluatedJourneys.find((journey) => journey.mode === 'walk');
+
     return {
       hero: finalHero,
       alternatives,
+      walkMinutes: exactWalk?.totalMinutes ?? walkCandidate.estimatedMinutes,
     };
   }
 }

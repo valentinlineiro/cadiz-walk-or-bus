@@ -131,6 +131,8 @@ test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and
   assert.equal(realtimeCalls > 0, true);
   assert.equal(result.hero.mode, 'bus');
   assert.match(result.hero.metadata?.line, /^M-/);
+  assert.equal(result.hero.metadata?.source, 'scheduled');
+  assert.equal(typeof result.walkMinutes, 'number');
 });
 
 test('GetEligibleArrivalsUseCase: filters arrivals and resolves alighting in Application', async () => {
