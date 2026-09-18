@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   RecordUserChoiceUseCase,
   FindBestJourneysUseCase,
+  GetQuickVerdictUseCase,
   SearchDestinationsUseCase,
 } from './application/index.js';
 import { createWalkIdentity, createBusIdentity } from './identity.js';
@@ -26,6 +27,58 @@ test('SearchDestinationsUseCase: delegates query and limit to GeocodingPort', as
   assert.equal(capturedLimit, 3);
   assert.equal(results.length, 1);
   assert.equal(results[0].label, 'Plaza Mina');
+});
+
+test('GetQuickVerdictUseCase: returns null when direct walking fails', async () => {
+  let transitCalls = 0;
+  const useCase = new GetQuickVerdictUseCase({
+    routing: {
+      routeWalking: async () => null,
+      routeBus: async () => { throw new Error('routeBus should not be called'); },
+    },
+    transit: {
+      getStops: async () => {
+        transitCalls += 1;
+        return [{ stop: '1', lat: 36.52, lon: -6.28 }];
+      },
+      getLines: async () => null,
+      getArrivals: async () => [],
+    },
+  });
+
+  const result = await useCase.execute({
+    origin: { lat: 36.52, lon: -6.28 },
+    destination: { lat: 36.535, lon: -6.297 },
+  });
+
+  assert.equal(result, null);
+  assert.equal(transitCalls, 1);
+});
+
+test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
+  let routeBusCalls = 0;
+  const useCase = new GetQuickVerdictUseCase({
+    routing: {
+      routeWalking: async (from) => ({ minutes: from.lat === 36.52 ? 12 : 5, coordinates: [] }),
+      routeBus: async () => {
+        routeBusCalls += 1;
+        return null;
+      },
+    },
+    transit: {
+      getStops: async () => [{ stop: '1', lat: 36.525, lon: -6.28 }],
+      getLines: async () => null,
+      getArrivals: async () => [],
+    },
+  });
+
+  const result = await useCase.execute({
+    origin: { lat: 36.52, lon: -6.28 },
+    destination: { lat: 36.535, lon: -6.297 },
+  });
+
+  assert.deepEqual(result, { kind: 'walk', totalMinutes: 12 });
+  assert.equal(routeBusCalls, 0);
 });
 
 class FakeJourneyLog {

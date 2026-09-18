@@ -14,6 +14,7 @@ import {
 } from './planner.js';
 import {
   FindBestJourneysUseCase,
+  GetQuickVerdictUseCase,
   RecordUserChoiceUseCase,
   SearchDestinationsUseCase,
 } from './application/index.js';
@@ -66,6 +67,11 @@ export const cachedTransitPort = {
 };
 
 const findBestJourneysUseCase = new FindBestJourneysUseCase({
+  routing: routingAdapter,
+  transit: cachedTransitPort,
+});
+
+const getQuickVerdictUseCase = new GetQuickVerdictUseCase({
   routing: routingAdapter,
   transit: cachedTransitPort,
 });
@@ -192,15 +198,10 @@ export async function quickVerdictFor(dest) {
   if (!dest || !isInCadiz(dest.lat, dest.lon)) return null;
   if (!me || !isInCadiz(me.lat, me.lon)) return null;
   try {
-    const decision = await findBestJourneysUseCase.execute({
+    return await getQuickVerdictUseCase.execute({
       origin: me,
       destination: dest,
     });
-    if (!decision?.hero) return null;
-    return {
-      kind: decision.hero.mode,
-      totalMinutes: decision.hero.totalMinutes,
-    };
   } catch {
     return null;
   }
