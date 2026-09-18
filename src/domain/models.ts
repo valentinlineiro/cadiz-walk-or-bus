@@ -22,10 +22,13 @@ export interface AlightResolution {
   rideMeters: number;
 }
 
+export type ArrivalSource = 'realtime' | 'scheduled';
+
 export interface Arrival {
   line: string;
   destination: string;
   minutes: number;
+  source: ArrivalSource;
   alight?: AlightResolution | null;
 }
 

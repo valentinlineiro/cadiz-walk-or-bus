@@ -4,7 +4,11 @@ import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
+import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
+import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
 import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedStops as _setStops, setCachedLines as _setLines } from './application/composition.js';
+
+import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
 
 const appendEntry = (entry, storage, max = 200) => {
   const adapter = new LocalStorageJourneyLogAdapter(storage);
@@ -162,7 +166,7 @@ test('MunicipalTransitAdapter: getStops returns parsed stops and throws on failu
   await assert.rejects(async () => failAdapter.getStops(), /stops 500/);
 });
 
-test('MunicipalTransitAdapter: getLines returns lines topology or null on error', async () => {
+test('MunicipalTransitAdapter: getLines returns topology and throws on error', async () => {
   const fakeFetchSuccess = async (url) => {
     assert.equal(url, '/lines');
     return {
@@ -178,11 +182,10 @@ test('MunicipalTransitAdapter: getLines returns lines topology or null on error'
 
   const fakeFetchNetworkError = async () => { throw new Error('network down'); };
   const failAdapter = new MunicipalTransitAdapter(fakeFetchNetworkError);
-  const result = await failAdapter.getLines();
-  assert.equal(result, null);
+  await assert.rejects(async () => failAdapter.getLines(), /network down/);
 });
 
-test('MunicipalTransitAdapter: getArrivals returns arrivals array or empty list on error', async () => {
+test('MunicipalTransitAdapter: getArrivals marks realtime data and throws on error', async () => {
   const fakeFetchSuccess = async (url) => {
     assert.equal(url, '/api?stop=1106');
     return {
@@ -195,11 +198,11 @@ test('MunicipalTransitAdapter: getArrivals returns arrivals array or empty list 
   const arrivals = await adapter.getArrivals('1106');
   assert.equal(arrivals.length, 1);
   assert.equal(arrivals[0].line, '1');
+  assert.equal(arrivals[0].source, 'realtime');
 
   const fakeFetchFail = async () => ({ ok: false, status: 502 });
   const failAdapter = new MunicipalTransitAdapter(fakeFetchFail);
-  const empty = await failAdapter.getArrivals('1106');
-  assert.deepEqual(empty, []);
+  await assert.rejects(async () => failAdapter.getArrivals('1106'), /arrivals 502/);
 });
 
 test('NominatimGeocodingAdapter: search formats query with viewbox and normalizes results', async () => {
@@ -703,4 +706,64 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
   const l2 = await cachedTransitPort.getLines();
   assert.equal(lineCalls, 1, 'subsequent call must reuse populated lines module variable');
   assert.equal(l2, l1);
+});
+
+test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled source', async () => {
+  const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T07:55:00+02:00'),
+  });
+
+  assert.equal(adapter.getMetadata().feedVersion, 'nap-test-2026-09-17');
+  assert.equal(adapter.getMetadata().source, 'nap');
+  assert.equal((await adapter.getStops()).length, 3);
+  assert.deepEqual(await adapter.getLines(), gtfsSnapshot.lines);
+  assert.deepEqual(await adapter.getArrivals('A'), [{
+    line: '1',
+    destination: 'Centro',
+    minutes: 125,
+    source: 'scheduled',
+  }]);
+});
+
+test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight service-day times', async () => {
+  const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-17T23:30:00+02:00'),
+  });
+
+  const arrivals = await adapter.getArrivals('A');
+  assert.deepEqual(arrivals, [{
+    line: '1',
+    destination: 'Centro',
+    minutes: 100,
+    source: 'scheduled',
+  }]);
+
+  const afterMidnight = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T00:30:00+02:00'),
+  });
+  assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
+});
+
+test('ResilientTransitAdapter: falls back on realtime errors but not on a valid empty response', async () => {
+  let scheduledCalls = 0;
+  const scheduled = {
+    getStops: async () => [{ stop: 'A', lat: 36.52, lon: -6.28 }],
+    getLines: async () => ({ '1': { Centro: ['A'] } }),
+    getArrivals: async () => { scheduledCalls += 1; return [{ line: '1', destination: 'Centro', minutes: 9, source: 'scheduled' }]; },
+  };
+  const realtime = {
+    getStops: async () => { throw new Error('502'); },
+    getLines: async () => { throw new Error('502'); },
+    getArrivals: async () => { throw new Error('502'); },
+  };
+  const adapter = new ResilientTransitAdapter(realtime, scheduled, 50);
+
+  assert.equal((await adapter.getArrivals('A'))[0].source, 'scheduled');
+  assert.equal(scheduledCalls, 1);
+
+  const emptyRealtime = { ...realtime, getArrivals: async () => [] };
+  const emptyAdapter = new ResilientTransitAdapter(emptyRealtime, scheduled, 50);
+  scheduledCalls = 0;
+  assert.deepEqual(await emptyAdapter.getArrivals('A'), []);
+  assert.equal(scheduledCalls, 0, 'scheduled source must not be queried for valid realtime emptiness');
 });

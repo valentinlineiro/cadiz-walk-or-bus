@@ -1,0 +1,66 @@
+{
+  "feedVersion": "nap-test-2026-09-17",
+  "generatedAt": "2026-09-17T03:31:55Z",
+  "source": "nap",
+  "stops": [
+    { "stop": "A", "name": "Parada A", "lat": 36.520, "lon": -6.280 },
+    { "stop": "B", "name": "Parada B", "lat": 36.530, "lon": -6.290 },
+    { "stop": "C", "name": "Parada C", "lat": 36.535, "lon": -6.297 }
+  ],
+  "lines": {
+    "1": { "Centro": ["A", "B", "C"] }
+  },
+  "services": [
+    {
+      "serviceId": "WEEKDAY",
+      "startDate": "20260101",
+      "endDate": "20301231",
+      "weekdays": [true, true, true, true, true, false, false],
+      "addedDates": [],
+      "removedDates": ["20260918"]
+    },
+    {
+      "serviceId": "HOLIDAY_EXTRA",
+      "startDate": "20260101",
+      "endDate": "20301231",
+      "weekdays": [false, false, false, false, false, true, true],
+      "addedDates": ["20260918"],
+      "removedDates": []
+    }
+  ],
+  "trips": [
+    {
+      "tripId": "weekday-1",
+      "line": "1",
+      "destination": "Centro",
+      "serviceId": "WEEKDAY",
+      "stopTimes": [
+        { "stop": "A", "arrivalSeconds": 29400, "departureSeconds": 29400 },
+        { "stop": "B", "arrivalSeconds": 30000, "departureSeconds": 30000 },
+        { "stop": "C", "arrivalSeconds": 30600, "departureSeconds": 30600 }
+      ]
+    },
+    {
+      "tripId": "after-midnight-1",
+      "line": "1",
+      "destination": "Centro",
+      "serviceId": "WEEKDAY",
+      "stopTimes": [
+        { "stop": "A", "arrivalSeconds": 90600, "departureSeconds": 90600 },
+        { "stop": "B", "arrivalSeconds": 91200, "departureSeconds": 91200 },
+        { "stop": "C", "arrivalSeconds": 91800, "departureSeconds": 91800 }
+      ]
+    },
+    {
+      "tripId": "holiday-extra-1",
+      "line": "1",
+      "destination": "Centro",
+      "serviceId": "HOLIDAY_EXTRA",
+      "stopTimes": [
+        { "stop": "A", "arrivalSeconds": 36000, "departureSeconds": 36000 },
+        { "stop": "B", "arrivalSeconds": 36600, "departureSeconds": 36600 },
+        { "stop": "C", "arrivalSeconds": 37200, "departureSeconds": 37200 }
+      ]
+    }
+  ]
+}

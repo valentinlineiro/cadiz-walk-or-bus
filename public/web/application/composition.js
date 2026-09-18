@@ -8,17 +8,21 @@ import {
 import {
   OsrmRoutingAdapter,
   MunicipalTransitAdapter,
+  GtfsTransitAdapter,
+  ResilientTransitAdapter,
   NominatimGeocodingAdapter,
   LocalStorageJourneyLogAdapter,
 } from '../infrastructure/index.js';
+import gtfsSnapshot from '../../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
 const routingAdapter = new OsrmRoutingAdapter(fetch);
-let transitAdapter = new MunicipalTransitAdapter(fetch);
+const scheduledAdapter = new GtfsTransitAdapter(gtfsSnapshot);
+let transitAdapter = new ResilientTransitAdapter(new MunicipalTransitAdapter(fetch), scheduledAdapter);
 let cachedStops = [];
 let cachedLines = null;
 
 export function setTransitAdapter(adapter) {
-  transitAdapter = adapter;
+  transitAdapter = new ResilientTransitAdapter(adapter, scheduledAdapter);
 }
 
 export function setCachedStops(nextStops) {
