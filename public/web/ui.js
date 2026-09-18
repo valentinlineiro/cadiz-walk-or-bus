@@ -1,10 +1,8 @@
 import { isInCadiz } from './geo.js';
-import { filterCandidates } from './decision.js';
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
-import { findAlightStop } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { computeLastMile } from './last-mile.js';
@@ -14,6 +12,7 @@ import {
 } from './planner.js';
 import {
   FindBestJourneysUseCase,
+  GetEligibleArrivalsUseCase,
   GetQuickVerdictUseCase,
   RecordUserChoiceUseCase,
   SearchDestinationsUseCase,
@@ -73,6 +72,10 @@ const findBestJourneysUseCase = new FindBestJourneysUseCase({
 
 const getQuickVerdictUseCase = new GetQuickVerdictUseCase({
   routing: routingAdapter,
+  transit: cachedTransitPort,
+});
+
+const getEligibleArrivalsUseCase = new GetEligibleArrivalsUseCase({
   transit: cachedTransitPort,
 });
 
@@ -186,7 +189,7 @@ function setState(event, statusText) {
 // sole bus runs the opposite direction must not be highlighted as useful.
 function eligibleArrivalsByStop(near) {
   return new Map(
-    near.map((s) => [s.stop, filterCandidates(arrivalsByStop.get(s.stop) ?? [], makeAlightResolver(s, destCoords))]),
+    near.map((s) => [s.stop, arrivalsByStop.get(s.stop) ?? []]),
   );
 }
 
@@ -205,19 +208,6 @@ export async function quickVerdictFor(dest) {
   } catch {
     return null;
   }
-}
-
-function makeAlightResolver(boardingStop, destinationCoords) {
-  if (!boardingStop || !destinationCoords || !lines) return null;
-  return (arr) =>
-    findAlightStop({
-      line: arr.line,
-      direction: arr.destination,
-      boardingStopId: boardingStop.stop,
-      destCoords: destinationCoords,
-      stops,
-      lines,
-    });
 }
 
 export function escapeHTML(str) {
@@ -672,6 +662,10 @@ async function routeToDestination(dest) {
     }
   }
   lastNear = nearStops;
+  arrivalsByStop = await getEligibleArrivalsUseCase.execute({
+    stops: nearStops,
+    destination: destCoords,
+  });
 
   const onPromote = (promoted) => {
     applyCandidateToMap(promoted);

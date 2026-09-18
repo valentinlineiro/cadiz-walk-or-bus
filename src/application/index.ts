@@ -6,3 +6,4 @@ export { RecordUserChoiceUseCase, type RecordUserChoiceInput } from './use-cases
 export { FindBestJourneysUseCase, type FindBestJourneysInput } from './use-cases/FindBestJourneysUseCase.js';
 export { SearchDestinationsUseCase } from './use-cases/SearchDestinationsUseCase.js';
 export { GetQuickVerdictUseCase, type GetQuickVerdictInput, type QuickVerdict } from './use-cases/GetQuickVerdictUseCase.js';
+export { GetEligibleArrivalsUseCase, type GetEligibleArrivalsInput } from './use-cases/GetEligibleArrivalsUseCase.js';

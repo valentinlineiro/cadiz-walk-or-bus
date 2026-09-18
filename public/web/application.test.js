@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   RecordUserChoiceUseCase,
   FindBestJourneysUseCase,
+  GetEligibleArrivalsUseCase,
   GetQuickVerdictUseCase,
   SearchDestinationsUseCase,
 } from './application/index.js';
@@ -79,6 +80,33 @@ test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
 
   assert.deepEqual(result, { kind: 'walk', totalMinutes: 12 });
   assert.equal(routeBusCalls, 0);
+});
+
+test('GetEligibleArrivalsUseCase: filters arrivals and resolves alighting in Application', async () => {
+  const stops = [
+    { stop: '1', lat: 36.520, lon: -6.280 },
+    { stop: '2', lat: 36.535, lon: -6.297 },
+  ];
+  const useCase = new GetEligibleArrivalsUseCase({
+    transit: {
+      getStops: async () => stops,
+      getLines: async () => ({ '1': { Centro: ['1', '2'] } }),
+      getArrivals: async () => [
+        { line: '1', destination: 'Centro', minutes: 4 },
+        { line: '9', destination: 'Wrong direction', minutes: 2 },
+      ],
+    },
+  });
+
+  const result = await useCase.execute({
+    stops: [stops[0]],
+    destination: { lat: 36.536, lon: -6.298 },
+  });
+  const arrivals = result.get('1');
+
+  assert.equal(arrivals.length, 1);
+  assert.equal(arrivals[0].line, '1');
+  assert.equal(arrivals[0].alight.stop.stop, '2');
 });
 
 class FakeJourneyLog {
