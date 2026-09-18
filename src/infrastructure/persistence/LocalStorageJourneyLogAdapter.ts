@@ -6,13 +6,29 @@ export const DEDUPE_WINDOW_MS = 300000; // 5 minutes
 export const DEDUPE_COORD_EPSILON = 0.0002;
 export const MAX_ENTRIES = 200;
 
-export function formatRecommendationSub(rec: any): string {
-  if (!rec) return '';
+export function formatRecommendationSub(rec: any): string | null {
+  if (!rec) return null;
   const isBus = rec.mode === 'bus' || rec.kind === 'bus';
-  const line = rec.line ?? rec.busLine ?? '';
-  const mode = isBus ? `BUS ${line}`.trim() : 'ANDAR';
-  const time = rec.totalMinutes ? ` · ${rec.totalMinutes}′` : '';
-  return `última vez: ${mode}${time}`;
+  const isWalk = rec.mode === 'walk' || rec.kind === 'walk';
+  if (!isBus && !isWalk) return null;
+
+  if (isBus) {
+    const rawLine = rec.busLine ?? rec.line;
+    const lineStr = rawLine ? (String(rawLine).startsWith('L') ? rawLine : `L${rawLine}`) + ' · ' : '';
+    const mins = rec.totalMinutes ?? rec.minutes;
+    const total = mins != null ? `${mins}′` : '';
+    return `última vez: BUS ${lineStr}${total}`.trim();
+  }
+
+  if (isWalk) {
+    const mins = rec.walkMinutes ?? rec.totalMinutes ?? rec.minutes;
+    if (mins != null) {
+      return `última vez: ANDAR · ${mins}′`;
+    }
+    return 'última vez: ANDAR';
+  }
+
+  return null;
 }
 
 function sameDestination(d1: { lat: number; lon: number }, d2: { lat: number; lon: number }): boolean {
@@ -26,8 +42,8 @@ export interface DestinationSummary {
   lon: number;
   count: number;
   lastTimestamp: number;
-  lastRecommendation?: any;
-  sub?: string;
+  lastRecommendation?: DecisionRecord['recommendation'] | null;
+  sub?: string | null;
 }
 
 export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
@@ -43,16 +59,20 @@ export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
 
-      return parsed.filter(
-        (item: any) =>
-          item &&
-          typeof item === 'object' &&
-          (item.id == null || typeof item.id === 'string') &&
-          typeof item.timestamp === 'number' &&
-          item.destination &&
-          typeof item.destination.lat === 'number' &&
-          typeof item.destination.lon === 'number',
-      ) as DecisionRecord[];
+      return parsed
+        .filter(
+          (item: any) =>
+            item &&
+            typeof item === 'object' &&
+            (item.id == null || typeof item.id === 'string') &&
+            typeof item.timestamp === 'number' &&
+            item.destination &&
+            typeof item.destination.lat === 'number' &&
+            typeof item.destination.lon === 'number' &&
+            item.recommendation &&
+            typeof item.recommendation === 'object',
+        )
+        .slice(0, MAX_ENTRIES) as DecisionRecord[];
     } catch {
       return [];
     }
