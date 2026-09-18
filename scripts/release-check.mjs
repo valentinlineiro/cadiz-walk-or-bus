@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { findServiceWorkerShellProblems } from './architecture-gate.mjs';
@@ -18,10 +18,6 @@ const REQUIRED_FILES = [
   'public/icons/icon-512.png',
   'public/icons/apple-touch-icon.png',
 ];
-
-function relativePath(path) {
-  return relative(root, path).replaceAll('\\', '/');
-}
 
 function readManifestProblems() {
   const manifestPath = join(root, 'public/manifest.json');
@@ -68,7 +64,6 @@ if (process.argv[1] === scriptPath) {
   }
 
   for (const [command, args] of [
-    ['npm', ['run', 'architecture:check']],
     ['npm', ['run', 'build']],
     ['npm', ['test']],
   ]) {

@@ -1,12 +1,13 @@
 # Release
 
 This document describes the repeatable release process for the Cádiz public
-beta. It is intentionally a checklist template: execution-specific evidence
-belongs in the pull request, CI results, deployment record, or an issue.
+beta. It is a checklist template, not an execution record. Leave its items
+unmarked; copy the checklist into the release PR and record the result there,
+alongside CI results, deployment records, and linked issues.
 
-## Current release
+## Release target
 
-The current product release is the Cádiz public beta. Its scope is defined in
+The target product release is the Cádiz public beta. Its scope is defined in
 the README and its product promise is:
 
 > ¿Me compensa andar o esperar el bus?

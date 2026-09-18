@@ -42,9 +42,9 @@ internal numeric IDs (e.g. `1106`/`110001`), not the display line number
 
 ## Estado
 
-La aplicación está en beta pública para Cádiz. La arquitectura y la
-planificación v1 están estabilizadas; el trabajo pendiente se centra en
-fiabilidad de producción, experiencia móvil y operación.
+La aplicación está preparada para la beta pública de Cádiz. La arquitectura y
+la planificación v1 están estabilizadas; la publicación depende de completar
+el release gate de producción, experiencia móvil y operación.
 
 ## Beta scope
 
