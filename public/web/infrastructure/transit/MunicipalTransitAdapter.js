@@ -10,39 +10,20 @@ export class MunicipalTransitAdapter {
         return r.json();
     }
     async getLines() {
-        let r;
-        try {
-            r = await this.fetchImpl('/lines');
-        }
-        catch {
-            return null;
-        }
+        const r = await this.fetchImpl('/lines');
         if (!r.ok)
-            return null;
-        try {
-            const data = await r.json();
-            return (data?.lines ?? null);
-        }
-        catch {
-            return null;
-        }
+            throw new Error(`lines ${r.status}`);
+        const data = await r.json();
+        return (data?.lines ?? null);
     }
     async getArrivals(stopId) {
-        let r;
-        try {
-            r = await this.fetchImpl(`/api?stop=${encodeURIComponent(String(stopId))}`);
-        }
-        catch {
-            return [];
-        }
+        const r = await this.fetchImpl(`/api?stop=${encodeURIComponent(String(stopId))}`);
         if (!r.ok)
-            return [];
-        try {
-            const data = await r.json();
-            return (data?.arrivals ?? []);
-        }
-        catch {
-            return [];
-        }
+            throw new Error(`arrivals ${r.status}`);
+        const data = await r.json();
+        return (data?.arrivals ?? []).map((arrival) => ({
+            ...arrival,
+            source: 'realtime',
+        }));
     }
 }

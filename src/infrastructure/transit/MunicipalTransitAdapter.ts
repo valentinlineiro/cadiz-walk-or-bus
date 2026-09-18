@@ -15,34 +15,19 @@ export class MunicipalTransitAdapter implements TransitDataPort {
   }
 
   async getLines(): Promise<LinesTopology | null> {
-    let r: Response;
-    try {
-      r = await this.fetchImpl('/lines');
-    } catch {
-      return null;
-    }
-    if (!r.ok) return null;
-    try {
-      const data = await r.json();
-      return (data?.lines ?? null) as LinesTopology | null;
-    } catch {
-      return null;
-    }
+    const r = await this.fetchImpl('/lines');
+    if (!r.ok) throw new Error(`lines ${r.status}`);
+    const data = await r.json();
+    return (data?.lines ?? null) as LinesTopology | null;
   }
 
   async getArrivals(stopId: string | number): Promise<Arrival[]> {
-    let r: Response;
-    try {
-      r = await this.fetchImpl(`/api?stop=${encodeURIComponent(String(stopId))}`);
-    } catch {
-      return [];
-    }
-    if (!r.ok) return [];
-    try {
-      const data = await r.json();
-      return (data?.arrivals ?? []) as Arrival[];
-    } catch {
-      return [];
-    }
+    const r = await this.fetchImpl(`/api?stop=${encodeURIComponent(String(stopId))}`);
+    if (!r.ok) throw new Error(`arrivals ${r.status}`);
+    const data = await r.json();
+    return ((data?.arrivals ?? []) as Omit<Arrival, 'source'>[]).map((arrival) => ({
+      ...arrival,
+      source: 'realtime' as const,
+    }));
   }
 }

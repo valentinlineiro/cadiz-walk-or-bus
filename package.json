@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "architecture:check": "node scripts/architecture-gate.mjs",
+    "ingest:gtfs": "node scripts/ingest-gtfs.mjs",
     "test": "npm run architecture:check && node --test",
     "typecheck": "tsc --noEmit",
     "build": "tsc",

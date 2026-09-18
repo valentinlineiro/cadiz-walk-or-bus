@@ -349,9 +349,9 @@ test('transition: OUT_OF_CADIZ from LOCATING goes to READY', () => {
   assert.equal(transition('LOCATING', 'OUT_OF_CADIZ'), 'READY');
 });
 
-test('getArrivals returns [] on panel outage', async () => {
+test('getArrivals exposes panel outage to the resilient infrastructure boundary', async () => {
   const f = async () => ({ ok: false, status: 502 });
-  assert.deepEqual(await getArrivals(f, '9905'), []);
+  await assert.rejects(async () => getArrivals(f, '9905'), /arrivals 502/);
 });
 
 test('geocode bounds to Cádiz and returns null on no hit', async () => {

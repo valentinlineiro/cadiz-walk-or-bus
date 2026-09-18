@@ -8,6 +8,10 @@ import {
   SearchDestinationsUseCase,
 } from './application/index.js';
 import { createWalkIdentity, createBusIdentity } from './identity.js';
+import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
+import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
+import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
+import officialGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
 test('SearchDestinationsUseCase: delegates query and limit to GeocodingPort', async () => {
   let capturedQuery = null;
@@ -80,6 +84,41 @@ test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
 
   assert.deepEqual(result, { kind: 'walk', totalMinutes: 12 });
   assert.equal(routeBusCalls, 0);
+});
+
+test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and still produces BUS', async () => {
+  const sourceTrip = officialGtfsSnapshot.trips.find((trip) => trip.line === 'M-021');
+  const originStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes[0].stop);
+  const destinationStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes.at(-1).stop);
+  const scheduled = new GtfsTransitAdapter(officialGtfsSnapshot, {
+    now: () => new Date('2026-09-18T07:00:00+02:00'),
+  });
+  let realtimeCalls = 0;
+  const realtime = {
+    getStops: async () => { realtimeCalls += 1; throw new Error('502'); },
+    getLines: async () => { realtimeCalls += 1; throw new Error('502'); },
+    getArrivals: async () => { realtimeCalls += 1; throw new Error('502'); },
+  };
+  const transit = new ResilientTransitAdapter(realtime, scheduled, 50);
+  const useCase = new FindBestJourneysUseCase({
+    transit,
+    routing: {
+      routeWalking: async (from, to) => ({
+        minutes: !from.stop && !to.stop ? 30 : (to.stop ? 2 : 1),
+        coordinates: [],
+      }),
+      routeBus: async () => ({ minutes: 8, coordinates: [] }),
+    },
+  });
+
+  const result = await useCase.execute({
+    origin: { lat: originStop.lat, lon: originStop.lon },
+    destination: { lat: destinationStop.lat, lon: destinationStop.lon, label: destinationStop.name },
+  });
+
+  assert.equal(realtimeCalls > 0, true);
+  assert.equal(result.hero.mode, 'bus');
+  assert.match(result.hero.metadata?.line, /^M-/);
 });
 
 test('GetEligibleArrivalsUseCase: filters arrivals and resolves alighting in Application', async () => {
