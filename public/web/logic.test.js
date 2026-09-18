@@ -1795,13 +1795,14 @@ test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and a
     },
     metadata: {
       line: '1',
+      source: 'realtime',
       boardingStop: { stop: '1106', name: 'Santa María del Mar' },
       alightStop: { stop: '1204', name: 'Plaza Mina' },
     },
   };
 
   // Case 1: activeIndex = 0 (Bus is Hero, Walk is alternative)
-  const html0 = planningCardsHTML([cBus, cWalk], 0);
+  const html0 = planningCardsHTML([cBus, cWalk], 0, { walkMinutes: 18 });
   assert.ok(html0.includes('class="decision-card bus"'));
   assert.ok(html0.includes('14<span class="unit">′ total</span>'));
   assert.ok(html0.includes('L1 · Bájate en Plaza Mina'));
@@ -1809,19 +1810,39 @@ test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and a
   assert.ok(html0.includes('Otras opciones competitivas'));
   assert.ok(html0.includes('data-identity="walk:direct"'));
   assert.ok(html0.includes('+4′'));
+  assert.ok(html0.includes('Bus te ahorra 4′ frente a ir andando.'));
+  assert.ok(html0.includes('Tiempo real'));
+  assert.ok(html0.includes('Iniciar trayecto'));
 
   // Case 2: activeIndex = 1 (Walk is Hero, Bus is alternative)
-  const html1 = planningCardsHTML([cBus, cWalk], 1);
+  const html1 = planningCardsHTML([cBus, cWalk], 1, { walkMinutes: 18 });
   assert.ok(html1.includes('class="decision-card walk"'));
   assert.ok(html1.includes('18<span class="unit">′</span>'));
   assert.ok(html1.includes('Ruta directa a pie'));
   assert.ok(html1.includes('data-identity="bus:1:1106:1204"'));
   assert.ok(html1.includes('-4′'));
 
+  const slowerBus = { ...cBus, exactJourney: { ...cBus.exactJourney, totalMinutes: 22 }, estimatedMinutes: 22 };
+  const htmlWalkWins = planningCardsHTML([slowerBus, cWalk], 1, { walkMinutes: 18 });
+  assert.ok(htmlWalkWins.includes('Andando llegas 4′ antes que esperando al bus.'));
+
   // Case 3: Single candidate produces no alternatives container
   const htmlSingle = planningCardsHTML([cWalk], 0);
   assert.ok(htmlSingle.includes('class="decision-card walk"'));
   assert.ok(!htmlSingle.includes('alternatives-container'));
+});
+
+test('ui: scheduled bus candidates expose a scheduled source label', () => {
+  const scheduledBus = {
+    identity: createBusIdentity('1', '1106', '1204'),
+    mode: 'bus',
+    estimatedMinutes: 14,
+    exactJourney: { totalMinutes: 14 },
+    estimate: { walkToStopMinutes: 3, waitMinutes: 2, rideMinutes: 7, lastMileMinutes: 2 },
+    metadata: { line: '1', source: 'scheduled', alightStop: { name: 'Plaza Mina' } },
+  };
+
+  assert.ok(planningCardsHTML([scheduledBus], 0, { walkMinutes: 18 }).includes('Horario programado'));
 });
 
 test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', () => {
@@ -1872,6 +1893,87 @@ test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', (
     // promoted.identity is a VO — compare with isSameIdentity
     assert.equal(isSameIdentity(promoted?.identity, createWalkIdentity()), true);
     assert.equal(promotedIdx, 1);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('ui: promoting an alternative preserves the comparison context', () => {
+  const cBus = {
+    identity: createBusIdentity('1', '1106', '1204'),
+    mode: 'bus',
+    estimatedMinutes: 14,
+    exactJourney: { totalMinutes: 14 },
+    estimate: { waitMinutes: 2, rideMinutes: 5, lastMileMinutes: 2 },
+    metadata: { line: '1', alightStop: { name: 'Plaza Mina' } },
+  };
+  const cWalk = {
+    identity: createWalkIdentity(),
+    mode: 'walk',
+    estimatedMinutes: 18,
+    exactJourney: { totalMinutes: 18 },
+  };
+  const listeners = [];
+  const mockButton = {
+    getAttribute: (attr) => (attr === 'data-identity' ? serializeIdentity(cWalk.identity) : null),
+    addEventListener: (event, handler) => { if (event === 'click') listeners.push(handler); },
+  };
+  const mockDecision = {
+    innerHTML: '',
+    classList: { remove: () => {} },
+    querySelectorAll: (sel) => (sel === '.alternative-card' ? [mockButton] : []),
+    querySelector: () => null,
+  };
+  globalThis.document = { getElementById: (id) => id === 'decision' ? mockDecision : null };
+
+  try {
+    renderDecisionWithAlternatives([cBus, cWalk], 0, () => {}, { walkMinutes: 18 });
+    listeners[0]();
+    assert.match(mockDecision.innerHTML, /Bus te ahorra 4′ frente a ir andando\./);
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test('ui: start journey action persists started state without changing navigation mode', () => {
+  const cWalk = {
+    identity: createWalkIdentity(),
+    mode: 'walk',
+    estimatedMinutes: 18,
+    exactJourney: { totalMinutes: 18 },
+  };
+  const listeners = [];
+  const startButton = {
+    addEventListener: (event, handler) => { if (event === 'click') listeners.push(handler); },
+    classList: { add: () => {} },
+    textContent: 'Iniciar trayecto',
+    disabled: false,
+  };
+  const hero = { addEventListener: () => {} };
+  const mockDecision = {
+    innerHTML: '',
+    classList: { remove: () => {} },
+    querySelectorAll: () => [],
+    querySelector: (selector) => selector === '.start-journey' ? startButton : hero,
+  };
+  globalThis.document = { getElementById: (id) => id === 'decision' ? mockDecision : null };
+
+  try {
+    let selected = null;
+    let started = null;
+    renderDecisionWithAlternatives(
+      [cWalk],
+      0,
+      (candidate) => { selected = candidate; },
+      { walkMinutes: 18 },
+      (candidate) => { started = candidate; },
+    );
+    assert.equal(listeners.length, 1);
+    listeners[0]({ stopPropagation: () => {} });
+    assert.equal(selected, null);
+    assert.equal(started, cWalk);
+    assert.equal(startButton.textContent, 'Trayecto iniciado');
+    assert.equal(startButton.disabled, true);
   } finally {
     delete globalThis.document;
   }

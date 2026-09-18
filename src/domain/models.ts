@@ -91,6 +91,7 @@ export interface CandidateEstimate {
  */
 export interface CandidateMetadata {
   line?: string;
+  source?: ArrivalSource;
   destination?: string | (Coordinates & { label?: string });
   boardingStop?: Stop;
   alightStop?: Stop;
@@ -153,6 +154,7 @@ export interface DecisionAlternative {
 export interface Decision {
   hero: EvaluatedJourney;
   alternatives: DecisionAlternative[];
+  walkMinutes: number;
 }
 
 /**
@@ -162,6 +164,7 @@ export interface Decision {
 export interface DecisionRecord {
   id?: string;
   timestamp: number;
+  startedAt?: number;
   destination: Coordinates & { label: string };
   recommendation: {
     identity: string;

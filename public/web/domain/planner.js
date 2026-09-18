@@ -60,6 +60,7 @@ export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolve
             },
             metadata: {
                 line: lineStr,
+                source: arr.source,
                 destination: arr.destination,
                 boardingStop: stop,
                 alightStop: resolvedStop,

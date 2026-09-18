@@ -13,7 +13,16 @@ export class RecordUserChoiceUseCase {
   constructor(private readonly ports: { journeyLog: JourneyLogPort }) {}
 
   execute(input: RecordUserChoiceInput): DecisionRecord {
-    const timestamp = input.timestamp ?? Date.now();
+    return this.record(input);
+  }
+
+  start(input: RecordUserChoiceInput): DecisionRecord {
+    const startedAt = input.timestamp ?? Date.now();
+    return this.record(input, startedAt);
+  }
+
+  private record(input: RecordUserChoiceInput, startedAt?: number): DecisionRecord {
+    const timestamp = input.timestamp ?? startedAt ?? Date.now();
     const rec = input.recommendation;
     const recBoarding = rec.metadata?.boardingStop?.stop != null
       ? String(rec.metadata.boardingStop.stop)
@@ -54,6 +63,7 @@ export class RecordUserChoiceUseCase {
     const record: DecisionRecord = {
       id: `${timestamp}-${Math.random().toString(36).slice(2, 7)}`,
       timestamp,
+      ...(startedAt !== undefined ? { startedAt } : {}),
       destination: {
         label: input.destination.label,
         lat: input.destination.lat,

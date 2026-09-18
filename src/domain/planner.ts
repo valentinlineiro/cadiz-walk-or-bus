@@ -117,6 +117,7 @@ export function createBusCandidates({
       },
       metadata: {
         line: lineStr,
+        source: arr.source,
         destination: arr.destination,
         boardingStop: stop,
         alightStop: resolvedStop,

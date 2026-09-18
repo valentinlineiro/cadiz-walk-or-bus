@@ -131,6 +131,8 @@ test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and
   assert.equal(realtimeCalls > 0, true);
   assert.equal(result.hero.mode, 'bus');
   assert.match(result.hero.metadata?.line, /^M-/);
+  assert.equal(result.hero.metadata?.source, 'scheduled');
+  assert.equal(typeof result.walkMinutes, 'number');
 });
 
 test('GetEligibleArrivalsUseCase: filters arrivals and resolves alighting in Application', async () => {
@@ -218,6 +220,27 @@ test('RecordUserChoiceUseCase: implicit acceptance when choice is null', () => {
 
   assert.equal(fakeLog.records.length, 1);
   assert.strictEqual(fakeLog.records[0], record);
+});
+
+test('RecordUserChoiceUseCase: start persists an explicit startedAt state', () => {
+  const fakeLog = new FakeJourneyLog();
+  const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });
+  const record = useCase.start({
+    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
+    recommendation: {
+      identity: createWalkIdentity(),
+      mode: 'walk',
+      totalMinutes: 18,
+      dataQuality: 'live',
+      breakdown: { walkToStopMinutes: 0, waitMinutes: 0, rideMinutes: 0, lastMileMinutes: 18, lastMileDegraded: false },
+      routes: {},
+    },
+    choice: null,
+    timestamp: 1700000001000,
+  });
+
+  assert.equal(record.startedAt, 1700000001000);
+  assert.equal(fakeLog.records[0].startedAt, 1700000001000);
 });
 
 test('RecordUserChoiceUseCase: explicit promotion preserves alternative details', () => {
