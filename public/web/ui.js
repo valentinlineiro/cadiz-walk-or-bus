@@ -231,7 +231,11 @@ function comparisonExplanation(hero, candidates, walkMinutes) {
 
   const difference = Math.round(walkTotal - busTotal);
   if (Math.abs(difference) <= 1) return 'Las dos opciones tardan prácticamente lo mismo.';
-  if (difference > 0) return `Bus te ahorra ${difference}′ frente a ir andando.`;
+  if (difference > 0) {
+    return hero.mode === 'walk'
+      ? `El bus es ${difference}′ más rápido que ir andando.`
+      : `Bus te ahorra ${difference}′ frente a ir andando.`;
+  }
   return `Andando llegas ${Math.abs(difference)}′ antes que esperando al bus.`;
 }
 
