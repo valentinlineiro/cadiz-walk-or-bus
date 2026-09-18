@@ -5,10 +5,10 @@ import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
-import { serializeIdentity, parseIdentity, isSameIdentity } from './identity.js';
+import { serializeIdentity, parseIdentity, isSameIdentity } from './domain/identity.js';
 import {
   formatAlternativeDiff,
-} from './planner.js';
+} from './domain/planner.js';
 import {
   cachedTransitPort,
   findBestJourneysUseCase,

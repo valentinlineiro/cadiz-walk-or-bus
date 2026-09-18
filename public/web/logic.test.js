@@ -18,7 +18,7 @@ import {
   planningCardsHTML,
   renderDecisionWithAlternatives,
 } from './ui.js';
-import { findAlightStop } from './topology.js';
+import { findAlightStop } from './domain/topology.js';
 import {
   DEFAULT_PLANNING_POLICY,
   createWalkCandidate,
@@ -29,26 +29,26 @@ import {
   isStructurallyDiverse,
   filterDiverseAlternatives,
   resolveEligibleArrivals,
-} from './planner.js';
+} from './domain/planner.js';
 import {
   WALK_METERS_PER_MINUTE,
   BUS_METERS_PER_MINUTE,
   DEFAULT_PLANNING_POLICY as DOMAIN_PLANNING_POLICY,
   DEFAULT_DIVERSITY_THRESHOLDS,
-} from './constants.js';
+} from './domain/constants.js';
 import {
   createWalkIdentity,
   createBusIdentity,
   parseIdentity,
   isSameIdentity,
   serializeIdentity,
-} from './identity.js';
+} from './domain/identity.js';
 import { computeLastMile as domainComputeLastMile } from './domain/last-mile.js';
 import {
   isStructurallyDiverse as domainIsStructurallyDiverse,
   filterDiverseAlternatives as domainFilterDiverseAlternatives,
   classifyDivergence,
-} from './diversity.js';
+} from './domain/diversity.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
 
