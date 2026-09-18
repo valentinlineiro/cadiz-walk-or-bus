@@ -4,6 +4,10 @@ export { NominatimGeocodingAdapter, CADIZ_VIEWBOX } from './geocoding/NominatimG
 export {
   LocalStorageJourneyLogAdapter,
   formatRecommendationSub,
+  STORAGE_KEY,
+  DEDUPE_WINDOW_MS,
+  DEDUPE_COORD_EPSILON,
+  MAX_ENTRIES,
   type DestinationSummary,
 } from './persistence/LocalStorageJourneyLogAdapter.js';
 
