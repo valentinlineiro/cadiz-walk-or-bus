@@ -1,6 +1,5 @@
 import { nearestStops, isInCadiz } from './geo.js';
 import { verdict, filterCandidates } from './decision.js';
-import { getStops, getLines, getArrivals, searchDestinations, walkRoute, busRoute } from './api.js';
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
@@ -8,13 +7,18 @@ import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorit
 import { findAlightStop, diversifyByLine } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
-import { appendEntry, getRecentDestinations, classifyDivergence } from './journey-log.js';
 import { computeLastMile } from './last-mile.js';
 import { serializeIdentity, parseIdentity, isSameIdentity } from './identity.js';
 import {
   formatAlternativeDiff,
 } from './planner.js';
 import { FindBestJourneysUseCase, RecordUserChoiceUseCase } from './application/index.js';
+import {
+  OsrmRoutingAdapter,
+  MunicipalTransitAdapter,
+  NominatimGeocodingAdapter,
+  LocalStorageJourneyLogAdapter,
+} from './infrastructure/index.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -31,41 +35,39 @@ let lastNear = [];
 let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
-const routingBridge = {
-  routeWalking: (from, to) => walkRoute(fetch, from, to),
-  routeBus: async (boarding, alight, path) => {
-    const coordinates = await busRoute(fetch, path ?? [boarding, alight]);
-    return coordinates ? { coordinates } : null;
-  },
-};
+const routingAdapter = new OsrmRoutingAdapter(fetch);
+let transitAdapter = new MunicipalTransitAdapter(fetch);
+export function _setTransitAdapter(adapter) { transitAdapter = adapter; }
+export function _setStops(s) { stops = s; }
+export function _getStops() { return stops; }
+export function _setLines(l) { lines = l; }
+export function _getLines() { return lines; }
+const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
+const geocodingAdapter = new NominatimGeocodingAdapter(fetch);
 
-const transitBridge = {
+export const cachedTransitPort = {
   getStops: async () => {
     if (!stops || stops.length === 0) {
-      stops = await getStops(fetch).catch(() => []);
+      stops = await transitAdapter.getStops().catch(() => []);
     }
     return stops ?? [];
   },
   getLines: async () => {
     if (!lines) {
-      lines = await getLines(fetch).catch(() => null);
+      lines = await transitAdapter.getLines().catch(() => null);
     }
     return lines;
   },
-  getArrivals: (stopId) => getArrivals(fetch, stopId),
-};
-
-const journeyLogBridge = {
-  append: (record) => appendEntry(record),
+  getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
 };
 
 const findBestJourneysUseCase = new FindBestJourneysUseCase({
-  routing: routingBridge,
-  transit: transitBridge,
+  routing: routingAdapter,
+  transit: cachedTransitPort,
 });
 
 const recordUserChoiceUseCase = new RecordUserChoiceUseCase({
-  journeyLog: journeyLogBridge,
+  journeyLog: journeyLogAdapter,
 });
 
 // Inline SVG glyphs — no emoji as primary iconography.
@@ -187,7 +189,7 @@ function nearbyDiverseStops(n) {
 
 async function getWalkToStopRoute(stop) {
   if (walkToStopCache.has(stop.stop)) return walkToStopCache.get(stop.stop);
-  const route = await walkRoute(fetch, me, { lat: stop.lat, lon: stop.lon });
+  const route = await routingAdapter.routeWalking(me, { lat: stop.lat, lon: stop.lon });
   walkToStopCache.set(stop.stop, route);
   return route;
 }
@@ -200,7 +202,7 @@ async function loadNearby() {
   arrivalsByStop = new Map();
   walkToStopCache = new Map();
   await Promise.all(
-    pool.map(async (s) => arrivalsByStop.set(s.stop, await getArrivals(fetch, s.stop))),
+    pool.map(async (s) => arrivalsByStop.set(s.stop, await transitAdapter.getArrivals(s.stop))),
   );
   const eligibleByPool = eligibleArrivalsByStop(pool);
   const candidates = pool.filter((s) => (eligibleByPool.get(s.stop) ?? []).length > 0);
@@ -230,12 +232,12 @@ async function quickVerdictFor(dest) {
   if (!isInCadiz(dest.lat, dest.lon)) return null;
   if (!me || stops.length === 0) return null;
   if (!isInCadiz(me.lat, me.lon)) return null; // origin guard: user outside Cádiz
-  const walkRes = await walkRoute(fetch, me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
+  const walkRes = await routingAdapter.routeWalking(me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
   const walkTotal = walkRes?.minutes ?? null;
   if (walkTotal == null) return null;
   const pool = nearbyDiverseStops(6);
   const arrivalsByPool = new Map(
-    await Promise.all(pool.map(async (s) => [s.stop, await getArrivals(fetch, s.stop)])),
+    await Promise.all(pool.map(async (s) => [s.stop, await transitAdapter.getArrivals(s.stop)])),
   );
   let best = null;
   for (const s of pool) {
@@ -576,7 +578,7 @@ function renderQuickPicks() {
   let destinations = [];
   try { favorites = getFavorites(); } catch { favorites = []; }
   try {
-    destinations = getRecentDestinations(20).filter((d) => !isFavorite(d)).slice(0, 5);
+    destinations = journeyLogAdapter.getRecentDestinations(20).filter((d) => !isFavorite(d)).slice(0, 5);
     if (destinations.length === 0) {
       destinations = getRecent().filter((r) => !isFavorite(r)).slice(0, 5);
     }
@@ -773,7 +775,7 @@ async function onFormSubmit(query) {
   document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Buscando…';
   setState('SEARCH');
-  const hits = await searchDestinations(fetch, q, 1);
+  const hits = await geocodingAdapter.search(q, 1);
   if (hits.length === 0) {
     destCoords = null;
     destLabel = null;
@@ -949,7 +951,7 @@ export function initUI() {
         return;
       }
       debounce = setTimeout(async () => {
-        const hits = await searchDestinations(fetch, q, 3);
+        const hits = await geocodingAdapter.search(q, 3);
         if (input.value.trim() === q) {
           if (hits.length === 0) renderNoResultsHint(q);
           else renderSuggestions(hits);
@@ -1025,7 +1027,7 @@ function locate() {
     me = { ...CADIZ };
     setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
     showMe(me.lat, me.lon);
-    Promise.all([getStops(fetch), getLines(fetch)])
+    Promise.all([transitAdapter.getStops(), transitAdapter.getLines()])
       .then(([s, l]) => {
         stops = s;
         lines = l;
@@ -1052,7 +1054,7 @@ function locate() {
         walkToStopCache = new Map();
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(me.lat, me.lon);
-        Promise.all([getStops(fetch), getLines(fetch)])
+        Promise.all([transitAdapter.getStops(), transitAdapter.getLines()])
           .then(([s, l]) => {
             stops = s;
             lines = l;
@@ -1066,8 +1068,8 @@ function locate() {
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
       try {
-        stops = await getStops(fetch);
-        lines = await getLines(fetch);
+        stops = await transitAdapter.getStops();
+        lines = await transitAdapter.getLines();
       } catch {
         setState('FAILED', 'No se pudieron cargar las paradas');
         return;
