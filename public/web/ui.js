@@ -5,24 +5,19 @@ import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
-import { computeLastMile } from './last-mile.js';
 import { serializeIdentity, parseIdentity, isSameIdentity } from './identity.js';
 import {
   formatAlternativeDiff,
 } from './planner.js';
 import {
-  FindBestJourneysUseCase,
-  GetEligibleArrivalsUseCase,
-  GetQuickVerdictUseCase,
-  RecordUserChoiceUseCase,
-  SearchDestinationsUseCase,
-} from './application/index.js';
-import {
-  OsrmRoutingAdapter,
-  MunicipalTransitAdapter,
-  NominatimGeocodingAdapter,
-  LocalStorageJourneyLogAdapter,
-} from './infrastructure/index.js';
+  cachedTransitPort,
+  findBestJourneysUseCase,
+  getEligibleArrivalsUseCase,
+  getQuickVerdictUseCase,
+  journeyLogAdapter,
+  recordUserChoiceUseCase,
+  searchDestinationsUseCase,
+} from './application/composition.js';
 
 let state = 'LOCATING';
 let me = null;
@@ -38,50 +33,6 @@ let lastNear = [];
 let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
-const routingAdapter = new OsrmRoutingAdapter(fetch);
-let transitAdapter = new MunicipalTransitAdapter(fetch);
-export function _setTransitAdapter(adapter) { transitAdapter = adapter; }
-export function _setStops(s) { stops = s; }
-export function _getStops() { return stops; }
-export function _setLines(l) { lines = l; }
-export function _getLines() { return lines; }
-const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
-const geocodingAdapter = new NominatimGeocodingAdapter(fetch);
-const searchDestinationsUseCase = new SearchDestinationsUseCase(geocodingAdapter);
-
-export const cachedTransitPort = {
-  getStops: async () => {
-    if (!stops || stops.length === 0) {
-      stops = await transitAdapter.getStops().catch(() => []);
-    }
-    return stops ?? [];
-  },
-  getLines: async () => {
-    if (!lines) {
-      lines = await transitAdapter.getLines().catch(() => null);
-    }
-    return lines;
-  },
-  getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
-};
-
-const findBestJourneysUseCase = new FindBestJourneysUseCase({
-  routing: routingAdapter,
-  transit: cachedTransitPort,
-});
-
-const getQuickVerdictUseCase = new GetQuickVerdictUseCase({
-  routing: routingAdapter,
-  transit: cachedTransitPort,
-});
-
-const getEligibleArrivalsUseCase = new GetEligibleArrivalsUseCase({
-  transit: cachedTransitPort,
-});
-
-const recordUserChoiceUseCase = new RecordUserChoiceUseCase({
-  journeyLog: journeyLogAdapter,
-});
 
 // Inline SVG glyphs — no emoji as primary iconography.
 const ICON = {
@@ -388,9 +339,6 @@ export function decisionCardHTML(v, lastMileMinutes = null, lastMileDegraded = f
     ${v.bus ? `<div class="decision-alt"><span class="icon">${ICON.bus}</span>Bus L${escapeHTML(v.bus.line)} · ${doorToDoorTotal}′ total (espera ${v.bus.minutes}′)</div>` : ''}
   `;
 }
-
-// computeLastMile moved to domain (src/domain/last-mile.ts); re-exported here for transitional compatibility
-export { computeLastMile };
 
 
 

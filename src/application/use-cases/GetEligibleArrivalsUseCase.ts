@@ -1,7 +1,7 @@
 import type { TransitDataPort } from '../ports/TransitDataPort.js';
 import type { Arrival, Coordinates, LinesTopology, Stop } from '../../domain/models.js';
-import { filterCandidates } from '../../domain/decision.js';
 import { findAlightStop } from '../../domain/topology.js';
+import { resolveEligibleArrivals } from '../../domain/planner.js';
 
 export interface GetEligibleArrivalsInput {
   stops: Stop[];
@@ -23,7 +23,7 @@ export class GetEligibleArrivalsUseCase {
 
     const entries = await Promise.all(input.stops.map(async (boardingStop) => {
       const arrivals = await this.ports.transit.getArrivals(boardingStop.stop).catch(() => [] as Arrival[]);
-      const eligible = filterCandidates(arrivals, lines
+      const eligible = resolveEligibleArrivals(arrivals, lines
         ? (arrival) => findAlightStop({
           line: arrival.line,
           direction: arrival.destination,

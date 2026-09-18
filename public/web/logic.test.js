@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, verdict, filterCandidates } from './decision.js';
 import { nearestStops, isInCadiz } from './geo.js';
 import { transition } from './state.js';
-import { getStops, getArrivals, geocode, searchDestinations, walkRoute, walkMinutes, driveMinutes, busRoute } from './api.js';
+import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
+import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
+import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.js';
+import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
 import { pinStyle } from './map.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
@@ -11,13 +13,11 @@ import {
   decisionCardHTML,
   errorCardHTML,
   escapeHTML,
-  computeLastMile,
   buildAlternativeCardHTML,
   heroCardHTML,
   planningCardsHTML,
   renderDecisionWithAlternatives,
 } from './ui.js';
-import { getLog, appendEntry, formatRecommendationSub, getRecentDestinations, getTopDestinations, classifyDivergence } from './journey-log.js';
 import { findAlightStop } from './topology.js';
 import {
   DEFAULT_PLANNING_POLICY,
@@ -28,6 +28,7 @@ import {
   cheapWalkToStop,
   isStructurallyDiverse,
   filterDiverseAlternatives,
+  resolveEligibleArrivals,
 } from './planner.js';
 import {
   WALK_METERS_PER_MINUTE,
@@ -42,14 +43,34 @@ import {
   isSameIdentity,
   serializeIdentity,
 } from './identity.js';
-import { computeLastMile as domainComputeLastMile } from './last-mile.js';
+import { computeLastMile as domainComputeLastMile } from './domain/last-mile.js';
 import {
   isStructurallyDiverse as domainIsStructurallyDiverse,
   filterDiverseAlternatives as domainFilterDiverseAlternatives,
-  classifyDivergence as domainClassifyDivergence,
+  classifyDivergence,
 } from './diversity.js';
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
+
+const getLog = (storage) => new LocalStorageJourneyLogAdapter(storage).getLog();
+const getRecentDestinations = (n, storage) => new LocalStorageJourneyLogAdapter(storage).getRecentDestinations(n);
+const getTopDestinations = (n, storage) => new LocalStorageJourneyLogAdapter(storage).getTopDestinations(n);
+const appendEntry = (entry, storage, max = 200) => {
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  adapter.append(entry, max);
+  return adapter.getLog().slice(0, max);
+};
+const getArrivals = (fetchImpl, stop) => new MunicipalTransitAdapter(fetchImpl).getArrivals(stop);
+const geocode = (fetchImpl, query) => new NominatimGeocodingAdapter(fetchImpl).geocode(query);
+const searchDestinations = (fetchImpl, query, limit) => new NominatimGeocodingAdapter(fetchImpl).search(query, limit);
+const walkRoute = (fetchImpl, from, to) => new OsrmRoutingAdapter(fetchImpl).routeWalking(from, to);
+const walkMinutes = async (fetchImpl, from, to) => (await walkRoute(fetchImpl, from, to))?.minutes ?? null;
+const busRoute = async (fetchImpl, stopCoords) => {
+  if (!Array.isArray(stopCoords) || stopCoords.length < 2) return null;
+  const adapter = new OsrmRoutingAdapter(fetchImpl);
+  const route = await adapter.routeBus(stopCoords[0], stopCoords.at(-1), stopCoords.slice(1, -1));
+  return route?.coordinates ?? null;
+};
 
 test('domain constants: values match urban transit kinematics and planning defaults', () => {
   assert.equal(WALK_METERS_PER_MINUTE, 80);
@@ -141,31 +162,31 @@ test('domain last-mile: computes routed and degraded last-mile durations with ex
 test('domain diversity: pure rules classify divergence and filter diverse alternatives', () => {
   // Modal divergence — classifyDivergence accepts serialized strings (persistence boundary)
   assert.equal(
-    domainClassifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'walk', identity: 'walk:direct' }),
+    classifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'walk', identity: 'walk:direct' }),
     'mode',
   );
 
   // Line divergence
   assert.equal(
-    domainClassifyDivergence({ mode: 'bus', busLine: '2', identity: 'bus:2:10:20' }, { kind: 'bus', busLine: '1', identity: 'bus:1:10:20' }),
+    classifyDivergence({ mode: 'bus', busLine: '2', identity: 'bus:2:10:20' }, { kind: 'bus', busLine: '1', identity: 'bus:1:10:20' }),
     'line',
   );
 
   // Access divergence (boarding stop differs)
   assert.equal(
-    domainClassifyDivergence({ mode: 'bus', busLine: '1', boardingStopId: '11', alightStopId: '20', identity: 'bus:1:11:20' }, { kind: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '20', identity: 'bus:1:10:20' }),
+    classifyDivergence({ mode: 'bus', busLine: '1', boardingStopId: '11', alightStopId: '20', identity: 'bus:1:11:20' }, { kind: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '20', identity: 'bus:1:10:20' }),
     'access',
   );
 
   // Access divergence (alight stop differs)
   assert.equal(
-    domainClassifyDivergence({ mode: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '21', identity: 'bus:1:10:21' }, { kind: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '20', identity: 'bus:1:10:20' }),
+    classifyDivergence({ mode: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '21', identity: 'bus:1:10:21' }, { kind: 'bus', busLine: '1', boardingStopId: '10', alightStopId: '20', identity: 'bus:1:10:20' }),
     'access',
   );
 
   // None (exact match)
   assert.equal(
-    domainClassifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'bus', identity: 'bus:1:10:20' }),
+    classifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'bus', identity: 'bus:1:10:20' }),
     'none',
   );
 
@@ -275,154 +296,6 @@ test('domain models: conform to structured Decision, EvaluatedJourney, and Candi
   assert.equal('candidate' in evaluated, false);
 });
 
-
-
-test('decide prefers bus only when strictly faster', () => {
-  const a = [{ line: '1', destination: 'CORTADURA', minutes: 3 }];
-  assert.equal(decide(a, 19).decision, 'bus');
-  assert.equal(decide(a, 3).decision, 'walk');
-  assert.equal(decide([], 10).decision, 'walk');
-});
-
-test('verdict falls back to walk without live arrivals', () => {
-  assert.deepEqual(verdict(19, 5, []), { kind: 'walk', walkMinutes: 19, walkToStop: 5, bus: null });
-  assert.deepEqual(verdict(null, 5, [{ line: '1', destination: 'X', minutes: 3 }]), { kind: 'walk', walkMinutes: null, walkToStop: 5, bus: null });
-});
-
-test('verdict adds walk-to-stop to the wait before comparing (no driveMinutes in decision)', () => {
-  const arr = [{ line: '1', destination: 'X', minutes: 17 }, { line: '1', destination: 'X', minutes: 8 }];
-  const v = verdict(19, 5, arr);
-  assert.deepEqual(v, { kind: 'bus', walkMinutes: 19, walkToStop: 5, bus: { minutes: 8, rideMinutes: 0, total: 13, line: '1', destination: 'X', alight: null } });
-  assert.equal(verdict(7, 5, arr).kind, 'walk');
-});
-
-test('verdict skips a bus that arrives before you could reach the stop', () => {
-  // walkToStop=5: the 1' bus is gone before you'd get there — not catchable —
-  // the 6' one is. "Arrives in 1'" must not be offered as if it were useful.
-  const arr = [{ line: '1', destination: 'X', minutes: 1 }, { line: '1', destination: 'X', minutes: 6 }];
-  const v = verdict(19, 5, arr);
-  assert.equal(v.kind, 'bus');
-  assert.equal(v.bus.minutes, 6);
-});
-
-test('verdict falls back to walk when every bus arrives before you could reach the stop', () => {
-  const arr = [{ line: '1', destination: 'X', minutes: 1 }, { line: '1', destination: 'X', minutes: 2 }];
-  const v = verdict(19, 5, arr);
-  assert.equal(v.kind, 'walk');
-  assert.equal(v.bus, null);
-});
-
-test('verdict treats arriving exactly when the bus does as still catching it', () => {
-  const arr = [{ line: '1', destination: 'X', minutes: 5 }];
-  const v = verdict(19, 5, arr);
-  assert.equal(v.kind, 'bus');
-  assert.equal(v.bus.minutes, 5);
-});
-
-test('verdict without walk-to-stop compares wait alone (degraded)', () => {
-  const arr = [{ line: '1', destination: 'X', minutes: 3 }];
-  assert.equal(verdict(19, null, arr).kind, 'bus');
-  assert.equal(verdict(3, null, arr).kind, 'walk');
-});
-
-test('regression: verdict discards bus in opposite direction and recommends walk even if bus arrives in 1 min', () => {
-  const arr = [{ line: '1', destination: 'CORTADURA', minutes: 1 }];
-  // resolveAlight returns null for any arrival that does not get closer to destination
-  const resolveAlight = () => null;
-  const v = verdict(25, 2, arr, resolveAlight);
-  assert.equal(v.kind, 'walk');
-  assert.equal(v.bus, null);
-});
-
-test('verdict picks soonest eligible bus when faster bus goes wrong direction', () => {
-  const arr = [
-    { line: '1', destination: 'CORTADURA', minutes: 1 },
-    { line: '1', destination: 'PLAZA ESPAÑA', minutes: 4 },
-  ];
-  const resolveAlight = (a) => (a.destination === 'PLAZA ESPAÑA' ? { stop: { name: 'PLAZA ESPAÑA', stop: '1101' }, distanceMeters: 300, direction: 'PLAZA ESPAÑA' } : null);
-  const v = verdict(20, 2, arr, resolveAlight);
-  assert.equal(v.kind, 'bus');
-  assert.equal(v.bus.line, '1');
-  assert.equal(v.bus.destination, 'PLAZA ESPAÑA');
-  assert.equal(v.bus.minutes, 4);
-  assert.equal(v.bus.total, 6);
-  assert.equal(v.bus.alight.stop.name, 'PLAZA ESPAÑA');
-});
-
-test('regression: real Cadiz topology - Santa María del Mar (1106) to Plaza Mina with L1 Cortadura in 1 min returns walk', () => {
-  const destMina = { lat: 36.5338, lon: -6.2974 };
-  const arrivals = [{ line: '1', destination: 'CORTADURA', minutes: 1 }];
-  const resolveAlight = (arr) => findAlightStop({
-    line: arr.line,
-    direction: arr.destination,
-    boardingStopId: '1106',
-    destCoords: destMina,
-    stops: stopsFixture,
-    lines: linesFixture.lines,
-  });
-
-  const v = verdict(25, 1, arrivals, resolveAlight);
-  assert.equal(v.kind, 'walk');
-  assert.equal(v.bus, null);
-});
-
-test('regression: Santa María del Mar (1121) to Plaza Mina with L1 Cortadura 1min and L1 Plaza España 4min selects Plaza España and never Cortadura', () => {
-  const destMina = { lat: 36.5338, lon: -6.2974 };
-  const arrivals = [
-    { line: '1', destination: 'L1 CORTADURA', minutes: 1 },
-    { line: '1', destination: 'L1 PLAZA ESPAÑA', minutes: 4 },
-  ];
-  const resolveAlight = (arr) => findAlightStop({
-    line: arr.line,
-    direction: arr.destination,
-    boardingStopId: '1121',
-    destCoords: destMina,
-    stops: stopsFixture,
-    lines: linesFixture.lines,
-  });
-
-  const v = verdict(25, 2, arrivals, resolveAlight);
-  assert.equal(v.kind, 'bus');
-  assert.equal(v.bus.line, '1');
-  assert.equal(v.bus.destination, 'L1 PLAZA ESPAÑA');
-  assert.equal(v.bus.minutes, 4);
-  assert.equal(v.bus.alight.stop.stop, '1101');
-  assert.equal(v.bus.alight.direction, 'PLAZA ESPAÑA');
-});
-
-test('regression: Guillén Moreno (1229) to Hospital de Mora - F. Ciencias Empresariales with L2 Plaza España finds the bus', () => {
-  const destHospitalMora = { lat: 36.5313241, lon: -6.3054551 };
-  const arrivals = [{ line: '2', destination: 'PLAZA ESPAÑA', minutes: 2 }];
-  const resolveAlight = (arr) => findAlightStop({
-    line: arr.line,
-    direction: arr.destination,
-    boardingStopId: '1229',
-    destCoords: destHospitalMora,
-    stops: stopsFixture,
-    lines: linesFixture.lines,
-  });
-
-  const v = verdict(25, 2, arrivals, resolveAlight);
-  assert.equal(v.kind, 'bus');
-  assert.equal(v.bus.line, '2');
-  assert.equal(v.bus.alight.stop.stop, '1240');
-});
-
-test('regression: verdict prefers the bus that lands closer to the destination over the merely soonest one', () => {
-  const arr = [
-    { line: '5', destination: 'PLAZA ESPAÑA', minutes: 1 },
-    { line: '2', destination: 'PLAZA ESPAÑA', minutes: 2 },
-  ];
-  const resolveAlight = (a) => (a.line === '5'
-    ? { stop: { name: 'PLAZA ESPAÑA', stop: '1101' }, distanceMeters: 1151, direction: 'PLAZA ESPAÑA' }
-    : { stop: { name: 'HOSPITAL MORA-PLAYA LA CALETA', stop: '1240' }, distanceMeters: 28, direction: 'PLAZA ESPAÑA' });
-
-  const v = verdict(25, 1, arr, resolveAlight);
-  assert.equal(v.kind, 'bus');
-  assert.equal(v.bus.line, '2');
-  assert.equal(v.bus.alight.stop.stop, '1240');
-});
-
 test('nearestStops returns 3 closest with _km', () => {
   const stops = [
     { name: 'FAR', number: '1', stop: '1', lat: 36.6, lon: -6.2 },
@@ -498,15 +371,6 @@ test('walkMinutes estimates from distance when OSRM duration is impossibly fast'
   assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 41);
 });
 
-test('driveMinutes rounds up and rejects absurd speeds', async () => {
-  const ok = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 480, distance: 3200 }] }) });
-  assert.equal(await driveMinutes(ok, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), 8);
-  const absurd = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 10, distance: 3200 }] }) });
-  assert.equal(await driveMinutes(absurd, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
-  const down = async () => ({ ok: false, status: 500 });
-  assert.equal(await driveMinutes(down, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
-});
-
 test('walkMinutes is null when no route', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [] }) });
   assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
@@ -524,7 +388,7 @@ test('regression: map must not highlight a stop whose only bus runs the opposite
     lines: linesFixture.lines,
   });
 
-  const eligible = filterCandidates(arrivals, resolveAlight);
+  const eligible = resolveEligibleArrivals(arrivals, resolveAlight);
   assert.deepEqual(eligible, []);
   assert.deepEqual(pinStyle(eligible, true), { label: '—', color: 'gray', scale: 1, halo: false });
 });
@@ -768,17 +632,17 @@ test('decisionCardHTML BUS card renders "?′" instead of "null′" when walkToS
 });
 
 test('computeLastMile: successful lastMile uses routed minutes, not degraded', () => {
-  const result = computeLastMile({ minutes: 7, coordinates: [] }, 900);
+  const result = domainComputeLastMile({ minutes: 7, coordinates: [] }, 900);
   assert.deepEqual(result, { lastMileMinutes: 7, lastMileDegraded: false });
 });
 
 test('computeLastMile: null lastMile (walkRoute\'s realistic failure mode) falls back to distance/80, flagged degraded', () => {
-  const result = computeLastMile(null, 800);
+  const result = domainComputeLastMile(null, 800);
   assert.deepEqual(result, { lastMileMinutes: 10, lastMileDegraded: true });
 });
 
 test('computeLastMile: lastMile object with no minutes also falls back, flagged degraded', () => {
-  const result = computeLastMile({ minutes: null }, 400);
+  const result = domainComputeLastMile({ minutes: null }, 400);
   assert.deepEqual(result, { lastMileMinutes: 5, lastMileDegraded: true });
 });
 

@@ -5,7 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "architecture:check": "node scripts/architecture-gate.mjs",
+    "test": "npm run architecture:check && node --test",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "dev": "wrangler dev"

@@ -4,8 +4,13 @@ import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
-import { appendEntry } from './journey-log.js';
-import { cachedTransitPort, _setTransitAdapter, _setStops, _getStops, _setLines, _getLines } from './ui.js';
+import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedStops as _setStops, setCachedLines as _setLines } from './application/composition.js';
+
+const appendEntry = (entry, storage, max = 200) => {
+  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  adapter.append(entry, max);
+  return adapter.getLog().slice(0, max);
+};
 
 
 test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
@@ -685,7 +690,7 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
 
   const s1 = await cachedTransitPort.getStops();
   assert.equal(stopCalls, 1);
-  assert.equal(_getStops().length, 1, 'stops module variable must be populated by getStops()');
+  assert.equal(s1.length, 1, 'cached port must return populated stops');
 
   const s2 = await cachedTransitPort.getStops();
   assert.equal(stopCalls, 1, 'subsequent call must reuse populated stops module variable');
@@ -693,11 +698,9 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
 
   const l1 = await cachedTransitPort.getLines();
   assert.equal(lineCalls, 1);
-  assert.ok(_getLines()['99'], 'lines module variable must be populated by getLines()');
+  assert.ok(l1['99'], 'cached port must return populated lines');
 
   const l2 = await cachedTransitPort.getLines();
   assert.equal(lineCalls, 1, 'subsequent call must reuse populated lines module variable');
   assert.equal(l2, l1);
 });
-
-
