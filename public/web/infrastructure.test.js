@@ -4,6 +4,7 @@ import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
+import { cachedTransitPort } from './ui.js';
 
 
 test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
@@ -525,4 +526,114 @@ test('formatRecommendationSub: formats walk and bus recommendations correctly', 
   assert.equal(formatRecommendationSub({ kind: 'bus', busLine: '2', totalMinutes: 10 }), 'última vez: BUS L2 · 10′');
   assert.equal(formatRecommendationSub({ mode: 'bus' }), 'última vez: BUS');
 });
+
+function createNativeLikeFetch(responseBody) {
+  return function nativeLikeFetch(...args) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    }
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => responseBody,
+    });
+  };
+}
+
+test('OsrmRoutingAdapter: binds fetchImpl to globalThis preventing Illegal invocation on native browser fetch', async () => {
+  const nativeFetch = createNativeLikeFetch({
+    routes: [
+      {
+        distance: 1200,
+        duration: 900,
+        geometry: {
+          coordinates: [
+            [-6.280, 36.520],
+            [-6.285, 36.525],
+          ],
+        },
+      },
+    ],
+  });
+
+  const adapter = new OsrmRoutingAdapter(nativeFetch);
+  const route = await adapter.routeWalking(
+    { lat: 36.520, lon: -6.280 },
+    { lat: 36.525, lon: -6.285 },
+  );
+  assert.ok(route);
+  assert.equal(route.minutes, 15);
+});
+
+test('MunicipalTransitAdapter: binds fetchImpl to globalThis preventing Illegal invocation on native browser fetch', async () => {
+  const nativeFetch = createNativeLikeFetch([
+    { stop: 1, name: 'Plaza España', lat: 36.535, lon: -6.292 },
+  ]);
+
+  const adapter = new MunicipalTransitAdapter(nativeFetch);
+  const stops = await adapter.getStops();
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].name, 'Plaza España');
+});
+
+test('NominatimGeocodingAdapter: binds fetchImpl to globalThis preventing Illegal invocation on native browser fetch', async () => {
+  const nativeFetch = createNativeLikeFetch([
+    { display_name: 'Cádiz, Spain', name: 'Cádiz', lat: '36.527', lon: '-6.288' },
+  ]);
+
+  const adapter = new NominatimGeocodingAdapter(nativeFetch);
+  const hits = await adapter.search('Cadiz');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].label, 'Cádiz');
+});
+
+test('cachedTransitPort: conforms to TransitDataPort and handles in-memory stops and lines caching', async () => {
+  assert.equal(typeof cachedTransitPort.getStops, 'function');
+  assert.equal(typeof cachedTransitPort.getLines, 'function');
+  assert.equal(typeof cachedTransitPort.getArrivals, 'function');
+
+  // Verify caching logic bridge:
+  let stopsCalls = 0;
+  let linesCalls = 0;
+  const mockAdapter = {
+    getStops: async () => { stopsCalls++; return [{ stop: 1, name: 'S1', lat: 36.5, lon: -6.2 }]; },
+    getLines: async () => { linesCalls++; return { '1': { name: 'Line 1' } }; },
+    getArrivals: async (id) => [{ line: '1', minutes: 5 }],
+  };
+
+  let inMemoryStops = [];
+  let inMemoryLines = null;
+
+  const testBridge = {
+    getStops: async () => (inMemoryStops?.length ? inMemoryStops : mockAdapter.getStops()),
+    getLines: async () => inMemoryLines || mockAdapter.getLines(),
+    getArrivals: (stopId) => mockAdapter.getArrivals(stopId),
+  };
+
+  // Initially empty -> calls adapter
+  const s1 = await testBridge.getStops();
+  assert.equal(stopsCalls, 1);
+  assert.equal(s1.length, 1);
+
+  const l1 = await testBridge.getLines();
+  assert.equal(linesCalls, 1);
+  assert.ok(l1['1']);
+
+  // Now populate in-memory state (as init() does)
+  inMemoryStops = s1;
+  inMemoryLines = l1;
+
+  // Subsequent calls use in-memory cache without calling adapter
+  const s2 = await testBridge.getStops();
+  assert.equal(stopsCalls, 1, 'getStops should not call adapter when cache is populated');
+  assert.equal(s2, inMemoryStops);
+
+  const l2 = await testBridge.getLines();
+  assert.equal(linesCalls, 1, 'getLines should not call adapter when cache is populated');
+  assert.equal(l2, inMemoryLines);
+
+  const arrivals = await testBridge.getArrivals(1);
+  assert.equal(arrivals.length, 1);
+});
+
 

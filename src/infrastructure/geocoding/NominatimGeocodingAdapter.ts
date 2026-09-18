@@ -4,7 +4,11 @@ import type { Coordinates } from '../../domain/models.js';
 export const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
 
 export class NominatimGeocodingAdapter implements GeocodingPort {
-  constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+    this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+  }
 
   async search(query: string, limit: number = 5): Promise<GeocodingResult[]> {
     if (!query || query.trim().length < 2) return [];

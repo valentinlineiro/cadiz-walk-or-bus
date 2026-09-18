@@ -3,7 +3,11 @@ import type { Coordinates, Route } from '../../domain/models.js';
 import { haversineMeters } from '../../domain/topology.js';
 
 export class OsrmRoutingAdapter implements RoutingPort {
-  constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+    this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+  }
 
   async routeWalking(from: Coordinates, to: Coordinates): Promise<Route | null> {
     const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;

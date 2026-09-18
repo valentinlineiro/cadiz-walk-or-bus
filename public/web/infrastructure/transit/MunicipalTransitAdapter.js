@@ -1,7 +1,7 @@
 export class MunicipalTransitAdapter {
     fetchImpl;
     constructor(fetchImpl = globalThis.fetch) {
-        this.fetchImpl = fetchImpl;
+        this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
     }
     async getStops() {
         const r = await this.fetchImpl('/stops');

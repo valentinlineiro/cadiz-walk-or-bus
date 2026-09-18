@@ -2,7 +2,11 @@ import type { TransitDataPort } from '../../application/ports/TransitDataPort.js
 import type { Arrival, LinesTopology, Stop } from '../../domain/models.js';
 
 export class MunicipalTransitAdapter implements TransitDataPort {
-  constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+    this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+  }
 
   async getStops(): Promise<Stop[]> {
     const r = await this.fetchImpl('/stops');

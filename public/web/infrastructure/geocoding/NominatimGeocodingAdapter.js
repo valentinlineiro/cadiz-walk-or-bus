@@ -2,7 +2,7 @@ export const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
 export class NominatimGeocodingAdapter {
     fetchImpl;
     constructor(fetchImpl = globalThis.fetch) {
-        this.fetchImpl = fetchImpl;
+        this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
     }
     async search(query, limit = 5) {
         if (!query || query.trim().length < 2)

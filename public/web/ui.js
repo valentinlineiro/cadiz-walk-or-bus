@@ -40,9 +40,15 @@ const transitAdapter = new MunicipalTransitAdapter(fetch);
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
 const geocodingAdapter = new NominatimGeocodingAdapter(fetch);
 
+export const cachedTransitPort = {
+  getStops: async () => (stops?.length ? stops : transitAdapter.getStops()),
+  getLines: async () => lines || transitAdapter.getLines(),
+  getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
+};
+
 const findBestJourneysUseCase = new FindBestJourneysUseCase({
   routing: routingAdapter,
-  transit: transitAdapter,
+  transit: cachedTransitPort,
 });
 
 const recordUserChoiceUseCase = new RecordUserChoiceUseCase({

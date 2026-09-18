@@ -2,7 +2,7 @@ import { haversineMeters } from '../../domain/topology.js';
 export class OsrmRoutingAdapter {
     fetchImpl;
     constructor(fetchImpl = globalThis.fetch) {
-        this.fetchImpl = fetchImpl;
+        this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
     }
     async routeWalking(from, to) {
         const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
