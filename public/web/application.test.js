@@ -88,11 +88,23 @@ test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
 
 test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and still produces BUS', async () => {
   const sourceTrip = officialGtfsSnapshot.trips.find((trip) => trip.line === 'M-021');
+  assert.ok(sourceTrip, 'official snapshot must contain M-021');
   const originStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes[0].stop);
+  assert.ok(originStop, 'M-021 must reference a known origin stop');
   const destinationStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes.at(-1).stop);
+  assert.ok(destinationStop, 'M-021 must reference a known destination stop');
   const scheduled = new GtfsTransitAdapter(officialGtfsSnapshot, {
-    now: () => new Date('2026-09-18T07:00:00+02:00'),
+    now: () => new Date('2026-09-19T09:00:00+02:00'),
   });
+  const scheduledArrivals = await scheduled.getArrivals(originStop.stop);
+  const scheduledArrival = scheduledArrivals.find((arrival) => arrival.line === sourceTrip.line);
+  assert.ok(scheduledArrival, 'real GTFS stop must produce a scheduled arrival');
+  assert.equal(scheduledArrival.source, 'scheduled');
+  assert.ok(officialGtfsSnapshot.lines[sourceTrip.line], 'scheduled line must exist in topology');
+  assert.ok(
+    Object.values(officialGtfsSnapshot.lines[sourceTrip.line]).some((sequence) => sequence.includes(destinationStop.stop)),
+    'scheduled line topology must contain the destination stop',
+  );
   let realtimeCalls = 0;
   const realtime = {
     getStops: async () => { realtimeCalls += 1; throw new Error('502'); },

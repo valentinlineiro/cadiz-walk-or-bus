@@ -57,28 +57,35 @@ export class GtfsTransitAdapter {
         const { dateKey, seconds, weekday } = madridNow(this.clock.now());
         const previousKey = previousDateKey(dateKey);
         const previousWeekday = (weekday + 6) % 7;
-        const activeServices = new Set(this.snapshot.services
-            .filter((service) => serviceRuns(service, dateKey, weekday))
-            .map((service) => service.serviceId));
-        const previousServices = new Set(this.snapshot.services
-            .filter((service) => serviceRuns(service, previousKey, previousWeekday))
-            .map((service) => service.serviceId));
+        const nowOnTimeline = 86400 + seconds;
+        const serviceDays = [
+            { dateKey: previousKey, weekday: previousWeekday, timelineOffset: 0 },
+            { dateKey, weekday, timelineOffset: 86400 },
+        ].filter(({ dateKey: serviceDate, weekday: serviceWeekday }) => this.snapshot.services.some((service) => serviceRuns(service, serviceDate, serviceWeekday)));
+        const activeServiceDays = new Map(serviceDays.map(({ dateKey: serviceDate, weekday: serviceWeekday, timelineOffset }) => [
+            `${serviceDate}:${serviceWeekday}`,
+            {
+                timelineOffset,
+                services: new Set(this.snapshot.services
+                    .filter((service) => serviceRuns(service, serviceDate, serviceWeekday))
+                    .map((service) => service.serviceId)),
+            },
+        ]));
         return this.snapshot.trips
             .flatMap((trip) => {
-            const serviceDayOffsets = [
-                ...(activeServices.has(trip.serviceId) ? [0] : []),
-                ...(previousServices.has(trip.serviceId) ? [86400] : []),
-            ];
-            return serviceDayOffsets.map((serviceDayOffset) => ({ trip, serviceDayOffset }));
+            return [...activeServiceDays.values()]
+                .filter(({ services }) => services.has(trip.serviceId))
+                .map(({ timelineOffset }) => ({ trip, timelineOffset }));
         })
             .flatMap((trip) => {
             const stopTime = trip.trip.stopTimes.find((time) => String(time.stop) === String(stopId));
-            if (!stopTime || stopTime.departureSeconds < trip.serviceDayOffset + seconds)
+            const departureOnTimeline = (trip.timelineOffset ?? 0) + (stopTime?.departureSeconds ?? 0);
+            if (!stopTime || departureOnTimeline < nowOnTimeline)
                 return [];
             return [{
                     line: String(trip.trip.line),
                     destination: trip.trip.destination,
-                    minutes: Math.ceil((stopTime.departureSeconds - trip.serviceDayOffset - seconds) / 60),
+                    minutes: Math.ceil((departureOnTimeline - nowOnTimeline) / 60),
                     source: 'scheduled',
                 }];
         })

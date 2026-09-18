@@ -739,9 +739,9 @@ test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight se
   }]);
 
   const afterMidnight = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T01:00:00+02:00'),
+    now: () => new Date('2026-09-18T00:30:00+02:00'),
   });
-  assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 10);
+  assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
 });
 
 test('ResilientTransitAdapter: falls back on realtime errors but not on a valid empty response', async () => {
@@ -763,6 +763,7 @@ test('ResilientTransitAdapter: falls back on realtime errors but not on a valid 
 
   const emptyRealtime = { ...realtime, getArrivals: async () => [] };
   const emptyAdapter = new ResilientTransitAdapter(emptyRealtime, scheduled, 50);
+  scheduledCalls = 0;
   assert.deepEqual(await emptyAdapter.getArrivals('A'), []);
-  assert.equal(scheduledCalls, 1, 'scheduled source must not be queried for valid realtime emptiness');
+  assert.equal(scheduledCalls, 0, 'scheduled source must not be queried for valid realtime emptiness');
 });
