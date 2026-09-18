@@ -1,10 +1,10 @@
-import { nearestStops, isInCadiz } from './geo.js';
-import { verdict, filterCandidates } from './decision.js';
+import { isInCadiz } from './geo.js';
+import { filterCandidates } from './decision.js';
 import { initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
-import { findAlightStop, diversifyByLine } from './topology.js';
+import { findAlightStop } from './topology.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { computeLastMile } from './last-mile.js';
@@ -12,7 +12,11 @@ import { serializeIdentity, parseIdentity, isSameIdentity } from './identity.js'
 import {
   formatAlternativeDiff,
 } from './planner.js';
-import { FindBestJourneysUseCase, RecordUserChoiceUseCase } from './application/index.js';
+import {
+  FindBestJourneysUseCase,
+  RecordUserChoiceUseCase,
+  SearchDestinationsUseCase,
+} from './application/index.js';
 import {
   OsrmRoutingAdapter,
   MunicipalTransitAdapter,
@@ -30,7 +34,6 @@ let requestId = 0;
 let destCoords = null;
 let destLabel = null;
 let lastWalkRoute = null;
-let walkToStopCache = new Map();
 let lastNear = [];
 let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
@@ -44,6 +47,7 @@ export function _setLines(l) { lines = l; }
 export function _getLines() { return lines; }
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
 const geocodingAdapter = new NominatimGeocodingAdapter(fetch);
+const searchDestinationsUseCase = new SearchDestinationsUseCase(geocodingAdapter);
 
 export const cachedTransitPort = {
   getStops: async () => {
@@ -180,73 +184,26 @@ function eligibleArrivalsByStop(near) {
   );
 }
 
-// Nearest stops, but not several stops all on the same line — pull from a
-// wider pool of close stops and keep only ones that add a new line.
-function nearbyDiverseStops(n) {
-  const pool = nearestStops(stops, me.lat, me.lon, Math.max(n * 4, 10));
-  return diversifyByLine(pool, lines, n);
-}
-
-async function getWalkToStopRoute(stop) {
-  if (walkToStopCache.has(stop.stop)) return walkToStopCache.get(stop.stop);
-  const route = await routingAdapter.routeWalking(me, { lat: stop.lat, lon: stop.lon });
-  walkToStopCache.set(stop.stop, route);
-  return route;
-}
-
-// Only offer stops with a bus actually heading toward destCoords, and only
-// if that bus beats walking there — a stop going the wrong way, or one
-// whose bus loses to walking, isn't worth showing on the map.
-async function loadNearby() {
-  const pool = nearbyDiverseStops(8);
-  arrivalsByStop = new Map();
-  walkToStopCache = new Map();
-  await Promise.all(
-    pool.map(async (s) => arrivalsByStop.set(s.stop, await transitAdapter.getArrivals(s.stop))),
-  );
-  const eligibleByPool = eligibleArrivalsByStop(pool);
-  const candidates = pool.filter((s) => (eligibleByPool.get(s.stop) ?? []).length > 0);
-
-  const walkTotal = lastWalkRoute?.minutes ?? null;
-  const near = [];
-  for (const s of candidates) {
-    if (near.length >= 3) break;
-    const walkToStopRoute = await getWalkToStopRoute(s);
-    const v = verdict(walkTotal, walkToStopRoute?.minutes ?? null, arrivalsByStop.get(s.stop) ?? [], makeAlightResolver(s, destCoords));
-    if (v.kind === 'bus') near.push(s);
-  }
-
-  if (!focused || !near.some((s) => s.stop === focused)) {
-    focused = near[0]?.stop ?? null;
-  }
-  showStops(near, eligibleArrivalsByStop(near), focused);
-  lastNear = near;
-  return near;
-}
-
 // A lightweight verdict for a pinned destination we are NOT currently
 // routing to — used to badge favorites with bus or walk minutes so the list
 // itself answers "bus or walk", without touching the current search state
 // (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
-async function quickVerdictFor(dest) {
-  if (!isInCadiz(dest.lat, dest.lon)) return null;
-  if (!me || stops.length === 0) return null;
-  if (!isInCadiz(me.lat, me.lon)) return null; // origin guard: user outside Cádiz
-  const walkRes = await routingAdapter.routeWalking(me, { lat: dest.lat, lon: dest.lon }).catch(() => null);
-  const walkTotal = walkRes?.minutes ?? null;
-  if (walkTotal == null) return null;
-  const pool = nearbyDiverseStops(6);
-  const arrivalsByPool = new Map(
-    await Promise.all(pool.map(async (s) => [s.stop, await transitAdapter.getArrivals(s.stop)])),
-  );
-  let best = null;
-  for (const s of pool) {
-    const arrivals = arrivalsByPool.get(s.stop) ?? [];
-    const walkToStopRoute = await getWalkToStopRoute(s);
-    const v = verdict(walkTotal, walkToStopRoute?.minutes ?? null, arrivals, makeAlightResolver(s, dest));
-    if (v.kind === 'bus' && (!best || v.bus.total < best.bus.total)) best = v;
+export async function quickVerdictFor(dest) {
+  if (!dest || !isInCadiz(dest.lat, dest.lon)) return null;
+  if (!me || !isInCadiz(me.lat, me.lon)) return null;
+  try {
+    const decision = await findBestJourneysUseCase.execute({
+      origin: me,
+      destination: dest,
+    });
+    if (!decision?.hero) return null;
+    return {
+      kind: decision.hero.mode,
+      totalMinutes: decision.hero.totalMinutes,
+    };
+  } catch {
+    return null;
   }
-  return best ?? { kind: 'walk', walkMinutes: walkTotal, bus: null };
 }
 
 function makeAlightResolver(boardingStop, destinationCoords) {
@@ -527,16 +484,16 @@ function buildDropdownRow(icon, item, { badge } = {}) {
 
 // Fills a favorite's badge with a quick bus-or-walk read, computed in the
 // background — lets the list itself answer the question, no tap needed.
-function fillQuickVerdictBadge(row, dest) {
+export function fillQuickVerdictBadge(row, dest) {
   quickVerdictFor(dest)
     .then((v) => {
       const badgeEl = row._badgeEl;
       if (!badgeEl) return;
-      if (v?.kind === 'bus' && v.bus) {
-        badgeEl.textContent = `${v.bus.total}′`;
+      if (v?.kind === 'bus') {
+        badgeEl.textContent = `${v.totalMinutes}′`;
         badgeEl.className = 'quick-verdict bus';
-      } else if (v?.walkMinutes != null) {
-        badgeEl.textContent = `${v.walkMinutes}′`;
+      } else if (v?.kind === 'walk') {
+        badgeEl.textContent = `${v.totalMinutes}′`;
         badgeEl.className = 'quick-verdict walk';
       } else {
         badgeEl.textContent = '';
@@ -775,7 +732,7 @@ async function onFormSubmit(query) {
   document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Buscando…';
   setState('SEARCH');
-  const hits = await geocodingAdapter.search(q, 1);
+  const hits = await searchDestinationsUseCase.execute(q, 1);
   if (hits.length === 0) {
     destCoords = null;
     destLabel = null;
@@ -951,7 +908,7 @@ export function initUI() {
         return;
       }
       debounce = setTimeout(async () => {
-        const hits = await geocodingAdapter.search(q, 3);
+        const hits = await searchDestinationsUseCase.execute(q, 3);
         if (input.value.trim() === q) {
           if (hits.length === 0) renderNoResultsHint(q);
           else renderSuggestions(hits);
@@ -1027,7 +984,7 @@ function locate() {
     me = { ...CADIZ };
     setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
     showMe(me.lat, me.lon);
-    Promise.all([transitAdapter.getStops(), transitAdapter.getLines()])
+    Promise.all([cachedTransitPort.getStops(), cachedTransitPort.getLines()])
       .then(([s, l]) => {
         stops = s;
         lines = l;
@@ -1051,10 +1008,9 @@ function locate() {
       const { latitude, longitude } = pos.coords;
       if (!isInCadiz(latitude, longitude)) {
         me = { lat: latitude, lon: longitude };
-        walkToStopCache = new Map();
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(me.lat, me.lon);
-        Promise.all([transitAdapter.getStops(), transitAdapter.getLines()])
+        Promise.all([cachedTransitPort.getStops(), cachedTransitPort.getLines()])
           .then(([s, l]) => {
             stops = s;
             lines = l;
@@ -1064,12 +1020,11 @@ function locate() {
         return;
       }
       me = { lat: latitude, lon: longitude };
-      walkToStopCache = new Map();
       setState('LOCATED', 'Cargando paradas y líneas…');
       showMe(me.lat, me.lon);
       try {
-        stops = await transitAdapter.getStops();
-        lines = await transitAdapter.getLines();
+        stops = await cachedTransitPort.getStops();
+        lines = await cachedTransitPort.getLines();
       } catch {
         setState('FAILED', 'No se pudieron cargar las paradas');
         return;

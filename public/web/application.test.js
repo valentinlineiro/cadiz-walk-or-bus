@@ -1,7 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RecordUserChoiceUseCase, FindBestJourneysUseCase } from './application/index.js';
+import {
+  RecordUserChoiceUseCase,
+  FindBestJourneysUseCase,
+  SearchDestinationsUseCase,
+} from './application/index.js';
 import { createWalkIdentity, createBusIdentity } from './identity.js';
+
+test('SearchDestinationsUseCase: delegates query and limit to GeocodingPort', async () => {
+  let capturedQuery = null;
+  let capturedLimit = null;
+  const fakeGeocoding = {
+    search: async (query, limit) => {
+      capturedQuery = query;
+      capturedLimit = limit;
+      return [{ label: 'Plaza Mina', sub: 'Cádiz', lat: 36.535, lon: -6.297 }];
+    },
+    geocode: async () => null,
+  };
+
+  const useCase = new SearchDestinationsUseCase(fakeGeocoding);
+  const results = await useCase.execute('Plaza Mina', 3);
+
+  assert.equal(capturedQuery, 'Plaza Mina');
+  assert.equal(capturedLimit, 3);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].label, 'Plaza Mina');
+});
 
 class FakeJourneyLog {
   constructor() {
@@ -510,4 +535,3 @@ test('FindBestJourneysUseCase: flags degraded last-mile when pedestrian routing 
   assert.equal(decision.hero.breakdown.lastMileDegraded, true);
   assert.ok(decision.hero.breakdown.lastMileMinutes > 0);
 });
-
