@@ -3,6 +3,13 @@ import type { Coordinates } from '../../domain/models.js';
 
 export const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
 
+interface NominatimHit {
+  name?: string;
+  display_name?: string;
+  lat: string | number;
+  lon: string | number;
+}
+
 export class NominatimGeocodingAdapter implements GeocodingPort {
   private readonly fetchImpl: typeof fetch;
 
@@ -22,7 +29,7 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
     }
     if (!r.ok) return [];
 
-    let hits: any;
+    let hits: NominatimHit[];
     try {
       hits = await r.json();
     } catch {

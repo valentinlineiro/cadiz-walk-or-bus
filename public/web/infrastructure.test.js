@@ -4,7 +4,8 @@ import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
-import { cachedTransitPort } from './ui.js';
+import { appendEntry } from './journey-log.js';
+import { cachedTransitPort, _setTransitAdapter, _setStops, _getStops, _setLines, _getLines } from './ui.js';
 
 
 test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
@@ -445,24 +446,33 @@ test('LocalStorageJourneyLogAdapter: deduplication moves updated entry to the he
   assert.equal(log[1].id, 'b1');
 });
 
-test('LocalStorageJourneyLogAdapter: getLog accepts entries with optional id and validates schema', () => {
+test('LocalStorageJourneyLogAdapter: getLog validates schema and drops invalid entries', () => {
   const storage = new MockStorage();
-  const validNoId = {
+  const validEntry = {
+    id: 'entry-1',
+    timestamp: 1000,
+    destination: { label: 'Dest A', lat: 36.50, lon: -6.28 },
+    recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
+  };
+  const invalidNoId = {
     timestamp: 1000,
     destination: { label: 'Dest A', lat: 36.50, lon: -6.28 },
     recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
   };
   const invalidTimestamp = {
+    id: 'entry-2',
     timestamp: 'not-a-number',
     destination: { label: 'Dest B', lat: 36.50, lon: -6.28 },
     recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
   };
   const invalidCoords = {
+    id: 'entry-3',
     timestamp: 2000,
     destination: { label: 'Dest C', lat: 'invalid', lon: -6.28 },
     recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
   };
   const invalidRecommendation = {
+    id: 'entry-4',
     timestamp: 3000,
     destination: { label: 'Dest D', lat: 36.50, lon: -6.28 },
     recommendation: null,
@@ -470,19 +480,20 @@ test('LocalStorageJourneyLogAdapter: getLog accepts entries with optional id and
 
   storage.setItem(
     'cadiz_journey_log',
-    JSON.stringify([validNoId, invalidTimestamp, invalidCoords, invalidRecommendation]),
+    JSON.stringify([validEntry, invalidNoId, invalidTimestamp, invalidCoords, invalidRecommendation]),
   );
+
   const adapter = new LocalStorageJourneyLogAdapter(storage);
   const log = adapter.getLog();
-
   assert.equal(log.length, 1);
+  assert.equal(log[0].id, 'entry-1');
   assert.equal(log[0].destination.label, 'Dest A');
-  assert.equal(log[0].id, undefined);
 });
 
 test('LocalStorageJourneyLogAdapter: getLog slices entries to MAX_ENTRIES (200)', () => {
   const storage = new MockStorage();
   const entries = Array.from({ length: 250 }, (_, i) => ({
+    id: `id-${i}`,
     timestamp: 1000 + i,
     destination: { label: `Dest ${i}`, lat: 36.50, lon: -6.28 },
     recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
@@ -634,6 +645,59 @@ test('cachedTransitPort: conforms to TransitDataPort and handles in-memory stops
 
   const arrivals = await testBridge.getArrivals(1);
   assert.equal(arrivals.length, 1);
+});
+
+test('appendEntry: respects max limit when persisting to storage (preserves legacy persistent state semantic)', () => {
+  const mockStorage = new MockStorage();
+  const entry1 = {
+    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
+    recommendation: { kind: 'walk', walkMinutes: 10, totalMinutes: 10 },
+  };
+  const entry2 = {
+    destination: { label: 'Plaza España', lat: 36.533, lon: -6.292 },
+    recommendation: { kind: 'walk', walkMinutes: 12, totalMinutes: 12 },
+  };
+  const entry3 = {
+    destination: { label: 'Playa Victoria', lat: 36.505, lon: -6.275 },
+    recommendation: { kind: 'walk', walkMinutes: 25, totalMinutes: 25 },
+  };
+
+  appendEntry(entry1, mockStorage, 2);
+  appendEntry(entry2, mockStorage, 2);
+  appendEntry(entry3, mockStorage, 2);
+
+  const raw = JSON.parse(mockStorage.getItem('cadiz_journey_log'));
+  assert.equal(raw.length, 2, 'storage must persist at most max=2 entries');
+  assert.equal(raw[0].destination.label, 'Playa Victoria');
+  assert.equal(raw[1].destination.label, 'Plaza España');
+});
+
+test('cachedTransitPort: populates and preserves in-memory cache across calls', async () => {
+  let stopCalls = 0;
+  let lineCalls = 0;
+  _setTransitAdapter({
+    getStops: async () => { stopCalls++; return [{ stop: 99, name: 'Test Stop', lat: 36.5, lon: -6.2 }]; },
+    getLines: async () => { lineCalls++; return { '99': { name: 'Line 99' } }; },
+    getArrivals: async () => [],
+  });
+  _setStops([]);
+  _setLines(null);
+
+  const s1 = await cachedTransitPort.getStops();
+  assert.equal(stopCalls, 1);
+  assert.equal(_getStops().length, 1, 'stops module variable must be populated by getStops()');
+
+  const s2 = await cachedTransitPort.getStops();
+  assert.equal(stopCalls, 1, 'subsequent call must reuse populated stops module variable');
+  assert.equal(s2, s1);
+
+  const l1 = await cachedTransitPort.getLines();
+  assert.equal(lineCalls, 1);
+  assert.ok(_getLines()['99'], 'lines module variable must be populated by getLines()');
+
+  const l2 = await cachedTransitPort.getLines();
+  assert.equal(lineCalls, 1, 'subsequent call must reuse populated lines module variable');
+  assert.equal(l2, l1);
 });
 
 

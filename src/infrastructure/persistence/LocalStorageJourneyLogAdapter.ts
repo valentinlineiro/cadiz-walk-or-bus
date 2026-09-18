@@ -136,13 +136,14 @@ export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
           (item: any) =>
             item &&
             typeof item === 'object' &&
-            (item.id == null || typeof item.id === 'string') &&
+            typeof item.id === 'string' &&
             typeof item.timestamp === 'number' &&
             item.destination &&
+            typeof item.destination.label === 'string' &&
             Number.isFinite(Number(item.destination.lat)) &&
             Number.isFinite(Number(item.destination.lon)) &&
             item.recommendation &&
-            typeof item.recommendation === 'object',
+            typeof item.recommendation.kind === 'string',
         )
         .map(normalizeEntry)
         .filter((item): item is DecisionRecord => item !== null)
@@ -152,7 +153,7 @@ export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
     }
   }
 
-  append(record: DecisionRecord): void {
+  append(record: DecisionRecord, maxEntries: number = MAX_ENTRIES): void {
     if (!this.storageImpl || !record || !record.destination || !record.recommendation) {
       return;
     }
@@ -188,8 +189,8 @@ export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
         log.unshift(normalized);
       }
 
-      if (log.length > MAX_ENTRIES) {
-        log.length = MAX_ENTRIES;
+      if (log.length > maxEntries) {
+        log.length = maxEntries;
       }
 
       this.storageImpl.setItem(STORAGE_KEY, JSON.stringify(log));

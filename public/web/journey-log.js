@@ -25,7 +25,7 @@ export function appendEntry(entry, storageImpl, max = MAX_LOG) {
   ) {
     return adapter.getLog().slice(0, max);
   }
-  adapter.append(entry);
+  adapter.append(entry, max);
   return adapter.getLog().slice(0, max);
 }
 

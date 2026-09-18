@@ -36,13 +36,28 @@ let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
 
 const routingAdapter = new OsrmRoutingAdapter(fetch);
-const transitAdapter = new MunicipalTransitAdapter(fetch);
+let transitAdapter = new MunicipalTransitAdapter(fetch);
+export function _setTransitAdapter(adapter) { transitAdapter = adapter; }
+export function _setStops(s) { stops = s; }
+export function _getStops() { return stops; }
+export function _setLines(l) { lines = l; }
+export function _getLines() { return lines; }
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
 const geocodingAdapter = new NominatimGeocodingAdapter(fetch);
 
 export const cachedTransitPort = {
-  getStops: async () => (stops?.length ? stops : transitAdapter.getStops()),
-  getLines: async () => lines || transitAdapter.getLines(),
+  getStops: async () => {
+    if (!stops || stops.length === 0) {
+      stops = await transitAdapter.getStops().catch(() => []);
+    }
+    return stops ?? [];
+  },
+  getLines: async () => {
+    if (!lines) {
+      lines = await transitAdapter.getLines().catch(() => null);
+    }
+    return lines;
+  },
   getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
 };
 

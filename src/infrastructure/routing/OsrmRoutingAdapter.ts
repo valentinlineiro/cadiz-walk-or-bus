@@ -2,6 +2,19 @@ import type { RoutingPort } from '../../application/ports/RoutingPort.js';
 import type { Coordinates, Route } from '../../domain/models.js';
 import { haversineMeters } from '../../domain/topology.js';
 
+interface OsrmRoute {
+  distance: number;
+  duration: number;
+  geometry?: {
+    coordinates: [number, number][];
+  };
+}
+
+interface OsrmResponse {
+  code?: string;
+  routes?: OsrmRoute[];
+}
+
 export class OsrmRoutingAdapter implements RoutingPort {
   private readonly fetchImpl: typeof fetch;
 
@@ -19,7 +32,7 @@ export class OsrmRoutingAdapter implements RoutingPort {
     }
     if (!r.ok) return null;
 
-    let data: any;
+    let data: OsrmResponse;
     try {
       data = await r.json();
     } catch {
@@ -55,7 +68,7 @@ export class OsrmRoutingAdapter implements RoutingPort {
     }
     if (!r.ok) return straightLine();
 
-    let data: any;
+    let data: OsrmResponse;
     try {
       data = await r.json();
     } catch {

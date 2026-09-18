@@ -115,13 +115,14 @@ export class LocalStorageJourneyLogAdapter {
             return parsed
                 .filter((item) => item &&
                 typeof item === 'object' &&
-                (item.id == null || typeof item.id === 'string') &&
+                typeof item.id === 'string' &&
                 typeof item.timestamp === 'number' &&
                 item.destination &&
+                typeof item.destination.label === 'string' &&
                 Number.isFinite(Number(item.destination.lat)) &&
                 Number.isFinite(Number(item.destination.lon)) &&
                 item.recommendation &&
-                typeof item.recommendation === 'object')
+                typeof item.recommendation.kind === 'string')
                 .map(normalizeEntry)
                 .filter((item) => item !== null)
                 .slice(0, MAX_ENTRIES);
@@ -130,7 +131,7 @@ export class LocalStorageJourneyLogAdapter {
             return [];
         }
     }
-    append(record) {
+    append(record, maxEntries = MAX_ENTRIES) {
         if (!this.storageImpl || !record || !record.destination || !record.recommendation) {
             return;
         }
@@ -160,8 +161,8 @@ export class LocalStorageJourneyLogAdapter {
             else {
                 log.unshift(normalized);
             }
-            if (log.length > MAX_ENTRIES) {
-                log.length = MAX_ENTRIES;
+            if (log.length > maxEntries) {
+                log.length = maxEntries;
             }
             this.storageImpl.setItem(STORAGE_KEY, JSON.stringify(log));
         }
