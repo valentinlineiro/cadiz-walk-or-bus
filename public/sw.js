@@ -1,7 +1,7 @@
 // GTFS_FEED_VERSION is automatically synchronized with /fixtures/gtfs-cadiz.snapshot.json
 // to guarantee that snapshot updates invalidate previous caches upon deployment without manual intervention.
 const GTFS_FEED_VERSION = 'nap-2026-09-18';
-const CACHE_VERSION = `v11-${GTFS_FEED_VERSION}`;
+const CACHE_VERSION = `v12-${GTFS_FEED_VERSION}`;
 const CACHE_NAME = `andar-o-bus-shell-${CACHE_VERSION}`;
 
 // Explicit allowlist, not a wildcard — only these exact paths are ever
