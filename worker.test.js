@@ -331,3 +331,14 @@ test('/proxy-health reports 503 unconfigured and 200 when Turso answers', async 
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { turso: 'ok' });
 });
+
+test('accepts a libsql:// Turso URL by talking https to the same host', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return { ok: true, json: async () => ({ results: [{ type: 'ok', response: { type: 'execute', result: { rows: [] } } }] }) };
+  };
+  const res = await worker.fetch(new Request('http://x/proxy-health'), { ...TURSO_ENV, TURSO_DATABASE_URL: 'libsql://db-test.turso.io' });
+  assert.equal(res.status, 200);
+  assert.equal(urls[0], 'https://db-test.turso.io/v2/pipeline');
+});

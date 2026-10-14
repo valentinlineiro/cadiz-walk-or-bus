@@ -151,7 +151,7 @@ function tursoDb(env) {
   if (!env?.TURSO_DATABASE_URL || !env?.TURSO_AUTH_TOKEN) return null;
   const arg = (v) => (typeof v === 'number' ? { type: 'integer', value: String(v) } : { type: 'text', value: String(v) });
   const exec = async (sql, args) => {
-    const r = await globalThis.fetch(`${env.TURSO_DATABASE_URL.replace(/\/$/, '')}/v2/pipeline`, {
+    const r = await globalThis.fetch(`${env.TURSO_DATABASE_URL.replace(/^libsql:/, 'https:').replace(/\/$/, '')}/v2/pipeline`, {
       method: 'POST',
       headers: { authorization: `Bearer ${env.TURSO_AUTH_TOKEN}`, 'content-type': 'application/json' },
       body: JSON.stringify({ requests: [{ type: 'execute', stmt: { sql, args: args.map(arg) } }, { type: 'close' }] }),
