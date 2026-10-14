@@ -56,6 +56,32 @@ test('GET /api without stop returns 400', async () => {
   assert.equal(res.status, 400);
 });
 
+test('GET /api validates stop and route parameters against injection and invalid characters', async () => {
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table></table>' });
+
+  // Valid request: /api?stop=101&route=1 passes
+  const validRes = await worker.fetch(new Request('http://x/api?stop=101&route=1'));
+  assert.equal(validRes.status, 200);
+
+  // Injection / special chars: /api?stop=101%26admin=1 returns 400
+  const injectionRes = await worker.fetch(new Request('http://x/api?stop=101%26admin=1'));
+  assert.equal(injectionRes.status, 400);
+  assert.deepEqual(await injectionRes.json(), { error: 'missing or invalid stop' });
+
+  // Characters outside [a-zA-Z0-9_-] in stop
+  const badStopRes = await worker.fetch(new Request('http://x/api?stop=101;drop'));
+  assert.equal(badStopRes.status, 400);
+
+  // Characters outside [a-zA-Z0-9_-] in route
+  const badRouteRes = await worker.fetch(new Request('http://x/api?stop=101&route=1%20or%201'));
+  assert.equal(badRouteRes.status, 400);
+  assert.deepEqual(await badRouteRes.json(), { error: 'invalid route' });
+
+  // Overlong parameters (> 16 chars)
+  const longStopRes = await worker.fetch(new Request('http://x/api?stop=12345678901234567'));
+  assert.equal(longStopRes.status, 400);
+});
+
 test('GET /stops returns the stop directory', async () => {
   const res = await worker.fetch(new Request('http://x/stops'));
   assert.equal(res.status, 200);

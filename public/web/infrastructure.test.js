@@ -53,6 +53,23 @@ test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns fo
   ]);
 });
 
+test('OsrmRoutingAdapter: passes AbortSignal and returns service_failure on timeout', async () => {
+  let passedSignal = null;
+  const timeoutFetch = async (url, options) => {
+    passedSignal = options?.signal;
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  };
+
+  const adapter = new OsrmRoutingAdapter(timeoutFetch);
+  const route = await adapter.routeWalking(
+    { lat: 36.520, lon: -6.280 },
+    { lat: 36.525, lon: -6.285 },
+  );
+
+  assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
+  assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
+});
+
 test('OsrmRoutingAdapter: routeWalking rejects degenerate route shorter than straight-line distance', async () => {
   const fakeFetch = async () => ({
     ok: true,
@@ -268,6 +285,20 @@ test('NominatimGeocodingAdapter: returns empty array or null on network error', 
 
   const geocodeResult = await failAdapter.geocode('Plaza');
   assert.equal(geocodeResult, null);
+});
+
+test('NominatimGeocodingAdapter: passes AbortSignal and returns empty array on timeout', async () => {
+  let passedSignal = null;
+  const timeoutFetch = async (url, options) => {
+    passedSignal = options?.signal;
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  };
+
+  const adapter = new NominatimGeocodingAdapter(timeoutFetch);
+  const results = await adapter.search('Plaza de Mina');
+
+  assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
+  assert.deepEqual(results, []);
 });
 
 test('NominatimGeocodingAdapter: short-circuits empty and single-character queries without calling fetch', async () => {
@@ -727,7 +758,7 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
 
 test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled source', async () => {
   const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T07:55:00+02:00'),
+    now: () => new Date('2026-09-18T09:15:00+02:00'),
   });
 
   assert.equal(adapter.getMetadata().feedVersion, 'nap-test-2026-09-17');
@@ -737,31 +768,45 @@ test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled sour
   assert.deepEqual(await adapter.getArrivals('A'), [{
     line: '1',
     destination: 'Centro',
-    minutes: 125,
+    minutes: 45,
     source: 'scheduled',
   }]);
 });
 
-test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight service-day times', async () => {
-  const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-17T23:30:00+02:00'),
+test('GtfsTransitAdapter: bounds lookahead horizon to 60 minutes (MAX_LOOKAHEAD_SECONDS)', async () => {
+  // At 07:55: departure at 10:00 is 125 min (> 3600s) -> excluded
+  const farAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T07:55:00+02:00'),
   });
+  assert.deepEqual(await farAdapter.getArrivals('A'), []);
 
-  const arrivals = await adapter.getArrivals('A');
-  assert.deepEqual(arrivals, [{
+  // At 09:15: departure at 10:00 is 45 min (<= 3600s) -> included
+  const nearAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T09:15:00+02:00'),
+  });
+  assert.deepEqual(await nearAdapter.getArrivals('A'), [{
     line: '1',
     destination: 'Centro',
-    minutes: 100,
+    minutes: 45,
     source: 'scheduled',
   }]);
+});
 
+test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight service-day times within lookahead', async () => {
+  // At 23:30 on 2026-09-17: next departure is at 25:10 (100 min away, > 3600s) -> excluded
+  const beforeMidnightFar = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-17T23:30:00+02:00'),
+  });
+  assert.deepEqual(await beforeMidnightFar.getArrivals('A'), []);
+
+  // At 00:30 on 2026-09-18: departure at 25:10 is 40 min away (<= 3600s) -> included
   const afterMidnight = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2026-09-18T00:30:00+02:00'),
   });
   assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
 });
 
-test('ResilientTransitAdapter: falls back on realtime errors and on empty realtime response (Bug 7)', async () => {
+test('ResilientTransitAdapter: falls back on realtime errors but treats empty array as authoritative (Issue #21)', async () => {
   let scheduledCalls = 0;
   const scheduled = {
     getStops: async () => [{ stop: 'A', lat: 36.52, lon: -6.28 }],
@@ -778,20 +823,20 @@ test('ResilientTransitAdapter: falls back on realtime errors and on empty realti
   assert.equal((await adapter.getArrivals('A'))[0].source, 'scheduled');
   assert.equal(scheduledCalls, 1);
 
-  // Bug 7: When realtime returns empty array [], fallback to scheduled GTFS if available
+  // Issue #21 (Policy A): When realtime returns empty array [], it is authoritative; do not fallback to scheduled
   const emptyRealtime = { ...realtime, getArrivals: async () => [] };
   const emptyAdapter = new ResilientTransitAdapter(emptyRealtime, scheduled, 50);
   scheduledCalls = 0;
   const fallbackArrivals = await emptyAdapter.getArrivals('A');
-  assert.equal(fallbackArrivals[0].source, 'scheduled');
-  assert.equal(scheduledCalls, 1, 'scheduled source must be queried when realtime returns empty array');
+  assert.deepEqual(fallbackArrivals, []);
+  assert.equal(scheduledCalls, 0, 'scheduled source must not be queried when realtime returns empty array');
 
-  // When both realtime and scheduled are empty, returns empty array
-  const emptyScheduled = {
+  // When both realtime and scheduled fail, returns empty array
+  const failingScheduled = {
     ...scheduled,
-    getArrivals: async () => [],
+    getArrivals: async () => { throw new Error('scheduled failed'); },
   };
-  const bothEmptyAdapter = new ResilientTransitAdapter(emptyRealtime, emptyScheduled, 50);
-  assert.deepEqual(await bothEmptyAdapter.getArrivals('A'), []);
+  const bothFailingAdapter = new ResilientTransitAdapter(realtime, failingScheduled, 50);
+  assert.deepEqual(await bothFailingAdapter.getArrivals('A'), []);
 });
 

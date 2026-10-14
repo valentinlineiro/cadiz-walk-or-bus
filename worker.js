@@ -108,14 +108,21 @@ async function handleFetch(request) {
   if (url.pathname === '/api') {
     const stop = url.searchParams.get('stop');
     const route = url.searchParams.get('route');
-    if (!stop) return Response.json({ error: 'missing stop/route' }, { status: 400 });
+    if (!stop || !/^[a-zA-Z0-9_-]{1,16}$/.test(stop)) {
+      return Response.json({ error: 'missing or invalid stop' }, { status: 400 });
+    }
+    if (route !== null && route !== '' && !/^[a-zA-Z0-9_-]{1,16}$/.test(route)) {
+      return Response.json({ error: 'invalid route' }, { status: 400 });
+    }
     // Workers' fetch() rejects plain-HTTP requests to a bare IP literal with its
     // own error 1003 ("Direct IP access not allowed") before the request ever
     // leaves Cloudflare's network. PANEL_HOST is the panel server's real reverse-DNS
     // name (resolves to the same 77.224.241.76) -- using it sidesteps that entirely.
-    const panel = route
-      ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${stop}&route=${route}`
-      : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${stop}`;
+    const encodedStop = encodeURIComponent(stop);
+    const encodedRoute = route ? encodeURIComponent(route) : '';
+    const panel = encodedRoute
+      ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}&route=${encodedRoute}`
+      : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}`;
     let upstream;
     try {
       upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });

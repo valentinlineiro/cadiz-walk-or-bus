@@ -53,7 +53,7 @@ export class NominatimGeocodingAdapter {
         const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
         let r;
         try {
-            r = await this.fetchImpl(url);
+            r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
         }
         catch {
             return [];

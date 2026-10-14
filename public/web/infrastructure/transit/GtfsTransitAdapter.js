@@ -1,3 +1,4 @@
+const MAX_LOOKAHEAD_SECONDS = 3600;
 const MADRID_DATE_PARTS = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/Madrid',
     year: 'numeric',
@@ -80,12 +81,13 @@ export class GtfsTransitAdapter {
             .flatMap((trip) => {
             const stopTime = trip.trip.stopTimes.find((time) => String(time.stop) === String(stopId));
             const departureOnTimeline = (trip.timelineOffset ?? 0) + (stopTime?.departureSeconds ?? 0);
-            if (!stopTime || departureOnTimeline < nowOnTimeline)
+            const waitSeconds = departureOnTimeline - nowOnTimeline;
+            if (!stopTime || waitSeconds < 0 || waitSeconds > MAX_LOOKAHEAD_SECONDS)
                 return [];
             return [{
                     line: String(trip.trip.line),
                     destination: trip.trip.destination,
-                    minutes: Math.ceil((departureOnTimeline - nowOnTimeline) / 60),
+                    minutes: Math.ceil(waitSeconds / 60),
                     source: 'scheduled',
                 }];
         })

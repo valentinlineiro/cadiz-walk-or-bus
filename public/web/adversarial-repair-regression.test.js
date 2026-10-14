@@ -202,15 +202,15 @@ test('Bug 4: filterDiverseAlternatives never prunes direct walk via similarityMa
 });
 
 // ============================================================================
-// BUG 7 REGRESSION: FALLBACK REALTIME -> GTFS ON EMPTY LIVE ARRIVALS
+// ISSUE #21: AUTHORITATIVE EMPTY REALTIME CONTRACT (POLICY A)
 // ============================================================================
 
-test('Bug 7: ResilientTransitAdapter falls back to scheduled GTFS when realtime returns empty array []', async () => {
+test('Issue #21: ResilientTransitAdapter treats empty realtime arrivals [] as authoritative and does not query scheduled GTFS', async () => {
   let scheduledQueried = false;
   const realtime = {
     getStops: async () => [{ stop: '101', lat: 36.52, lon: -6.28 }],
     getLines: async () => ({ '1': { Centro: ['101'] } }),
-    getArrivals: async () => [], // Live API returned 200 OK with no live vehicles
+    getArrivals: async () => [], // Live API returned 200 OK with no live vehicles (authoritative)
   };
 
   const scheduled = {
@@ -227,8 +227,6 @@ test('Bug 7: ResilientTransitAdapter falls back to scheduled GTFS when realtime 
   const resilient = new ResilientTransitAdapter(realtime, scheduled, 100);
   const arrivals = await resilient.getArrivals('101');
 
-  assert.equal(scheduledQueried, true, 'Scheduled adapter must be queried when realtime returns empty array');
-  assert.equal(arrivals.length, 1);
-  assert.equal(arrivals[0].source, 'scheduled');
-  assert.equal(arrivals[0].minutes, 14);
+  assert.equal(scheduledQueried, false, 'Scheduled adapter must not be queried when realtime returns empty array');
+  assert.deepEqual(arrivals, []);
 });

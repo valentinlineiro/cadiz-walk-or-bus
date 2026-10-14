@@ -85,6 +85,39 @@ export function findCompositionRoots() {
     .map(relativePath);
 }
 
+export function findMissingServiceWorkerShellImports() {
+  const swSource = readFileSync(join(root, 'public/sw.js'), 'utf8');
+  const shellUrlsMatch = swSource.match(/const\s+SHELL_URLS\s*=\s*\[([\s\S]*?)\];/);
+  const shellUrls = shellUrlsMatch
+    ? [...shellUrlsMatch[1].matchAll(/['"](\/[^'"]*)['"]/g)].map((m) => m[1])
+    : [];
+
+  const visited = new Set();
+  function crawl(relPath) {
+    const fullPath = join(root, 'public', relPath);
+    if (!existsSync(fullPath)) return;
+    const urlPath = '/' + relPath.replace(/\\/g, '/');
+    if (visited.has(urlPath)) return;
+    visited.add(urlPath);
+    for (const specifier of importsOf(fullPath)) {
+      if (specifier.startsWith('.')) {
+        const target = normalize(join(dirname(relPath), specifier)).replaceAll('\\', '/');
+        crawl(target);
+      }
+    }
+  }
+
+  crawl('web/ui.js');
+
+  const missing = [];
+  for (const url of visited) {
+    if (!shellUrls.includes(url)) {
+      missing.push(`service worker SHELL_URLS is missing imported module: ${url}`);
+    }
+  }
+  return missing;
+}
+
 export function findServiceWorkerShellProblems() {
   const source = readFileSync(join(root, 'public/sw.js'), 'utf8');
   const shellUrls = [...source.matchAll(/['"](\/[^'"]*)['"]/g)].map((match) => match[1]);
@@ -95,6 +128,8 @@ export function findServiceWorkerShellProblems() {
       problems.push(`service worker caches missing file: ${url}`);
     }
   }
+
+  problems.push(...findMissingServiceWorkerShellImports());
 
   const gtfsPath = join(root, 'public/fixtures/gtfs-cadiz.snapshot.json');
   if (existsSync(gtfsPath)) {
