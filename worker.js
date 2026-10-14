@@ -283,17 +283,22 @@ function handleRoute(url, env) {
 }
 
 // --- Live arrivals: panel is a legacy server, so it is hit at most ~once per stop per TTL. ---
-// Layers: per-isolate memory -> Turso (shared) -> panel. A Turso row-lock makes one instance
-// fetch per stop while the others poll the cache. If Turso is down we fetch directly (the
-// per-IP rate limiter and the isolate cache still bound the load); arrivals are core, so
-// unlike Nominatim this path fails open.
+// Layers: per-isolate memory + in-flight coalescing -> Turso (shared) -> panel. A Turso
+// row-lock (owned by its next_at value) makes one instance fetch per stop while the others
+// poll the cache. If Turso is down, arrivals (the core feature) fail open in DEGRADED mode:
+// each isolate still fetches at most once per stop per TTL (memory cache + coalescing), so
+// panel load is bounded by isolates x stops / TTL, NOT globally. Degraded fetches are
+// reported with x-arrivals-cache: degraded and a console.warn so they can be alerted on.
+// Unlike Nominatim this path does not fail closed.
 const ARRIVALS_TTL_S = 15;
-const ARRIVALS_LOCK_MS = 6000; // > panel timeout (4s)
-const ARRIVALS_POLL_MS = 500;
-const ARRIVALS_POLLS = 3;
+const ARRIVALS_LOCK_MS = 6000; // > panel timeout (4s) + Turso round trips
+const ARRIVALS_POLL_MS = 400;
+const ARRIVALS_POLLS = 12; // ~4.8s: waiters outlast a panel answer that lands near its 4s timeout
 const isolateArrivals = new Map();
+const inflightArrivals = new Map();
 export function __resetArrivalsCache() {
   isolateArrivals.clear();
+  inflightArrivals.clear();
 }
 
 async function rateLimited(request, env) {
@@ -367,13 +372,24 @@ async function handleArrivals(url, env) {
     return Response.json({ error: 'invalid route' }, { status: 400 });
   }
   const key = `arr:${stop}:${route ?? ''}`;
-  const lockName = `lock:${key}`;
 
   const mem = isolateArrivals.get(key);
   if (mem && Date.now() - mem.t < ARRIVALS_TTL_S * 1000) return arrivalsResponse(mem.arrivals, mem.t, 'mem');
 
+  // Concurrent requests in this isolate share one load (one Turso lookup, one panel fetch).
+  let load = inflightArrivals.get(key);
+  if (!load) {
+    load = loadArrivals(key, stop, route, env).finally(() => inflightArrivals.delete(key));
+    inflightArrivals.set(key, load);
+  }
+  return (await load).clone();
+}
+
+async function loadArrivals(key, stop, route, env) {
+  const lockName = `lock:${key}`;
   const db = tursoDb(env);
-  let locked = false;
+  let lockUntil = null; // the next_at value we wrote: it identifies OUR acquisition
+  let degraded = !db;
   if (db) {
     const shared = await readSharedArrivals(db, key);
     if (shared) {
@@ -399,7 +415,12 @@ async function handleArrivals(url, env) {
       }
       return Response.json({ error: 'busy' }, { status: 503, headers: { 'retry-after': '2' } });
     }
-    locked = claimed !== null;
+    if (claimed === null) {
+      degraded = true;
+      console.warn('arrivals: Turso unavailable, fetching panel without shared lock', key);
+    } else {
+      lockUntil = now + ARRIVALS_LOCK_MS;
+    }
   }
 
   try {
@@ -407,7 +428,7 @@ async function handleArrivals(url, env) {
     if (arrivals instanceof Response) return arrivals;
     const entry = { t: Date.now(), arrivals };
     rememberArrivals(key, entry);
-    if (db) {
+    if (db && !degraded) {
       await db
         .run('INSERT OR REPLACE INTO proxy_cache (key, body, expires_at) VALUES (?1, ?2, ?3)', [
           key,
@@ -420,9 +441,12 @@ async function handleArrivals(url, env) {
         await db.run('DELETE FROM proxy_cache WHERE expires_at < ?1', [Math.floor(entry.t / 1000)]).catch(() => {});
       }
     }
-    return arrivalsResponse(arrivals, entry.t, 'miss');
+    return arrivalsResponse(arrivals, entry.t, degraded ? 'degraded' : 'miss');
   } finally {
-    if (locked) await db.run('DELETE FROM proxy_slot WHERE name = ?1', [lockName]).catch(() => {});
+    // Release only our own acquisition: if it expired and someone else re-acquired, next_at differs.
+    if (lockUntil !== null) {
+      await db.run('DELETE FROM proxy_slot WHERE name = ?1 AND next_at = ?2', [lockName, lockUntil]).catch(() => {});
+    }
   }
 }
 

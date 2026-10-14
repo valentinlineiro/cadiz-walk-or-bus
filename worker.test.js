@@ -193,7 +193,8 @@ function withTurso(upstream, { slotBusy = false } = {}) {
       const hit = cache.get(v[0]);
       result = { rows: hit && hit.expires_at > Number(v[1]) ? [[{ type: 'text', value: hit.body }]] : [] };
     } else if (sql.startsWith('DELETE FROM proxy_slot')) {
-      slots.delete(v[0]);
+      // Owner-checked release: only delete when next_at still equals the caller's value.
+      if (v.length < 2 || slots.get(v[0]) === Number(v[1])) slots.delete(v[0]);
       result = { rows: [], affected_row_count: 1 };
     } else if (sql.startsWith('DELETE')) {
       result = { rows: [], affected_row_count: 0 };
@@ -209,6 +210,7 @@ function withTurso(upstream, { slotBusy = false } = {}) {
     }
     return { ok: true, json: async () => ({ results: [{ type: 'ok', response: { type: 'execute', result } }] }) };
   };
+  cache.slots = slots;
   return cache;
 }
 
@@ -375,7 +377,7 @@ test('GET /api serves repeats from the isolate cache without touching the panel'
   globalThis.fetch = panelOk(c);
   const a = await worker.fetch(new Request('http://x/api?stop=2001'));
   const b = await worker.fetch(new Request('http://x/api?stop=2001'));
-  assert.equal(a.headers.get('x-arrivals-cache'), 'miss');
+  assert.equal(a.headers.get('x-arrivals-cache'), 'degraded'); // no Turso configured
   assert.equal(b.headers.get('x-arrivals-cache'), 'mem');
   assert.equal(c.n, 1);
   assert.deepEqual(await b.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 3 }] });
@@ -434,6 +436,7 @@ test('GET /api falls back to the panel directly when Turso is down (fail open)',
   };
   const res = await worker.fetch(new Request('http://x/api?stop=2006'), TURSO_ENV);
   assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-arrivals-cache'), 'degraded');
   assert.equal(panel, 1);
 });
 
@@ -459,4 +462,78 @@ test('rate limiter lets requests through when under the limit or when the bindin
   __resetArrivalsCache();
   const broken = { RATE_LIMITER: { limit: async () => { throw new Error('boom'); } } };
   assert.equal((await worker.fetch(new Request('http://x/api?stop=2007'), broken)).status, 200);
+});
+
+const gate = () => {
+  let open;
+  const p = new Promise((r) => (open = r));
+  return { p, open };
+};
+
+test('GET /api: a late finisher does not delete a lock re-acquired by someone else', async () => {
+  const gA = gate();
+  const gB = gate();
+  let n = 0;
+  const cache = withTurso(async () => {
+    const me = ++n;
+    await (me === 1 ? gA.p : gB.p);
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  });
+  const a = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV); // acquires lock, panel is slow
+  await new Promise((r) => setTimeout(r, 20));
+  const lock = 'lock:arr:3001:';
+  const aOwner = cache.slots.get(lock);
+  assert.ok(aOwner > 0);
+  cache.slots.set(lock, 1); // A's lock expires...
+  __resetArrivalsCache(); // ...and a request on another isolate re-acquires it
+  const b = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV);
+  await new Promise((r) => setTimeout(r, 20));
+  const bOwner = cache.slots.get(lock);
+  assert.ok(bOwner > aOwner, 'B holds a fresh acquisition');
+  gA.open(); // A finishes first and runs its finally
+  assert.equal((await a).status, 200);
+  assert.equal(cache.slots.get(lock), bOwner, "A must not release B's lock");
+  gB.open();
+  assert.equal((await b).status, 200);
+  assert.equal(cache.slots.has(lock), false, 'B releases its own lock');
+});
+
+test('GET /api: waiters outlast a slow panel answer instead of returning 503 busy', async () => {
+  let n = 0;
+  withTurso(async () => {
+    n++;
+    await new Promise((r) => setTimeout(r, 2200)); // older 1.5s window would have given up
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  });
+  const a = worker.fetch(new Request('http://x/api?stop=3002'), TURSO_ENV);
+  await new Promise((r) => setTimeout(r, 20));
+  __resetArrivalsCache(); // second request comes from another isolate
+  const b = await worker.fetch(new Request('http://x/api?stop=3002'), TURSO_ENV);
+  assert.equal(b.status, 200);
+  assert.equal(b.headers.get('x-arrivals-cache'), 'hit');
+  assert.equal((await a).status, 200);
+  assert.equal(n, 1);
+});
+
+test('GET /api coalesces concurrent requests in one isolate even without Turso (degraded mode)', async () => {
+  const c = { n: 0 };
+  globalThis.fetch = panelOk(c);
+  const res = await Promise.all(Array.from({ length: 8 }, () => worker.fetch(new Request('http://x/api?stop=3003'))));
+  assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
+  assert.equal(c.n, 1);
+  assert.equal(await res[7].text(), await res[0].text());
+});
+
+test('GET /api degraded mode (Turso down) coalesces and reports degraded', async () => {
+  let panel = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    panel++;
+    await new Promise((r) => setTimeout(r, 30));
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  const res = await Promise.all(Array.from({ length: 5 }, () => worker.fetch(new Request('http://x/api?stop=3004'), TURSO_ENV)));
+  assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
+  assert.equal(res[0].headers.get('x-arrivals-cache'), 'degraded');
+  assert.equal(panel, 1);
 });
