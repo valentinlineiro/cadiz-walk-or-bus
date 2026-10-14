@@ -22,6 +22,10 @@ test('Frontier C: parseArrivals returns null for malformed, non-table, or non-st
   assert.equal(parseArrivals('<table><tr><td>Only one column error</td></tr></table>'), null);
   assert.equal(parseArrivals('<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>'), null);
   assert.equal(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td></td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>15:30</td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>> 45 min</td></tr></table>'), null);
+  assert.deepEqual(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>Sin servicio</td></tr></table>'), []);
+  assert.deepEqual(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>En cochera</td></tr></table>'), []);
 });
 
 test('Frontier C: parseArrivals correctly parses rows with attributes like tr class', () => {

@@ -13,7 +13,8 @@ export function decide(arrivals, walkMinutes) {
   return { decision, soonest };
 }
 
-const TRANSIT_ARRIVAL_PATTERN = /^(\d+\s*min|inminente|\d{1,2}:\d{2}|sin servicio|en cochera|fuera de servicio|>\s*\d+\s*min)$/i;
+const LIVE_ARRIVAL_PATTERN = /^(\d+\s*min|inminente)$/i;
+const OUT_OF_SERVICE_PATTERN = /^(sin servicio|en cochera|fuera de servicio)$/i;
 
 export function parseArrivals(html) {
   if (typeof html !== 'string' || !html.trim()) return null;
@@ -21,7 +22,8 @@ export function parseArrivals(html) {
 
   const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
   const arrivals = [];
-  let foundValidTransitRow = false;
+  let hasAuthoritativeStatus = false;
+  let hasLiveArrival = false;
 
   for (const row of rows) {
     const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) =>
@@ -31,29 +33,35 @@ export function parseArrivals(html) {
     const [line, destination, arrival] = cells;
     if (!line || !destination) continue;
 
-    // Validate that the row conforms to genuine transit panel arrival semantics
-    const isTransitPattern = TRANSIT_ARRIVAL_PATTERN.test(arrival.trim());
-    if (!isTransitPattern) continue;
+    const trimmedArrival = arrival.trim();
 
-    foundValidTransitRow = true;
-
-    let minutes;
-    const relMatch = arrival.match(/^(\d+)\s*min$/i);
-    if (relMatch) {
-      minutes = Number(relMatch[1]);
-    } else if (/^inminente$/i.test(arrival.trim())) {
-      minutes = 0;
-    } else {
+    // Check if this row is an explicit out-of-service status (confirmed by operator)
+    if (OUT_OF_SERVICE_PATTERN.test(trimmedArrival)) {
+      hasAuthoritativeStatus = true;
       continue;
     }
 
-    arrivals.push({ line, destination, minutes });
+    // Check if this row has live relative minutes or imminent arrival
+    if (LIVE_ARRIVAL_PATTERN.test(trimmedArrival)) {
+      hasLiveArrival = true;
+      let minutes = 0;
+      const relMatch = trimmedArrival.match(/^(\d+)\s*min$/i);
+      if (relMatch) {
+        minutes = Number(relMatch[1]);
+      }
+      arrivals.push({ line, destination, minutes });
+      continue;
+    }
+
+    // Clock times (e.g. "15:30") or bounds (e.g. "> 45 min") indicate static timetables
+    // or entries beyond live telemetry horizon. They are skipped here.
   }
 
-  // If the table contains <td> data rows but not a single row conformed to the transit arrival structure,
-  // the page structure is unrecognizable or an error table.
+  // If the table contains <td> data rows but we found neither actionable live arrivals
+  // nor an explicit out-of-service status (e.g. only static clock times, bounds, error messages,
+  // or empty cells), live realtime tracking is unavailable -> return null to allow GTFS scheduled fallback.
   const allTdRows = rows.filter((r) => /<td[^>]*>/i.test(r));
-  if (allTdRows.length > 0 && !foundValidTransitRow) {
+  if (allTdRows.length > 0 && !hasLiveArrival && !hasAuthoritativeStatus) {
     return null;
   }
 
