@@ -69,6 +69,12 @@ test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async 
   const threeColErrorRes = await worker.fetch(new Request('http://x/api?stop=1106'));
   assert.equal(threeColErrorRes.status, 502);
   assert.deepEqual(await threeColErrorRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns a table where arrival cell is empty/blank without recognized status -> treated as malformed (502)
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td></td></tr></table>' });
+  const emptyArrivalRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(emptyArrivalRes.status, 502);
+  assert.deepEqual(await emptyArrivalRes.json(), { error: 'malformed upstream response' });
 });
 
 test('GET /api parses tables with row attributes like class or style properly', async () => {

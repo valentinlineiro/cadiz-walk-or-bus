@@ -1048,13 +1048,24 @@ test('GTFS production snapshot: executes calendar and exception engine returning
   assert.equal(sundayArrivals[0].source, 'scheduled');
 
   // 3. Local holiday exception: Carnaval de Cádiz (Wednesday 2026-02-11 10:00 Madrid time):
-  // 20260211 is defined in addedDates for holiday services
+  // 20260211 is defined in addedDates for holiday services (e.g. M-021, which only runs on weekends and added holiday dates)
   const carnavalAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
     now: () => new Date('2026-02-11T10:00:00+01:00'),
   });
   const carnavalArrivals = await carnavalAdapter.getArrivals(stopId);
   assert.ok(carnavalArrivals.length > 0, 'Carnaval holiday must return active scheduled arrivals');
   assert.equal(carnavalArrivals[0].source, 'scheduled');
+
+  // Prove that Carnaval arrivals strictly originate from addedDates exception services:
+  // Contrast against a regular non-holiday Wednesday (2026-02-18 10:00)
+  const normalWednesdayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-02-18T10:00:00+01:00'),
+  });
+  const normalWednesdayArrivals = await normalWednesdayAdapter.getArrivals(stopId);
+  const hasCarnavalExceptionLine = carnavalArrivals.some((a) => a.line === 'M-021');
+  const normalWednesdayHasLine = normalWednesdayArrivals.some((a) => a.line === 'M-021');
+  assert.ok(hasCarnavalExceptionLine, 'Carnaval Wednesday must activate holiday exception service line M-021 via addedDates');
+  assert.equal(normalWednesdayHasLine, false, 'Weekend-only line M-021 must NOT run on a normal Wednesday');
 
   // 4. Past or future date outside feed validity window (e.g. 2035-01-01): returns empty []
   const expiredAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {

@@ -33,7 +33,7 @@ export function parseArrivals(html) {
     if (!line || !destination) continue;
 
     // Validate that the row conforms to genuine transit panel arrival semantics
-    const isTransitPattern = TRANSIT_ARRIVAL_PATTERN.test(arrival.trim()) || arrival.trim() === '';
+    const isTransitPattern = TRANSIT_ARRIVAL_PATTERN.test(arrival.trim());
     if (!isTransitPattern) continue;
 
     foundValidTransitRow = true;
