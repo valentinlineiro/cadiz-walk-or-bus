@@ -20,6 +20,15 @@ test('Frontier C: parseArrivals returns null for malformed, non-table, or non-st
   assert.equal(parseArrivals(123), null);
   assert.equal(parseArrivals('<html><body>No tables here</body></html>'), null);
   assert.equal(parseArrivals('<table><tr><td>Only one column error</td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>'), null);
+});
+
+test('Frontier C: parseArrivals correctly parses rows with attributes like tr class', () => {
+  const htmlWithAttrs = '<table class="tablePanel"><tr class="even-row" style="background:#fff"><td>1</td><td>Plaza España</td><td>3 min</td></tr></table>';
+  const arrivals = parseArrivals(htmlWithAttrs);
+  assert.ok(arrivals);
+  assert.equal(arrivals.length, 1);
+  assert.deepEqual(arrivals[0], { line: '1', destination: 'Plaza España', minutes: 3 });
 });
 
 test('Frontier C: parseArrivals strictly supports Inminente variants as 0 minutes', () => {

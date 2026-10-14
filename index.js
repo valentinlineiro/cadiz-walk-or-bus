@@ -14,22 +14,29 @@ export function decide(arrivals, walkMinutes) {
   return { decision, soonest };
 }
 
+const TRANSIT_ARRIVAL_PATTERN = /^(\d+\s*min|inminente|\d{1,2}:\d{2}|sin servicio|en cochera|fuera de servicio|>\s*\d+\s*min)$/i;
+
 export function parseArrivals(html) {
   if (typeof html !== 'string' || !html.trim()) return null;
   if (!/<table[^>]*>/i.test(html)) return null;
 
-  const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
   const arrivals = [];
-  let foundCandidateRow = false;
+  let foundValidTransitRow = false;
 
   for (const row of rows) {
-    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) =>
       m[1].replace(/&nbsp;|<[^>]+>/g, '').trim(),
     );
     if (cells.length < 3) continue;
-    foundCandidateRow = true;
     const [line, destination, arrival] = cells;
     if (!line || !destination) continue;
+
+    // Validate that the row conforms to genuine transit panel arrival semantics
+    const isTransitPattern = TRANSIT_ARRIVAL_PATTERN.test(arrival.trim()) || arrival.trim() === '';
+    if (!isTransitPattern) continue;
+
+    foundValidTransitRow = true;
 
     let minutes;
     const relMatch = arrival.match(/^(\d+)\s*min$/i);
@@ -46,10 +53,10 @@ export function parseArrivals(html) {
     arrivals.push({ line, destination, minutes });
   }
 
-  // If the table contains <td> data rows but none conformed to the 3-column transit structure,
+  // If the table contains <td> data rows but not a single row conformed to the transit arrival structure,
   // the page structure is unrecognizable or an error table.
   const allTdRows = rows.filter((r) => /<td[^>]*>/i.test(r));
-  if (allTdRows.length > 0 && !foundCandidateRow) {
+  if (allTdRows.length > 0 && !foundValidTransitRow) {
     return null;
   }
 

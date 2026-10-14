@@ -60,6 +60,7 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
   private readonly baseUrl: string;
   private readonly minIntervalMs: number;
   private readonly cache = new Map<string, GeocodingResult[]>();
+  private requestQueue: Promise<void> = Promise.resolve();
   private lastRequestTime = 0;
 
   constructor(
@@ -68,7 +69,7 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
   ) {
     this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
     this.baseUrl = options.baseUrl ?? 'https://nominatim.openstreetmap.org/search';
-    this.minIntervalMs = options.minIntervalMs ?? 0;
+    this.minIntervalMs = options.minIntervalMs ?? 1000;
   }
 
   async search(query: string, limit: number = 5): Promise<GeocodingResult[]> {
@@ -87,55 +88,66 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
       return cached;
     }
 
-    if (this.minIntervalMs > 0) {
-      const elapsed = Date.now() - this.lastRequestTime;
-      if (elapsed < this.minIntervalMs) {
-        await new Promise((resolve) => setTimeout(resolve, this.minIntervalMs - elapsed));
+    const executeNetworkSearch = async (): Promise<GeocodingResult[]> => {
+      // Re-check cache in case an identical in-flight query already resolved
+      const freshCache = this.cache.get(cacheKey);
+      if (freshCache) return freshCache;
+
+      if (this.minIntervalMs > 0) {
+        const now = Date.now();
+        const elapsed = now - this.lastRequestTime;
+        if (elapsed < this.minIntervalMs) {
+          await new Promise((resolve) => setTimeout(resolve, this.minIntervalMs - elapsed));
+        }
       }
-    }
-    this.lastRequestTime = Date.now();
+      this.lastRequestTime = Date.now();
 
-    const separator = this.baseUrl.includes('?') ? '&' : '?';
-    const url = `${this.baseUrl}${separator}format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
-    let r: Response;
-    try {
-      r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
-    } catch {
-      return [];
-    }
-    if (!r.ok) return [];
+      const separator = this.baseUrl.includes('?') ? '&' : '?';
+      const url = `${this.baseUrl}${separator}format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
+      let r: Response;
+      try {
+        r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
+      } catch {
+        return [];
+      }
+      if (!r.ok) return [];
 
-    let hits: NominatimHit[];
-    try {
-      hits = await r.json();
-    } catch {
-      return [];
-    }
+      let hits: NominatimHit[];
+      try {
+        hits = await r.json();
+      } catch {
+        return [];
+      }
 
-    if (!Array.isArray(hits)) return [];
-    const results = hits
-      .filter((hit) => {
-        const lat = Number(hit.lat);
-        const lon = Number(hit.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
-        return isPointInCadiz(lat, lon);
-      })
-      .map((hit) => {
-        const displayName = String(hit.display_name ?? '');
-        const main = hit.name || displayName.split(',')[0].trim();
-        const parts = displayName.split(',').map((p: string) => p.trim());
-        const sub = parts.length > 1 ? parts.slice(1, 3).join(', ') : '';
-        return {
-          label: String(main),
-          sub,
-          lat: Number(hit.lat),
-          lon: Number(hit.lon),
-        };
-      })
-      .slice(0, limit);
+      if (!Array.isArray(hits)) return [];
+      const results = hits
+        .filter((hit) => {
+          const lat = Number(hit.lat);
+          const lon = Number(hit.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+          return isPointInCadiz(lat, lon);
+        })
+        .map((hit) => {
+          const displayName = String(hit.display_name ?? '');
+          const main = hit.name || displayName.split(',')[0].trim();
+          const parts = displayName.split(',').map((p: string) => p.trim());
+          const sub = parts.length > 1 ? parts.slice(1, 3).join(', ') : '';
+          return {
+            label: String(main),
+            sub,
+            lat: Number(hit.lat),
+            lon: Number(hit.lon),
+          };
+        })
+        .slice(0, limit);
 
-    this.cache.set(cacheKey, results);
-    return results;
+      this.cache.set(cacheKey, results);
+      return results;
+    };
+
+    const task = this.requestQueue.then(executeNetworkSearch, executeNetworkSearch);
+    this.requestQueue = task.then(() => {}, () => {});
+    return task;
   }
 
   async geocode(query: string): Promise<(Coordinates & { name?: string }) | null> {

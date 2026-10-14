@@ -385,6 +385,27 @@ test('NominatimGeocodingAdapter: respects custom baseUrl option for proxying or 
   assert.ok(calledUrl.startsWith(customBaseUrl), 'must query the custom baseUrl proxy');
 });
 
+test('NominatimGeocodingAdapter: serializes concurrent network requests and enforces minIntervalMs spacing', async () => {
+  const requestTimes = [];
+  const fakeFetch = async () => {
+    requestTimes.push(Date.now());
+    return {
+      ok: true,
+      json: async () => [],
+    };
+  };
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch, { minIntervalMs: 40 });
+  await Promise.all([
+    adapter.search('Plaza de Mina'),
+    adapter.search('Plaza de San Antonio'),
+  ]);
+
+  assert.equal(requestTimes.length, 2);
+  const diff = requestTimes[1] - requestTimes[0];
+  assert.ok(diff >= 35, `Concurrent searches must be serialized and spaced (elapsed: ${diff}ms)`);
+});
+
 class MockStorage {
   constructor() {
     this.store = new Map();
@@ -1004,6 +1025,43 @@ test('GTFS production snapshot: validates feed validity window, calendar service
   assert.ok(allAddedDates.has('20260211'), 'feed must include Cádiz Carnaval local holiday (2026-02-11)');
   assert.ok(allAddedDates.has('20261012'), 'feed must include Fiesta Nacional (2026-10-12)');
   assert.ok(allAddedDates.has('20261225'), 'feed must include Navidad (2026-12-25)');
+});
+
+test('GTFS production snapshot: executes calendar and exception engine returning active scheduled arrivals for weekdays, weekends, and holidays', async () => {
+  const stopId = realGtfsSnapshot.stops[0].stop; // '2_1' (Avda. Del Puerto)
+
+  // 1. Regular Monday (2026-10-19 10:00 Madrid time): evaluates active Monday service calendar
+  const mondayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-10-19T10:00:00+02:00'),
+  });
+  const mondayArrivals = await mondayAdapter.getArrivals(stopId);
+  assert.ok(mondayArrivals.length > 0, 'Monday must return active scheduled arrivals');
+  assert.equal(mondayArrivals[0].source, 'scheduled');
+  assert.ok(mondayArrivals[0].minutes >= 0 && mondayArrivals[0].minutes <= 60);
+
+  // 2. Regular Sunday (2026-10-18 10:00 Madrid time): evaluates Sunday service schedule
+  const sundayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-10-18T10:00:00+02:00'),
+  });
+  const sundayArrivals = await sundayAdapter.getArrivals(stopId);
+  assert.ok(sundayArrivals.length > 0, 'Sunday must return active scheduled arrivals');
+  assert.equal(sundayArrivals[0].source, 'scheduled');
+
+  // 3. Local holiday exception: Carnaval de Cádiz (Wednesday 2026-02-11 10:00 Madrid time):
+  // 20260211 is defined in addedDates for holiday services
+  const carnavalAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-02-11T10:00:00+01:00'),
+  });
+  const carnavalArrivals = await carnavalAdapter.getArrivals(stopId);
+  assert.ok(carnavalArrivals.length > 0, 'Carnaval holiday must return active scheduled arrivals');
+  assert.equal(carnavalArrivals[0].source, 'scheduled');
+
+  // 4. Past or future date outside feed validity window (e.g. 2035-01-01): returns empty []
+  const expiredAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2035-01-01T10:00:00+01:00'),
+  });
+  const expiredArrivals = await expiredAdapter.getArrivals(stopId);
+  assert.deepEqual(expiredArrivals, [], 'Date outside feed bounds must return empty arrivals');
 });
 
 test('ResilientTransitAdapter + MunicipalTransitAdapter integration: malformed upstream response triggers scheduled fallback', async () => {

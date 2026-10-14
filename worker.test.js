@@ -63,6 +63,20 @@ test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async 
   const errorTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
   assert.equal(errorTableRes.status, 502);
   assert.deepEqual(await errorTableRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns a 3-column error table (e.g. Error / Details / Code 500) which must NOT be treated as a candidate transit row
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>' });
+  const threeColErrorRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(threeColErrorRes.status, 502);
+  assert.deepEqual(await threeColErrorRes.json(), { error: 'malformed upstream response' });
+});
+
+test('GET /api parses tables with row attributes like class or style properly', async () => {
+  const htmlWithTrClass = '<table class="tablePanel"><tr class="odd"><td>1</td><td>CORTADURA</td><td>5min</td></tr></table>';
+  globalThis.fetch = async () => ({ ok: true, text: async () => htmlWithTrClass });
+  const res = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 5 }] });
 });
 
 test('GET /api returns 200 and authoritative empty arrivals on valid empty panel table', async () => {
@@ -76,6 +90,13 @@ test('GET /api returns 200 and authoritative empty arrivals on valid empty panel
   const headersRes = await worker.fetch(new Request('http://x/api?stop=1106'));
   assert.equal(headersRes.status, 200);
   assert.deepEqual(await headersRes.json(), { arrivals: [] });
+
+  // Valid transit table with out-of-service status
+  const outOfServiceTable = '<table class="tablePanel"><tr class="row"><td>1</td><td>CORTADURA</td><td>Sin servicio</td></tr></table>';
+  globalThis.fetch = async () => ({ ok: true, text: async () => outOfServiceTable });
+  const oosRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(oosRes.status, 200);
+  assert.deepEqual(await oosRes.json(), { arrivals: [] });
 });
 
 test('GET /api without stop returns 400', async () => {
