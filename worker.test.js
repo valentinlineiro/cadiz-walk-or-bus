@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from './worker.js';
+import worker, { __resetArrivalsCache } from './worker.js';
 
 const originalFetch = globalThis.fetch;
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  __resetArrivalsCache();
 });
 
 test('GET /api returns parsed arrivals with mocked upstream', async () => {
@@ -180,7 +181,7 @@ test('GET /lines returns the topology directory', async () => {
 const TURSO_ENV = { TURSO_DATABASE_URL: 'https://db-test.turso.io', TURSO_AUTH_TOKEN: 'tok' };
 function withTurso(upstream, { slotBusy = false } = {}) {
   const cache = new Map();
-  let slot = 0;
+  const slots = new Map();
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) return upstream(url, init);
     assert.equal(url, `${TURSO_ENV.TURSO_DATABASE_URL}/v2/pipeline`);
@@ -191,12 +192,19 @@ function withTurso(upstream, { slotBusy = false } = {}) {
     if (sql.startsWith('SELECT')) {
       const hit = cache.get(v[0]);
       result = { rows: hit && hit.expires_at > Number(v[1]) ? [[{ type: 'text', value: hit.body }]] : [] };
+    } else if (sql.startsWith('DELETE FROM proxy_slot')) {
+      slots.delete(v[0]);
+      result = { rows: [], affected_row_count: 1 };
+    } else if (sql.startsWith('DELETE')) {
+      result = { rows: [], affected_row_count: 0 };
     } else if (sql.includes('proxy_cache')) {
       cache.set(v[0], { body: v[1], expires_at: Number(v[2]) });
       result = { rows: [], affected_row_count: 1 };
     } else {
-      const taken = slotBusy || slot > Number(v[1]);
-      if (!taken) slot = Number(v[0]);
+      // Slot claim: [name, nextAt, now] for per-stop locks, [nextAt, now] for the Nominatim slot.
+      const [name, nextAt, now] = v.length === 3 ? [v[0], Number(v[1]), Number(v[2])] : ['nominatim', Number(v[0]), Number(v[1])];
+      const taken = slotBusy || (slots.get(name) ?? 0) > now;
+      if (!taken) slots.set(name, nextAt);
       result = { rows: [], affected_row_count: taken ? 0 : 1 };
     }
     return { ok: true, json: async () => ({ results: [{ type: 'ok', response: { type: 'execute', result } }] }) };
@@ -353,4 +361,102 @@ test('OSRM Ok with no routes or empty geometry is rejected and never cached', as
   withTurso(async () => ({ ok: true, status: 200, text: async () => '{"code":"NoRoute","routes":[]}' }));
   const noRoute = await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
   assert.equal(noRoute.status, 200);
+});
+
+const PANEL_HTML = '<table><tbody><tr><td>1</td><td>CORTADURA</td><td>3min</td></tr></tbody></table>';
+const panelOk = (counter) => async () => {
+  counter.n++;
+  await new Promise((r) => setTimeout(r, 30));
+  return { ok: true, status: 200, text: async () => PANEL_HTML };
+};
+
+test('GET /api serves repeats from the isolate cache without touching the panel', async () => {
+  const c = { n: 0 };
+  globalThis.fetch = panelOk(c);
+  const a = await worker.fetch(new Request('http://x/api?stop=2001'));
+  const b = await worker.fetch(new Request('http://x/api?stop=2001'));
+  assert.equal(a.headers.get('x-arrivals-cache'), 'miss');
+  assert.equal(b.headers.get('x-arrivals-cache'), 'mem');
+  assert.equal(c.n, 1);
+  assert.deepEqual(await b.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 3 }] });
+});
+
+test('GET /api shares the cache across instances through Turso', async () => {
+  const c = { n: 0 };
+  withTurso(panelOk(c));
+  const first = await worker.fetch(new Request('http://x/api?stop=2002'), TURSO_ENV);
+  __resetArrivalsCache(); // a different isolate
+  const second = await worker.fetch(new Request('http://x/api?stop=2002'), TURSO_ENV);
+  assert.equal(first.headers.get('x-arrivals-cache'), 'miss');
+  assert.equal(second.headers.get('x-arrivals-cache'), 'hit');
+  assert.equal(c.n, 1);
+});
+
+test('GET /api single-flight: concurrent misses cause one panel fetch', async () => {
+  const c = { n: 0 };
+  withTurso(panelOk(c));
+  const res = await Promise.all(
+    Array.from({ length: 6 }, () => worker.fetch(new Request('http://x/api?stop=2003'), TURSO_ENV)),
+  );
+  assert.deepEqual(res.map((r) => r.status), [200, 200, 200, 200, 200, 200]);
+  assert.equal(c.n, 1);
+});
+
+test('GET /api returns 503 + retry-after when another instance holds the lock and no result appears', async () => {
+  const c = { n: 0 };
+  withTurso(panelOk(c), { slotBusy: true });
+  const res = await worker.fetch(new Request('http://x/api?stop=2004'), TURSO_ENV);
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get('retry-after'), '2');
+  assert.equal(c.n, 0);
+});
+
+test('GET /api releases the lock after an upstream failure so the next request retries', async () => {
+  let fail = true;
+  let calls = 0;
+  withTurso(async () => {
+    calls++;
+    if (fail) throw new TypeError('fetch failed');
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  });
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=2005'), TURSO_ENV)).status, 502);
+  fail = false;
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=2005'), TURSO_ENV)).status, 200);
+  assert.equal(calls, 2);
+});
+
+test('GET /api falls back to the panel directly when Turso is down (fail open)', async () => {
+  let panel = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    panel++;
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  const res = await worker.fetch(new Request('http://x/api?stop=2006'), TURSO_ENV);
+  assert.equal(res.status, 200);
+  assert.equal(panel, 1);
+});
+
+test('rate limiter answers 429 + retry-after on /api, /geocode and /route, keyed by client IP', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach any upstream when limited');
+  const keys = [];
+  const env = { RATE_LIMITER: { limit: async ({ key }) => (keys.push(key), { success: false }) } };
+  const h = { 'cf-connecting-ip': '203.0.113.9' };
+  for (const path of ['/api?stop=1', '/geocode?q=cadiz', '/route/foot/-6.30,36.50;-6.29,36.51']) {
+    const res = await worker.fetch(new Request(`http://x${path}`, { headers: h }), env);
+    assert.equal(res.status, 429, path);
+    assert.equal(res.headers.get('retry-after'), '10');
+  }
+  assert.deepEqual(keys, ['203.0.113.9', '203.0.113.9', '203.0.113.9']);
+  // static/health endpoints are not limited
+  assert.equal((await worker.fetch(new Request('http://x/stops'), env)).status, 200);
+});
+
+test('rate limiter lets requests through when under the limit or when the binding errors', async () => {
+  globalThis.fetch = panelOk({ n: 0 });
+  const ok = { RATE_LIMITER: { limit: async () => ({ success: true }) } };
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=2007'), ok)).status, 200);
+  __resetArrivalsCache();
+  const broken = { RATE_LIMITER: { limit: async () => { throw new Error('boom'); } } };
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=2007'), broken)).status, 200);
 });

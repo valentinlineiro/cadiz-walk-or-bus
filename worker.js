@@ -282,6 +282,150 @@ function handleRoute(url, env) {
   );
 }
 
+// --- Live arrivals: panel is a legacy server, so it is hit at most ~once per stop per TTL. ---
+// Layers: per-isolate memory -> Turso (shared) -> panel. A Turso row-lock makes one instance
+// fetch per stop while the others poll the cache. If Turso is down we fetch directly (the
+// per-IP rate limiter and the isolate cache still bound the load); arrivals are core, so
+// unlike Nominatim this path fails open.
+const ARRIVALS_TTL_S = 15;
+const ARRIVALS_LOCK_MS = 6000; // > panel timeout (4s)
+const ARRIVALS_POLL_MS = 500;
+const ARRIVALS_POLLS = 3;
+const isolateArrivals = new Map();
+export function __resetArrivalsCache() {
+  isolateArrivals.clear();
+}
+
+async function rateLimited(request, env) {
+  const limiter = env?.RATE_LIMITER;
+  if (!limiter) return false;
+  // Anonymous public app: the client IP is the only stable key. Limit is generous because
+  // mobile carriers share IPs (CGNAT).
+  const key = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  try {
+    return !(await limiter.limit({ key })).success;
+  } catch {
+    return false;
+  }
+}
+const rateLimitedResponse = () =>
+  Response.json({ error: 'rate limited' }, { status: 429, headers: { 'retry-after': '10' } });
+
+function arrivalsResponse(arrivals, fetchedAt, source) {
+  return Response.json(
+    { arrivals },
+    { headers: { 'x-arrivals-cache': source, 'x-data-age': String(Math.max(0, Math.round((Date.now() - fetchedAt) / 1000))) } },
+  );
+}
+
+async function fetchPanelArrivals(stop, route) {
+  const encodedStop = encodeURIComponent(stop);
+  // Workers' fetch() rejects plain-HTTP requests to a bare IP literal with its
+  // own error 1003 ("Direct IP access not allowed") before the request ever
+  // leaves Cloudflare's network. PANEL_HOST is the panel server's real reverse-DNS
+  // name (resolves to the same 77.224.241.76) -- using it sidesteps that entirely.
+  const panel = route
+    ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}&route=${encodeURIComponent(route)}`
+    : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}`;
+  let upstream;
+  try {
+    upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
+  } catch {
+    return Response.json({ error: 'upstream unreachable' }, { status: 502 });
+  }
+  if (!upstream.ok) return Response.json({ error: `upstream ${upstream.status}` }, { status: 502 });
+  const arrivals = parseArrivals(await upstream.text());
+  if (arrivals === null) return Response.json({ error: 'malformed upstream response' }, { status: 502 });
+  return arrivals;
+}
+
+async function readSharedArrivals(db, key) {
+  const raw = await db
+    .first('SELECT body FROM proxy_cache WHERE key = ?1 AND expires_at > ?2', [key, Math.floor(Date.now() / 1000)])
+    .catch(() => null);
+  if (raw === null) return null;
+  try {
+    const { t, arrivals } = JSON.parse(raw);
+    return Array.isArray(arrivals) && Number.isFinite(t) ? { t, arrivals } : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberArrivals(key, entry) {
+  if (isolateArrivals.size >= 500) isolateArrivals.clear(); // ponytail: stops are finite; this only bounds junk `route` values
+  isolateArrivals.set(key, entry);
+}
+
+async function handleArrivals(url, env) {
+  const stop = url.searchParams.get('stop');
+  const route = url.searchParams.get('route');
+  if (!stop || !/^[a-zA-Z0-9_-]{1,16}$/.test(stop)) {
+    return Response.json({ error: 'missing or invalid stop' }, { status: 400 });
+  }
+  if (route !== null && route !== '' && !/^[a-zA-Z0-9_-]{1,16}$/.test(route)) {
+    return Response.json({ error: 'invalid route' }, { status: 400 });
+  }
+  const key = `arr:${stop}:${route ?? ''}`;
+  const lockName = `lock:${key}`;
+
+  const mem = isolateArrivals.get(key);
+  if (mem && Date.now() - mem.t < ARRIVALS_TTL_S * 1000) return arrivalsResponse(mem.arrivals, mem.t, 'mem');
+
+  const db = tursoDb(env);
+  let locked = false;
+  if (db) {
+    const shared = await readSharedArrivals(db, key);
+    if (shared) {
+      rememberArrivals(key, shared);
+      return arrivalsResponse(shared.arrivals, shared.t, 'hit');
+    }
+    const now = Date.now();
+    const claimed = await db
+      .run(
+        'INSERT INTO proxy_slot (name, next_at) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET next_at = ?2 WHERE next_at <= ?3',
+        [lockName, now + ARRIVALS_LOCK_MS, now],
+      )
+      .catch(() => null);
+    if (claimed === 0) {
+      // Another instance is fetching this stop: wait for its result instead of hitting the panel.
+      for (let i = 0; i < ARRIVALS_POLLS; i++) {
+        await new Promise((resolve) => setTimeout(resolve, ARRIVALS_POLL_MS));
+        const polled = await readSharedArrivals(db, key);
+        if (polled) {
+          rememberArrivals(key, polled);
+          return arrivalsResponse(polled.arrivals, polled.t, 'hit');
+        }
+      }
+      return Response.json({ error: 'busy' }, { status: 503, headers: { 'retry-after': '2' } });
+    }
+    locked = claimed !== null;
+  }
+
+  try {
+    const arrivals = await fetchPanelArrivals(stop, route);
+    if (arrivals instanceof Response) return arrivals;
+    const entry = { t: Date.now(), arrivals };
+    rememberArrivals(key, entry);
+    if (db) {
+      await db
+        .run('INSERT OR REPLACE INTO proxy_cache (key, body, expires_at) VALUES (?1, ?2, ?3)', [
+          key,
+          JSON.stringify(entry),
+          Math.floor(entry.t / 1000) + ARRIVALS_TTL_S,
+        ])
+        .catch(() => {});
+      // Opportunistic sweep so geocode/route keys do not accumulate forever.
+      if (Math.random() < 0.02) {
+        await db.run('DELETE FROM proxy_cache WHERE expires_at < ?1', [Math.floor(entry.t / 1000)]).catch(() => {});
+      }
+    }
+    return arrivalsResponse(arrivals, entry.t, 'miss');
+  } finally {
+    if (locked) await db.run('DELETE FROM proxy_slot WHERE name = ?1', [lockName]).catch(() => {});
+  }
+}
+
 // Deployment gate: 200 only when Turso is configured, reachable and migrated.
 async function handleProxyHealth(env) {
   const db = tursoDb(env);
@@ -299,41 +443,15 @@ async function handleFetch(request, env) {
   const url = new URL(request.url);
   if (url.pathname === '/proxy-health') return handleProxyHealth(env);
   if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
+    if (await rateLimited(request, env)) return rateLimitedResponse();
     if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
     return url.pathname === '/geocode' ? handleGeocode(url, env) : handleRoute(url, env);
   }
   if (url.pathname === '/stops') return Response.json(stops);
   if (url.pathname === '/lines') return Response.json(lines);
   if (url.pathname === '/api') {
-    const stop = url.searchParams.get('stop');
-    const route = url.searchParams.get('route');
-    if (!stop || !/^[a-zA-Z0-9_-]{1,16}$/.test(stop)) {
-      return Response.json({ error: 'missing or invalid stop' }, { status: 400 });
-    }
-    if (route !== null && route !== '' && !/^[a-zA-Z0-9_-]{1,16}$/.test(route)) {
-      return Response.json({ error: 'invalid route' }, { status: 400 });
-    }
-    // Workers' fetch() rejects plain-HTTP requests to a bare IP literal with its
-    // own error 1003 ("Direct IP access not allowed") before the request ever
-    // leaves Cloudflare's network. PANEL_HOST is the panel server's real reverse-DNS
-    // name (resolves to the same 77.224.241.76) -- using it sidesteps that entirely.
-    const encodedStop = encodeURIComponent(stop);
-    const encodedRoute = route ? encodeURIComponent(route) : '';
-    const panel = encodedRoute
-      ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}&route=${encodedRoute}`
-      : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}`;
-    let upstream;
-    try {
-      upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
-    } catch {
-      return Response.json({ error: 'upstream unreachable' }, { status: 502 });
-    }
-    if (!upstream.ok) return Response.json({ error: `upstream ${upstream.status}` }, { status: 502 });
-    const arrivals = parseArrivals(await upstream.text());
-    if (arrivals === null) {
-      return Response.json({ error: 'malformed upstream response' }, { status: 502 });
-    }
-    return Response.json({ arrivals });
+    if (await rateLimited(request, env)) return rateLimitedResponse();
+    return handleArrivals(url, env);
   }
   if (url.pathname === '/' || url.pathname === '/map' || url.pathname === '/map.html') {
     return new Response(MAP_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });
