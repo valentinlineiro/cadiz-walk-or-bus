@@ -181,8 +181,9 @@ const validOsrm = (j) =>
   (j.code === 'NoRoute' ||
     (j.code === 'Ok' &&
       Array.isArray(j.routes) &&
+      j.routes.length > 0 &&
       j.routes.every(
-        (r) => Number.isFinite(r?.distance) && Number.isFinite(r?.duration) && Array.isArray(r?.geometry?.coordinates),
+        (r) => Number.isFinite(r?.distance) && Number.isFinite(r?.duration) && Array.isArray(r?.geometry?.coordinates) && r.geometry.coordinates.length >= 2,
       )));
 
 async function upstreamJson(url, isValid) {

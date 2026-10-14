@@ -244,7 +244,7 @@ test('GET /route proxies foot and drive, validates coordinates, maps upstream er
   const urls = [];
   withTurso(async (url) => {
     urls.push(url);
-    return { ok: true, status: 200, text: async () => '{"code":"Ok","routes":[]}' };
+    return { ok: true, status: 200, text: async () => '{"code":"Ok","routes":[{"distance":120,"duration":90,"geometry":{"coordinates":[[-6.29,36.53],[-6.28,36.54]]}}]}' };
   });
   const foot = await worker.fetch(new Request('http://x/route/foot/-6.2885,36.5271;-6.293656,36.5345546'), env);
   assert.equal(foot.status, 200);
@@ -266,7 +266,7 @@ test('geocode fails closed (503 + retry-after) without Turso secrets, but routes
   let calls = 0;
   globalThis.fetch = async () => {
     calls++;
-    return { ok: true, status: 200, text: async () => '{"code":"Ok","routes":[]}' };
+    return { ok: true, status: 200, text: async () => '{"code":"Ok","routes":[{"distance":120,"duration":90,"geometry":{"coordinates":[[-6.29,36.53],[-6.28,36.54]]}}]}' };
   };
   const geo = await worker.fetch(new Request('http://x/geocode?q=cadiz'));
   assert.equal(geo.status, 503);
@@ -341,4 +341,16 @@ test('accepts a libsql:// Turso URL by talking https to the same host', async ()
   const res = await worker.fetch(new Request('http://x/proxy-health'), { ...TURSO_ENV, TURSO_DATABASE_URL: 'libsql://db-test.turso.io' });
   assert.equal(res.status, 200);
   assert.equal(urls[0], 'https://db-test.turso.io/v2/pipeline');
+});
+
+test('OSRM Ok with no routes or empty geometry is rejected and never cached', async () => {
+  for (const body of ['{"code":"Ok","routes":[]}', '{"code":"Ok","routes":[{"distance":1,"duration":1,"geometry":{"coordinates":[]}}]}']) {
+    const cache = withTurso(async () => ({ ok: true, status: 200, text: async () => body }));
+    const res = await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+    assert.equal(res.status, 502);
+    assert.equal(cache.size, 0);
+  }
+  withTurso(async () => ({ ok: true, status: 200, text: async () => '{"code":"NoRoute","routes":[]}' }));
+  const noRoute = await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  assert.equal(noRoute.status, 200);
 });
