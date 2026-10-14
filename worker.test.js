@@ -34,7 +34,7 @@ const ev = (name) => logs.filter((l) => l.event === name);
 test('GET /api returns parsed arrivals with mocked upstream', async () => {
   const html = `<table><tbody><tr><td>1</td><td>CORTADURA</td><td>3min</td></tr></tbody></table>`;
   globalThis.fetch = async () => ({ ok: true, text: async () => html });
-  const res = await worker.fetch(new Request('http://x/api?stop=1106&route=110001'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1213&route=110001'));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 3 }] });
 });
@@ -56,20 +56,20 @@ test('GET /map serves map UI', async () => {
 
 test('GET /api times out and returns 502 cleanly on slow upstream', async () => {
   globalThis.fetch = async () => new Promise((_, reject) => setTimeout(() => reject(new DOMException('Timeout', 'TimeoutError')), 20));
-  const res = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(res.status, 502);
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
 test('GET /api proxies upstream failure as 502', async () => {
   globalThis.fetch = async () => ({ ok: false, status: 500 });
-  const res = await worker.fetch(new Request('http://x/api?stop=1&route=2'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1225&route=2'));
   assert.equal(res.status, 502);
 });
 
 test('GET /api maps upstream throw to 502', async () => {
   globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
-  const res = await worker.fetch(new Request('http://x/api?stop=1&route=2'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1225&route=2'));
   assert.equal(res.status, 502);
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
@@ -77,37 +77,37 @@ test('GET /api maps upstream throw to 502', async () => {
 test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async () => {
   // Upstream returns an error page without tables
   globalThis.fetch = async () => ({ ok: true, text: async () => '<html><body>Internal Server Error</body></html>' });
-  const noTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const noTableRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(noTableRes.status, 502);
   assert.deepEqual(await noTableRes.json(), { error: 'malformed upstream response' });
 
   // Upstream returns an ASP.NET error page with a table that has no transit columns
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Server Error in / Application</td></tr></table>' });
-  const errorTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const errorTableRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(errorTableRes.status, 502);
   assert.deepEqual(await errorTableRes.json(), { error: 'malformed upstream response' });
 
   // Upstream returns a 3-column error table (e.g. Error / Details / Code 500) which must NOT be treated as a candidate transit row
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>' });
-  const threeColErrorRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const threeColErrorRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(threeColErrorRes.status, 502);
   assert.deepEqual(await threeColErrorRes.json(), { error: 'malformed upstream response' });
 
   // Upstream returns a table where arrival cell is empty/blank without recognized status -> treated as malformed (502)
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td></td></tr></table>' });
-  const emptyArrivalRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const emptyArrivalRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(emptyArrivalRes.status, 502);
   assert.deepEqual(await emptyArrivalRes.json(), { error: 'malformed upstream response' });
 
   // Upstream returns a table containing ONLY timetable clock times (e.g. 15:30) and no live relative arrivals -> 502 to trigger scheduled GTFS fallback
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>15:30</td></tr></table>' });
-  const clockOnlyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const clockOnlyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(clockOnlyRes.status, 502);
   assert.deepEqual(await clockOnlyRes.json(), { error: 'malformed upstream response' });
 
   // Upstream returns a table containing ONLY bounds (e.g. > 45 min) without live arrivals or out-of-service indicator -> 502 to trigger scheduled GTFS fallback
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>> 45 min</td></tr></table>' });
-  const boundsOnlyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const boundsOnlyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(boundsOnlyRes.status, 502);
   assert.deepEqual(await boundsOnlyRes.json(), { error: 'malformed upstream response' });
 });
@@ -115,27 +115,27 @@ test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async 
 test('GET /api parses tables with row attributes like class or style properly', async () => {
   const htmlWithTrClass = '<table class="tablePanel"><tr class="odd"><td>1</td><td>CORTADURA</td><td>5min</td></tr></table>';
   globalThis.fetch = async () => ({ ok: true, text: async () => htmlWithTrClass });
-  const res = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 5 }] });
 });
 
 test('GET /api returns 200 and authoritative empty arrivals on valid empty panel table', async () => {
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tbody></tbody></table>' });
-  const emptyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const emptyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(emptyRes.status, 200);
   assert.deepEqual(await emptyRes.json(), { arrivals: [] });
 
   const validTableWithHeaders = '<table class="tablePanel"><thead><tr><th>Línea</th><th>Destino</th><th>Llegada</th></tr></thead><tbody></tbody></table>';
   globalThis.fetch = async () => ({ ok: true, text: async () => validTableWithHeaders });
-  const headersRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const headersRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(headersRes.status, 200);
   assert.deepEqual(await headersRes.json(), { arrivals: [] });
 
   // Valid transit table with out-of-service status
   const outOfServiceTable = '<table class="tablePanel"><tr class="row"><td>1</td><td>CORTADURA</td><td>Sin servicio</td></tr></table>';
   globalThis.fetch = async () => ({ ok: true, text: async () => outOfServiceTable });
-  const oosRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  const oosRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(oosRes.status, 200);
   assert.deepEqual(await oosRes.json(), { arrivals: [] });
 });
@@ -145,30 +145,62 @@ test('GET /api without stop returns 400', async () => {
   assert.equal(res.status, 400);
 });
 
-test('GET /api validates stop and route parameters against injection and invalid characters', async () => {
-  globalThis.fetch = async () => ({ ok: true, text: async () => '<table></table>' });
+test('GET /api validates the stop parameter against injection and malformed ids', async () => {
+  globalThis.fetch = async () => assert.fail('malformed requests must never reach the panel');
+  for (const q of ['stop=1308%26admin=1', 'stop=1308;drop', 'stop=12345678901234567', 'stop=', '']) {
+    const res = await worker.fetch(new Request(`http://x/api?${q}`));
+    assert.equal(res.status, 400, q);
+    assert.deepEqual(await res.json(), { error: 'missing or invalid stop' });
+  }
+});
 
-  // Valid request: /api?stop=101&route=1 passes
-  const validRes = await worker.fetch(new Request('http://x/api?stop=101&route=1'));
-  assert.equal(validRes.status, 200);
+test('GET /api rejects unknown stops with 404 before any cache, lock or panel access', async () => {
+  let panel = 0;
+  let turso = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) turso++;
+    else panel++;
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  for (const id of ['987654', 'zzz-not-a-stop', '0', 'A1', '1515x']) {
+    const res = await worker.fetch(new Request(`http://x/api?stop=${id}`), TURSO_ENV);
+    assert.equal(res.status, 404, id);
+    assert.deepEqual(await res.json(), { error: 'unknown stop' });
+  }
+  assert.equal(panel, 0, 'no panel calls for rejected ids');
+  assert.equal(turso, 0, 'no Turso lookups or locks for rejected ids');
+  assert.equal(ev('arrivals_request').length, 0);
+  assert.deepEqual(ev('arrivals_rejected').map((e) => e.reason), Array(5).fill('unknown_stop'));
+  assert.equal(lines.join('\n').includes('987654'), false, 'rejected ids are not logged');
+});
 
-  // Injection / special chars: /api?stop=101%26admin=1 returns 400
-  const injectionRes = await worker.fetch(new Request('http://x/api?stop=101%26admin=1'));
-  assert.equal(injectionRes.status, 400);
-  assert.deepEqual(await injectionRes.json(), { error: 'missing or invalid stop' });
+test('GET /api ignores the route parameter: not forwarded and not part of the cache key', async () => {
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  const a = await worker.fetch(new Request('http://x/api?stop=1515&route=110001'));
+  const b = await worker.fetch(new Request('http://x/api?stop=1515&route=anything-else'));
+  const c = await worker.fetch(new Request('http://x/api?stop=1515&route=1%20or%201'));
+  assert.deepEqual([a.status, b.status, c.status], [200, 200, 200]);
+  assert.equal(urls.length, 1, 'varying route cannot bypass the per-stop cache');
+  assert.equal(urls[0].includes('route='), false);
+});
 
-  // Characters outside [a-zA-Z0-9_-] in stop
-  const badStopRes = await worker.fetch(new Request('http://x/api?stop=101;drop'));
-  assert.equal(badStopRes.status, 400);
-
-  // Characters outside [a-zA-Z0-9_-] in route
-  const badRouteRes = await worker.fetch(new Request('http://x/api?stop=101&route=1%20or%201'));
-  assert.equal(badRouteRes.status, 400);
-  assert.deepEqual(await badRouteRes.json(), { error: 'invalid route' });
-
-  // Overlong parameters (> 16 chars)
-  const longStopRes = await worker.fetch(new Request('http://x/api?stop=12345678901234567'));
-  assert.equal(longStopRes.status, 400);
+test('every shipped stop is servable and the allowlist matches stops.json', async () => {
+  const shipped = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./stops.json', import.meta.url), 'utf8'));
+  let panel = 0;
+  globalThis.fetch = async () => {
+    panel++;
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  const ids = [...new Set(shipped.map((s) => String(s.stop)))];
+  for (const id of ids) {
+    __resetArrivalsCache();
+    assert.equal((await worker.fetch(new Request(`http://x/api?stop=${id}`))).status, 200, id);
+  }
+  assert.equal(panel, ids.length);
 });
 
 test('GET /stops returns the stop directory', async () => {
@@ -183,9 +215,9 @@ test('GET /api works stop-only (no route)', async () => {
   let fetched = '';
   globalThis.fetch = async (url) => { fetched = String(url); return { ok: true, text: async () => '<table></table>' }; };
   try {
-    const res = await worker.fetch(new Request('http://x/api?stop=9905'));
+    const res = await worker.fetch(new Request('http://x/api?stop=1319'));
     assert.equal(res.status, 200);
-    assert.match(fetched, /panel\.aspx\?stop=9905$/);
+    assert.match(fetched, /panel\.aspx\?stop=1319$/);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -399,8 +431,8 @@ const panelOk = (counter) => async () => {
 test('GET /api serves repeats from the isolate cache without touching the panel', async () => {
   const c = { n: 0 };
   globalThis.fetch = panelOk(c);
-  const a = await worker.fetch(new Request('http://x/api?stop=2001'));
-  const b = await worker.fetch(new Request('http://x/api?stop=2001'));
+  const a = await worker.fetch(new Request('http://x/api?stop=1111'));
+  const b = await worker.fetch(new Request('http://x/api?stop=1111'));
   assert.equal(a.headers.get('x-arrivals-cache'), 'degraded'); // no Turso configured
   assert.equal(b.headers.get('x-arrivals-cache'), 'mem');
   assert.equal(c.n, 1);
@@ -410,9 +442,9 @@ test('GET /api serves repeats from the isolate cache without touching the panel'
 test('GET /api shares the cache across instances through Turso', async () => {
   const c = { n: 0 };
   withTurso(panelOk(c));
-  const first = await worker.fetch(new Request('http://x/api?stop=2002'), TURSO_ENV);
+  const first = await worker.fetch(new Request('http://x/api?stop=1116'), TURSO_ENV);
   __resetArrivalsCache(); // a different isolate
-  const second = await worker.fetch(new Request('http://x/api?stop=2002'), TURSO_ENV);
+  const second = await worker.fetch(new Request('http://x/api?stop=1116'), TURSO_ENV);
   assert.equal(first.headers.get('x-arrivals-cache'), 'miss');
   assert.equal(second.headers.get('x-arrivals-cache'), 'hit');
   assert.equal(c.n, 1);
@@ -422,7 +454,7 @@ test('GET /api single-flight: concurrent misses cause one panel fetch', async ()
   const c = { n: 0 };
   withTurso(panelOk(c));
   const res = await Promise.all(
-    Array.from({ length: 6 }, () => worker.fetch(new Request('http://x/api?stop=2003'), TURSO_ENV)),
+    Array.from({ length: 6 }, () => worker.fetch(new Request('http://x/api?stop=1510'), TURSO_ENV)),
   );
   assert.deepEqual(res.map((r) => r.status), [200, 200, 200, 200, 200, 200]);
   assert.equal(c.n, 1);
@@ -431,7 +463,7 @@ test('GET /api single-flight: concurrent misses cause one panel fetch', async ()
 test('GET /api returns 503 + retry-after when another instance holds the lock and no result appears', async () => {
   const c = { n: 0 };
   withTurso(panelOk(c), { slotBusy: true });
-  const res = await worker.fetch(new Request('http://x/api?stop=2004'), TURSO_ENV);
+  const res = await worker.fetch(new Request('http://x/api?stop=1708'), TURSO_ENV);
   assert.equal(res.status, 503);
   assert.equal(res.headers.get('retry-after'), '2');
   assert.equal(c.n, 0);
@@ -445,9 +477,9 @@ test('GET /api releases the lock after an upstream failure so the next request r
     if (fail) throw new TypeError('fetch failed');
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   });
-  assert.equal((await worker.fetch(new Request('http://x/api?stop=2005'), TURSO_ENV)).status, 502);
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=1304'), TURSO_ENV)).status, 502);
   fail = false;
-  assert.equal((await worker.fetch(new Request('http://x/api?stop=2005'), TURSO_ENV)).status, 200);
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=1304'), TURSO_ENV)).status, 200);
   assert.equal(calls, 2);
 });
 
@@ -458,7 +490,7 @@ test('GET /api falls back to the panel directly when Turso is down (fail open)',
     panel++;
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   };
-  const res = await worker.fetch(new Request('http://x/api?stop=2006'), TURSO_ENV);
+  const res = await worker.fetch(new Request('http://x/api?stop=1315'), TURSO_ENV);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('x-arrivals-cache'), 'degraded');
   assert.equal(panel, 1);
@@ -469,7 +501,7 @@ test('rate limiter answers 429 + retry-after on /api, /geocode and /route, keyed
   const keys = [];
   const env = { RATE_LIMITER: { limit: async ({ key }) => (keys.push(key), { success: false }) } };
   const h = { 'cf-connecting-ip': '203.0.113.9' };
-  for (const path of ['/api?stop=1', '/geocode?q=cadiz', '/route/foot/-6.30,36.50;-6.29,36.51']) {
+  for (const path of ['/api?stop=1225', '/geocode?q=cadiz', '/route/foot/-6.30,36.50;-6.29,36.51']) {
     const res = await worker.fetch(new Request(`http://x${path}`, { headers: h }), env);
     assert.equal(res.status, 429, path);
     assert.equal(res.headers.get('retry-after'), '10');
@@ -482,10 +514,10 @@ test('rate limiter answers 429 + retry-after on /api, /geocode and /route, keyed
 test('rate limiter lets requests through when under the limit or when the binding errors', async () => {
   globalThis.fetch = panelOk({ n: 0 });
   const ok = { RATE_LIMITER: { limit: async () => ({ success: true }) } };
-  assert.equal((await worker.fetch(new Request('http://x/api?stop=2007'), ok)).status, 200);
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=1215'), ok)).status, 200);
   __resetArrivalsCache();
   const broken = { RATE_LIMITER: { limit: async () => { throw new Error('boom'); } } };
-  assert.equal((await worker.fetch(new Request('http://x/api?stop=2007'), broken)).status, 200);
+  assert.equal((await worker.fetch(new Request('http://x/api?stop=1215'), broken)).status, 200);
 });
 
 const until = async (cond) => {
@@ -508,14 +540,14 @@ test('GET /api: a late finisher does not delete a lock re-acquired by someone el
     await (me === 1 ? gA.p : gB.p);
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   });
-  const lock = 'lock:arr:3001:';
-  const a = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV); // acquires lock, panel is slow
+  const lock = 'lock:arr:1113';
+  const a = worker.fetch(new Request('http://x/api?stop=1113'), TURSO_ENV); // acquires lock, panel is slow
   await until(() => cache.slots.has(lock));
   const aOwner = cache.slots.get(lock);
   assert.ok(aOwner > 0);
   cache.slots.set(lock, 1); // A's lock expires...
   __resetArrivalsCache(); // ...and a request on another isolate re-acquires it
-  const b = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV);
+  const b = worker.fetch(new Request('http://x/api?stop=1113'), TURSO_ENV);
   await until(() => cache.slots.get(lock) !== 1);
   const bOwner = cache.slots.get(lock);
   assert.ok(bOwner > aOwner, 'B holds a fresh acquisition');
@@ -534,10 +566,10 @@ test('GET /api: waiters outlast a slow panel answer instead of returning 503 bus
     await new Promise((r) => setTimeout(r, 2200)); // older 1.5s window would have given up
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   });
-  const a = worker.fetch(new Request('http://x/api?stop=3002'), TURSO_ENV);
-  await until(() => cache.slots.has('lock:arr:3002:'));
+  const a = worker.fetch(new Request('http://x/api?stop=1114'), TURSO_ENV);
+  await until(() => cache.slots.has('lock:arr:1114'));
   __resetArrivalsCache(); // second request comes from another isolate
-  const b = await worker.fetch(new Request('http://x/api?stop=3002'), TURSO_ENV);
+  const b = await worker.fetch(new Request('http://x/api?stop=1114'), TURSO_ENV);
   assert.equal(b.status, 200);
   assert.equal(b.headers.get('x-arrivals-cache'), 'hit');
   assert.equal((await a).status, 200);
@@ -547,7 +579,7 @@ test('GET /api: waiters outlast a slow panel answer instead of returning 503 bus
 test('GET /api coalesces concurrent requests in one isolate even without Turso (degraded mode)', async () => {
   const c = { n: 0 };
   globalThis.fetch = panelOk(c);
-  const res = await Promise.all(Array.from({ length: 8 }, () => worker.fetch(new Request('http://x/api?stop=3003'))));
+  const res = await Promise.all(Array.from({ length: 8 }, () => worker.fetch(new Request('http://x/api?stop=1901'))));
   assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
   assert.equal(c.n, 1);
   assert.equal(await res[7].text(), await res[0].text());
@@ -561,7 +593,7 @@ test('GET /api degraded mode (Turso down) coalesces and reports degraded', async
     await new Promise((r) => setTimeout(r, 30));
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   };
-  const res = await Promise.all(Array.from({ length: 5 }, () => worker.fetch(new Request('http://x/api?stop=3004'), TURSO_ENV)));
+  const res = await Promise.all(Array.from({ length: 5 }, () => worker.fetch(new Request('http://x/api?stop=1210'), TURSO_ENV)));
   assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
   assert.equal(res[0].headers.get('x-arrivals-cache'), 'degraded');
   assert.equal(panel, 1);
@@ -577,11 +609,11 @@ test('GET /api: panel near its timeout plus a slow cache publish still resolves 
     },
     { writeDelayMs: 500 }, // Turso publish is slow too
   );
-  const owner = worker.fetch(new Request('http://x/api?stop=3005'), TURSO_ENV);
-  await until(() => cache.slots.has('lock:arr:3005:'));
+  const owner = worker.fetch(new Request('http://x/api?stop=1237'), TURSO_ENV);
+  await until(() => cache.slots.has('lock:arr:1237'));
   __resetArrivalsCache(); // waiters come from other isolates
   const waiters = await Promise.all(
-    [1, 2, 3].map(() => worker.fetch(new Request('http://x/api?stop=3005'), TURSO_ENV)),
+    [1, 2, 3].map(() => worker.fetch(new Request('http://x/api?stop=1237'), TURSO_ENV)),
   );
   assert.deepEqual(waiters.map((r) => r.status), [200, 200, 200]);
   assert.equal((await owner).status, 200);
@@ -594,7 +626,7 @@ test('GET /api never clones or shares a Response between requests (Workers I/O i
   try {
     const c = { n: 0 };
     globalThis.fetch = panelOk(c);
-    const res = await Promise.all(Array.from({ length: 5 }, () => worker.fetch(new Request('http://x/api?stop=3006'))));
+    const res = await Promise.all(Array.from({ length: 5 }, () => worker.fetch(new Request('http://x/api?stop=1307'))));
     assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
     assert.equal(c.n, 1);
     assert.equal(new Set(res).size, 5, 'each request gets its own Response');
@@ -621,6 +653,8 @@ test('metrics: panel_request counts real panel calls, not cache hits or coalesce
   for (const e of ev('arrivals_request')) assert.equal(typeof e.duration_ms, 'number');
 });
 
+const known4 = ['1710','1506','1523','1125'];
+
 test('metrics: panel failures are classified as timeout, transport, http or parse', async () => {
   const cases = [
     [async () => { throw new DOMException('t', 'TimeoutError'); }, { error_type: 'timeout' }],
@@ -632,7 +666,7 @@ test('metrics: panel failures are classified as timeout, transport, http or pars
     logs.length = 0;
     __resetArrivalsCache();
     globalThis.fetch = impl;
-    const res = await worker.fetch(new Request(`http://x/api?stop=${4000 + i}`));
+    const res = await worker.fetch(new Request(`http://x/api?stop=${known4[i]}`));
     assert.equal(res.status, 502);
     const [p] = ev('panel_request');
     assert.equal(p.ok, false);
@@ -642,11 +676,11 @@ test('metrics: panel failures are classified as timeout, transport, http or pars
   }
 });
 
-test('metrics: stop ids are logged only for real stops (bounded cardinality)', async () => {
+test('metrics: stop ids are logged for known stops and unknown ones never reach the logs', async () => {
   globalThis.fetch = panelOk({ n: 0 });
   await worker.fetch(new Request('http://x/api?stop=1515'));
   await worker.fetch(new Request('http://x/api?stop=zzz-not-a-stop'));
-  assert.deepEqual(ev('arrivals_request').map((e) => e.stop_id), ['1515', 'other']);
+  assert.deepEqual(ev('arrivals_request').map((e) => e.stop_id), ['1515']);
   assert.equal(lines.join('\n').includes('zzz-not-a-stop'), false);
 });
 
