@@ -130,6 +130,13 @@ initUI();
 </html>`;
 
 
+// --- Observability: one structured JSON line per event (Workers Logs). Counts = number of events.
+// Never log headers, IPs, bodies or raw user input; stop ids are logged only when they are real stops.
+const KNOWN_STOPS = new Set(stops.map((s) => String(s.stop)));
+const logEvent = (event, fields, level = 'log') => console[level](JSON.stringify({ event, ...fields }));
+const knownStop = (id) => (KNOWN_STOPS.has(id) ? id : 'other');
+const routeKind = (pathname) => (pathname === '/api' ? 'api' : pathname === '/geocode' ? 'geocode' : 'route');
+
 // --- Upstream proxy: Nominatim + OSRM, cached/rate-limited via optional Turso. ---
 // Needs secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN. Nominatim cache misses FAIL CLOSED
 // (503 + Retry-After) when the global limiter is unavailable; cache hits and OSRM keep working.
@@ -215,6 +222,22 @@ async function upstreamJson(url, isValid) {
 
 // produce() returns the JSON body string to cache, or a Response to pass through uncached.
 async function proxyCached(env, key, produce) {
+  const started = Date.now();
+  const res = await proxyCachedInner(env, key, produce);
+  logEvent(
+    'proxy_request',
+    {
+      kind: key.startsWith('geo:') ? 'geocode' : key.split(':')[1],
+      status: res.status,
+      cache_status: res.headers.get('x-proxy-cache') ?? 'none',
+      duration_ms: Date.now() - started,
+    },
+    res.status >= 500 ? 'warn' : 'log',
+  );
+  return res;
+}
+
+async function proxyCachedInner(env, key, produce) {
   const db = tursoDb(env);
   const now = Math.floor(Date.now() / 1000);
   const headers = { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' };
@@ -288,7 +311,7 @@ function handleRoute(url, env) {
 // poll the cache. If Turso is down, arrivals (the core feature) fail open in DEGRADED mode:
 // each isolate still fetches at most once per stop per TTL (memory cache + coalescing), so
 // panel load is bounded by isolates x stops / TTL, NOT globally. Degraded fetches are
-// reported with x-arrivals-cache: degraded and a console.warn so they can be alerted on.
+// reported with x-arrivals-cache: degraded and an `arrivals_degraded` log event so they can be alerted on.
 // Unlike Nominatim this path does not fail closed.
 const ARRIVALS_TTL_S = 15;
 const ARRIVALS_LOCK_MS = 6000; // > panel timeout (4s) + Turso round trips
@@ -315,8 +338,10 @@ async function rateLimited(request, env) {
     return false;
   }
 }
-const rateLimitedResponse = () =>
-  Response.json({ error: 'rate limited' }, { status: 429, headers: { 'retry-after': '10' } });
+const rateLimitedResponse = (pathname) => {
+  logEvent('rate_limited', { kind: routeKind(pathname) }, 'warn');
+  return Response.json({ error: 'rate limited' }, { status: 429, headers: { 'retry-after': '10' } });
+};
 
 function arrivalsResponse(arrivals, fetchedAt, source) {
   return Response.json(
@@ -334,15 +359,28 @@ async function fetchPanelArrivals(stop, route) {
   const panel = route
     ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}&route=${encodeURIComponent(route)}`
     : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}`;
+  const started = Date.now();
+  const done = (fields) => {
+    const ok = !fields.error_type;
+    logEvent('panel_request', { stop_id: knownStop(stop), ok, panel_duration_ms: Date.now() - started, ...fields }, ok ? 'log' : 'warn');
+  };
   let upstream;
   try {
     upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
-  } catch {
+  } catch (e) {
+    done({ error_type: e?.name === 'TimeoutError' ? 'timeout' : 'transport' });
     return { fail: { status: 502, body: { error: 'upstream unreachable' } } };
   }
-  if (!upstream.ok) return { fail: { status: 502, body: { error: `upstream ${upstream.status}` } } };
+  if (!upstream.ok) {
+    done({ error_type: 'http', status: upstream.status });
+    return { fail: { status: 502, body: { error: `upstream ${upstream.status}` } } };
+  }
   const arrivals = parseArrivals(await upstream.text());
-  if (arrivals === null) return { fail: { status: 502, body: { error: 'malformed upstream response' } } };
+  if (arrivals === null) {
+    done({ error_type: 'parse', status: upstream.status });
+    return { fail: { status: 502, body: { error: 'malformed upstream response' } } };
+  }
+  done({ status: upstream.status, arrivals: arrivals.length });
   return { arrivals };
 }
 
@@ -374,9 +412,20 @@ async function handleArrivals(url, env) {
     return Response.json({ error: 'invalid route' }, { status: 400 });
   }
   const key = `arr:${stop}:${route ?? ''}`;
+  const started = Date.now();
+  const finish = (res, cache_status) => {
+    logEvent(
+      'arrivals_request',
+      { status: res.status, cache_status, duration_ms: Date.now() - started, stop_id: knownStop(stop) },
+      res.status >= 500 ? 'warn' : 'log',
+    );
+    return res;
+  };
 
   const mem = isolateArrivals.get(key);
-  if (mem && Date.now() - mem.t < ARRIVALS_TTL_S * 1000) return arrivalsResponse(mem.arrivals, mem.t, 'mem');
+  if (mem && Date.now() - mem.t < ARRIVALS_TTL_S * 1000) {
+    return finish(arrivalsResponse(mem.arrivals, mem.t, 'mem'), 'mem');
+  }
 
   // Concurrent requests in this isolate share one load (one Turso lookup, one panel fetch).
   // Only plain data is shared: Workers forbid touching a Response/stream created by another
@@ -389,9 +438,9 @@ async function handleArrivals(url, env) {
   }
   const r = await load;
   if (r.fail) {
-    return Response.json(r.fail.body, { status: r.fail.status, headers: r.fail.headers ?? {} });
+    return finish(Response.json(r.fail.body, { status: r.fail.status, headers: r.fail.headers ?? {} }), 'none');
   }
-  return arrivalsResponse(r.arrivals, r.t, r.source);
+  return finish(arrivalsResponse(r.arrivals, r.t, r.source), r.source);
 }
 
 async function loadArrivals(key, stop, route, env) {
@@ -426,7 +475,7 @@ async function loadArrivals(key, stop, route, env) {
     }
     if (claimed === null) {
       degraded = true;
-      console.warn('arrivals: Turso unavailable, fetching panel without shared lock', key);
+      logEvent('arrivals_degraded', { reason: 'turso_unavailable', stop_id: knownStop(stop) }, 'warn');
     } else {
       lockUntil = now + ARRIVALS_LOCK_MS;
     }
@@ -477,14 +526,14 @@ async function handleFetch(request, env) {
   const url = new URL(request.url);
   if (url.pathname === '/proxy-health') return handleProxyHealth(env);
   if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
-    if (await rateLimited(request, env)) return rateLimitedResponse();
+    if (await rateLimited(request, env)) return rateLimitedResponse(url.pathname);
     if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
     return url.pathname === '/geocode' ? handleGeocode(url, env) : handleRoute(url, env);
   }
   if (url.pathname === '/stops') return Response.json(stops);
   if (url.pathname === '/lines') return Response.json(lines);
   if (url.pathname === '/api') {
-    if (await rateLimited(request, env)) return rateLimitedResponse();
+    if (await rateLimited(request, env)) return rateLimitedResponse(url.pathname);
     return handleArrivals(url, env);
   }
   if (url.pathname === '/' || url.pathname === '/map' || url.pathname === '/map.html') {

@@ -3,11 +3,33 @@ import assert from 'node:assert/strict';
 import worker, { __resetArrivalsCache } from './worker.js';
 
 const originalFetch = globalThis.fetch;
+const originalConsole = { log: console.log, warn: console.warn };
+// Structured log events emitted by the worker, as { level, ...fields }.
+let logs = [];
+const lines = [];
+
+test.beforeEach(() => {
+  logs = [];
+  lines.length = 0;
+  for (const level of ['log', 'warn']) {
+    console[level] = (line) => {
+      lines.push(String(line));
+      try {
+        logs.push({ level, ...JSON.parse(line) });
+      } catch {
+        /* not a structured event */
+      }
+    };
+  }
+});
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch;
+  console.log = originalConsole.log;
+  console.warn = originalConsole.warn;
   __resetArrivalsCache();
 });
+const ev = (name) => logs.filter((l) => l.event === name);
 
 test('GET /api returns parsed arrivals with mocked upstream', async () => {
   const html = `<table><tbody><tr><td>1</td><td>CORTADURA</td><td>3min</td></tr></tbody></table>`;
@@ -366,6 +388,7 @@ test('OSRM Ok with no routes or empty geometry is rejected and never cached', as
   assert.equal(noRoute.status, 200);
 });
 
+const ROUTE_BODY = '{"code":"Ok","routes":[{"distance":120,"duration":90,"geometry":{"coordinates":[[-6.29,36.53],[-6.28,36.54]]}}]}';
 const PANEL_HTML = '<table><tbody><tr><td>1</td><td>CORTADURA</td><td>3min</td></tr></tbody></table>';
 const panelOk = (counter) => async () => {
   counter.n++;
@@ -578,4 +601,95 @@ test('GET /api never clones or shares a Response between requests (Workers I/O i
   } finally {
     Response.prototype.clone = realClone;
   }
+});
+
+// --- observability ---------------------------------------------------------
+
+test('metrics: panel_request counts real panel calls, not cache hits or coalesced requests', async () => {
+  const c = { n: 0 };
+  globalThis.fetch = panelOk(c);
+  await Promise.all(Array.from({ length: 4 }, () => worker.fetch(new Request('http://x/api?stop=1515'))));
+  await worker.fetch(new Request('http://x/api?stop=1515')); // served from memory
+  assert.equal(c.n, 1);
+  assert.equal(ev('panel_request').length, 1);
+  assert.equal(ev('arrivals_request').length, 5);
+  const p = ev('panel_request')[0];
+  assert.deepEqual([p.ok, p.status, p.stop_id, p.arrivals], [true, 200, '1515', 1]);
+  assert.equal(typeof p.panel_duration_ms, 'number');
+  const caches = ev('arrivals_request').map((e) => e.cache_status).sort();
+  assert.deepEqual(caches, ['degraded', 'degraded', 'degraded', 'degraded', 'mem']); // no Turso configured
+  for (const e of ev('arrivals_request')) assert.equal(typeof e.duration_ms, 'number');
+});
+
+test('metrics: panel failures are classified as timeout, transport, http or parse', async () => {
+  const cases = [
+    [async () => { throw new DOMException('t', 'TimeoutError'); }, { error_type: 'timeout' }],
+    [async () => { throw new TypeError('fetch failed'); }, { error_type: 'transport' }],
+    [async () => ({ ok: false, status: 500 }), { error_type: 'http', status: 500 }],
+    [async () => ({ ok: true, status: 200, text: async () => '<html>oops</html>' }), { error_type: 'parse', status: 200 }],
+  ];
+  for (const [i, [impl, want]] of cases.entries()) {
+    logs.length = 0;
+    __resetArrivalsCache();
+    globalThis.fetch = impl;
+    const res = await worker.fetch(new Request(`http://x/api?stop=${4000 + i}`));
+    assert.equal(res.status, 502);
+    const [p] = ev('panel_request');
+    assert.equal(p.ok, false);
+    assert.equal(p.level, 'warn');
+    for (const [k, v] of Object.entries(want)) assert.equal(p[k], v, `${k} for case ${i}`);
+    assert.equal(ev('arrivals_request')[0].status, 502);
+  }
+});
+
+test('metrics: stop ids are logged only for real stops (bounded cardinality)', async () => {
+  globalThis.fetch = panelOk({ n: 0 });
+  await worker.fetch(new Request('http://x/api?stop=1515'));
+  await worker.fetch(new Request('http://x/api?stop=zzz-not-a-stop'));
+  assert.deepEqual(ev('arrivals_request').map((e) => e.stop_id), ['1515', 'other']);
+  assert.equal(lines.join('\n').includes('zzz-not-a-stop'), false);
+});
+
+test('metrics: Turso down is observable as arrivals_degraded and cache_status degraded', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
+  assert.equal(ev('arrivals_degraded').length, 1);
+  assert.equal(ev('arrivals_degraded')[0].level, 'warn');
+  assert.equal(ev('arrivals_request')[0].cache_status, 'degraded');
+});
+
+test('metrics: 503 busy and 429 are observable without leaking IPs or coordinates', async () => {
+  withTurso(async () => assert.fail('no upstream'), { slotBusy: true });
+  const busy = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
+  assert.equal(busy.status, 503);
+  const b = ev('arrivals_request')[0];
+  assert.deepEqual([b.status, b.cache_status, b.level], [503, 'none', 'warn']);
+
+  const env = { RATE_LIMITER: { limit: async () => ({ success: false }) } };
+  const h = { 'cf-connecting-ip': '203.0.113.9' };
+  await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51', { headers: h }), env);
+  await worker.fetch(new Request('http://x/api?stop=1515', { headers: h }), env);
+  assert.deepEqual(ev('rate_limited').map((e) => e.kind), ['route', 'api']);
+  const all = lines.join('\n');
+  for (const secret of ['203.0.113.9', '-6.30', 'Bearer', TURSO_ENV.TURSO_AUTH_TOKEN]) {
+    assert.equal(all.includes(secret), false, `log must not contain ${secret}`);
+  }
+});
+
+test('metrics: proxy_request reports kind, status and cache_status for geocode and routes', async () => {
+  withTurso(async (url) => ({
+    ok: true,
+    status: 200,
+    text: async () => (String(url).includes('nominatim') ? NOMINATIM_HIT : ROUTE_BODY),
+  }));
+  await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
+  await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
+  await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  const got = ev('proxy_request').map((e) => `${e.kind}:${e.status}:${e.cache_status}`);
+  assert.deepEqual(got, ['geocode:200:miss', 'geocode:200:hit', 'foot:200:miss']);
+  const raw = lines.join('\n');
+  assert.equal(raw.includes('catedral'), false, 'user queries must not be logged');
 });

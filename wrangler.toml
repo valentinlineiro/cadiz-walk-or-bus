@@ -4,6 +4,12 @@ compatibility_date = "2026-09-01"
 
 assets = { directory = "./public/" }
 
+# Structured events (arrivals_request, panel_request, proxy_request, rate_limited, arrivals_degraded)
+# are queryable in Workers Logs. Keep sampling at 1: the pilot is small and every error matters.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Per-client-IP ceiling for /api, /geocode and /route/*. Per-location and approximate by design.
 # A route search costs ~22 calls, so this allows roughly 10 searches/minute per IP.
 [[ratelimits]]
