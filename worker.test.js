@@ -464,6 +464,11 @@ test('rate limiter lets requests through when under the limit or when the bindin
   assert.equal((await worker.fetch(new Request('http://x/api?stop=2007'), broken)).status, 200);
 });
 
+const until = async (cond) => {
+  for (let i = 0; i < 500 && !cond(); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(cond(), 'condition not reached');
+};
+
 const gate = () => {
   let open;
   const p = new Promise((r) => (open = r));
@@ -479,15 +484,15 @@ test('GET /api: a late finisher does not delete a lock re-acquired by someone el
     await (me === 1 ? gA.p : gB.p);
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   });
-  const a = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV); // acquires lock, panel is slow
-  await new Promise((r) => setTimeout(r, 20));
   const lock = 'lock:arr:3001:';
+  const a = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV); // acquires lock, panel is slow
+  await until(() => cache.slots.has(lock));
   const aOwner = cache.slots.get(lock);
   assert.ok(aOwner > 0);
   cache.slots.set(lock, 1); // A's lock expires...
   __resetArrivalsCache(); // ...and a request on another isolate re-acquires it
   const b = worker.fetch(new Request('http://x/api?stop=3001'), TURSO_ENV);
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => cache.slots.get(lock) !== 1);
   const bOwner = cache.slots.get(lock);
   assert.ok(bOwner > aOwner, 'B holds a fresh acquisition');
   gA.open(); // A finishes first and runs its finally
@@ -500,13 +505,13 @@ test('GET /api: a late finisher does not delete a lock re-acquired by someone el
 
 test('GET /api: waiters outlast a slow panel answer instead of returning 503 busy', async () => {
   let n = 0;
-  withTurso(async () => {
+  const cache = withTurso(async () => {
     n++;
     await new Promise((r) => setTimeout(r, 2200)); // older 1.5s window would have given up
     return { ok: true, status: 200, text: async () => PANEL_HTML };
   });
   const a = worker.fetch(new Request('http://x/api?stop=3002'), TURSO_ENV);
-  await new Promise((r) => setTimeout(r, 20));
+  await until(() => cache.slots.has('lock:arr:3002:'));
   __resetArrivalsCache(); // second request comes from another isolate
   const b = await worker.fetch(new Request('http://x/api?stop=3002'), TURSO_ENV);
   assert.equal(b.status, 200);
