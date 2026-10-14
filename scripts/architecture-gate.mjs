@@ -85,7 +85,7 @@ export function findCompositionRoots() {
     .map(relativePath);
 }
 
-export function findMissingServiceWorkerShellImports() {
+export function findMissingServiceWorkerShellImports(entrypoint = 'web/ui.js') {
   const swSource = readFileSync(join(root, 'public/sw.js'), 'utf8');
   const shellUrlsMatch = swSource.match(/const\s+SHELL_URLS\s*=\s*\[([\s\S]*?)\];/);
   const shellUrls = shellUrlsMatch
@@ -93,29 +93,37 @@ export function findMissingServiceWorkerShellImports() {
     : [];
 
   const visited = new Set();
+  const problems = [];
   function crawl(relPath) {
     const fullPath = join(root, 'public', relPath);
-    if (!existsSync(fullPath)) return;
+    if (!existsSync(fullPath)) {
+      problems.push(`service worker imported module does not exist: ${relPath}`);
+      return;
+    }
     const urlPath = '/' + relPath.replace(/\\/g, '/');
     if (visited.has(urlPath)) return;
     visited.add(urlPath);
     for (const specifier of importsOf(fullPath)) {
       if (specifier.startsWith('.')) {
-        const target = normalize(join(dirname(relPath), specifier)).replaceAll('\\', '/');
-        crawl(target);
+        const resolved = relativeTarget(fullPath, specifier);
+        if (!resolved) {
+          problems.push(`unresolved local import: ${specifier} in ${relPath}`);
+          continue;
+        }
+        const targetRel = relative(join(root, 'public'), resolved).replaceAll('\\', '/');
+        crawl(targetRel);
       }
     }
   }
 
-  crawl('web/ui.js');
+  crawl(entrypoint);
 
-  const missing = [];
   for (const url of visited) {
     if (!shellUrls.includes(url)) {
-      missing.push(`service worker SHELL_URLS is missing imported module: ${url}`);
+      problems.push(`service worker SHELL_URLS is missing imported module: ${url}`);
     }
   }
-  return missing;
+  return problems;
 }
 
 export function findServiceWorkerShellProblems() {

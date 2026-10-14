@@ -840,3 +840,77 @@ test('ResilientTransitAdapter: falls back on realtime errors but treats empty ar
   assert.deepEqual(await bothFailingAdapter.getArrivals('A'), []);
 });
 
+test('ResilientTransitAdapter: slow realtime resolving after timeout falls back cleanly without leaking side effects', async () => {
+  let realtimeResolved = false;
+  const slowRealtime = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      realtimeResolved = true;
+      return [{ line: '1', destination: 'Late Bus', minutes: 1, source: 'realtime' }];
+    },
+  };
+  const scheduled = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => [
+      { line: '1', destination: 'Scheduled Bus', minutes: 10, source: 'scheduled' },
+    ],
+  };
+
+  const adapter = new ResilientTransitAdapter(slowRealtime, scheduled, 15); // 15ms timeout
+  const arrivals = await adapter.getArrivals('A');
+
+  // Must immediately receive scheduled arrivals due to timeout
+  assert.equal(arrivals.length, 1);
+  assert.equal(arrivals[0].source, 'scheduled');
+  assert.equal(arrivals[0].destination, 'Scheduled Bus');
+  assert.equal(realtimeResolved, false, 'realtime call should still be pending when fallback returned');
+
+  // Wait for the delayed realtime promise to settle in the background
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(realtimeResolved, true);
+
+  // Subsequent reads of the returned result are unchanged
+  assert.equal(arrivals[0].source, 'scheduled');
+  assert.equal(arrivals[0].destination, 'Scheduled Bus');
+});
+
+test('GtfsTransitAdapter: enforces calendar active windows, inactive weekdays, and exception dates', async () => {
+  // 1. Before startDate (2020-09-25) -> no service active -> []
+  const pastAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2020-09-25T07:30:00+02:00'),
+  });
+  assert.deepEqual(await pastAdapter.getArrivals('A'), []);
+
+  // 2. After endDate (2035-09-25) -> no service active -> []
+  const futureAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2035-09-25T07:30:00+02:00'),
+  });
+  assert.deepEqual(await futureAdapter.getArrivals('A'), []);
+
+  // 3. Normal active Friday (2026-09-25): WEEKDAY is active, next departure at 08:10 (40 min)
+  const activeFriday = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-25T07:30:00+02:00'),
+  });
+  assert.deepEqual(await activeFriday.getArrivals('A'), [{
+    line: '1',
+    destination: 'Centro',
+    minutes: 40,
+    source: 'scheduled',
+  }]);
+
+  // 4. Inactive weekday (Sunday 2026-09-27 at 07:30): WEEKDAY does not run on Sundays
+  const sundayAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-27T07:30:00+02:00'),
+  });
+  assert.deepEqual(await sundayAdapter.getArrivals('A'), []);
+
+  // 5. Exception removedDate (2026-09-18): WEEKDAY removed, so weekday-1 (at 08:10) is excluded
+  const removedExceptionAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T07:30:00+02:00'),
+  });
+  assert.deepEqual(await removedExceptionAdapter.getArrivals('A'), []);
+});
+
