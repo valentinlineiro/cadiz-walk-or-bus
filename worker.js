@@ -130,14 +130,15 @@ initUI();
 </html>`;
 
 
-// --- Observability: one structured JSON line per event (Workers Logs). Counts = number of events.
+// --- Observability: one structured object per event (Workers Logs). Counts = number of events.
 // Never log headers, IPs, bodies or raw user input; stop ids are logged only when they are real stops.
 // Schema notes: fields can be absent and mean "unknown", never 0/false/success. In particular
 // panel_request.status is missing when no HTTP response was received (timeout/transport/body_read).
 // Turso incidents: `turso_error` {op: read|publish|release} per failed operation (the request
 // still succeeds); a failed lock claim is reported as `arrivals_degraded` {op: lock} instead.
 const KNOWN_STOPS = new Set(stops.map((s) => String(s.stop)));
-const logEvent = (event, fields, level = 'log') => console[level](JSON.stringify({ event, ...fields }));
+// Objects (not JSON strings): Workers Logs indexes object keys as queryable fields.
+const logEvent = (event, fields, level = 'log') => console[level]({ event, ...fields });
 const knownStop = (id) => (KNOWN_STOPS.has(id) ? id : 'other');
 const routeKind = (pathname) => (pathname === '/api' ? 'api' : pathname === '/geocode' ? 'geocode' : 'route');
 
