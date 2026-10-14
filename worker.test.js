@@ -179,7 +179,7 @@ test('GET /lines returns the topology directory', async () => {
 // In-memory Turso stand-in: answers the HTTP pipeline API for the statements the proxy issues,
 // and passes everything else (real upstreams) to `upstream`.
 const TURSO_ENV = { TURSO_DATABASE_URL: 'https://db-test.turso.io', TURSO_AUTH_TOKEN: 'tok' };
-function withTurso(upstream, { slotBusy = false } = {}) {
+function withTurso(upstream, { slotBusy = false, writeDelayMs = 0 } = {}) {
   const cache = new Map();
   const slots = new Map();
   globalThis.fetch = async (url, init) => {
@@ -199,6 +199,7 @@ function withTurso(upstream, { slotBusy = false } = {}) {
     } else if (sql.startsWith('DELETE')) {
       result = { rows: [], affected_row_count: 0 };
     } else if (sql.includes('proxy_cache')) {
+      if (writeDelayMs) await new Promise((r) => setTimeout(r, writeDelayMs));
       cache.set(v[0], { body: v[1], expires_at: Number(v[2]) });
       result = { rows: [], affected_row_count: 1 };
     } else {
@@ -541,4 +542,25 @@ test('GET /api degraded mode (Turso down) coalesces and reports degraded', async
   assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
   assert.equal(res[0].headers.get('x-arrivals-cache'), 'degraded');
   assert.equal(panel, 1);
+});
+
+test('GET /api: panel near its timeout plus a slow cache publish still resolves 200 for owner and waiters', async () => {
+  let n = 0;
+  const cache = withTurso(
+    async () => {
+      n++;
+      await new Promise((r) => setTimeout(r, 3900)); // just under the 4s panel timeout
+      return { ok: true, status: 200, text: async () => PANEL_HTML };
+    },
+    { writeDelayMs: 500 }, // Turso publish is slow too
+  );
+  const owner = worker.fetch(new Request('http://x/api?stop=3005'), TURSO_ENV);
+  await until(() => cache.slots.has('lock:arr:3005:'));
+  __resetArrivalsCache(); // waiters come from other isolates
+  const waiters = await Promise.all(
+    [1, 2, 3].map(() => worker.fetch(new Request('http://x/api?stop=3005'), TURSO_ENV)),
+  );
+  assert.deepEqual(waiters.map((r) => r.status), [200, 200, 200]);
+  assert.equal((await owner).status, 200);
+  assert.equal(n, 1, 'only the owner reached the panel');
 });

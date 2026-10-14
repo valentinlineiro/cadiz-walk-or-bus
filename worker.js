@@ -293,7 +293,9 @@ function handleRoute(url, env) {
 const ARRIVALS_TTL_S = 15;
 const ARRIVALS_LOCK_MS = 6000; // > panel timeout (4s) + Turso round trips
 const ARRIVALS_POLL_MS = 400;
-const ARRIVALS_POLLS = 12; // ~4.8s: waiters outlast a panel answer that lands near its 4s timeout
+const ARRIVALS_POLLS = 12; // ~4.8s: waiters outlast a panel answer that lands near its 4s timeout.
+// Measured limit: with the panel at 3.9s the shared publish may take up to ~0.8s; at ~1.2s the
+// waiters get 503 busy + Retry-After (documented fallback, the owner still answers 200).
 const isolateArrivals = new Map();
 const inflightArrivals = new Map();
 export function __resetArrivalsCache() {
