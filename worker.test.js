@@ -7,18 +7,18 @@ const originalConsole = { log: console.log, warn: console.warn };
 // Structured log events emitted by the worker, as { level, ...fields }.
 let logs = [];
 const lines = [];
+const rawArgs = []; // exactly what the worker handed to console.log/warn
 
 test.beforeEach(() => {
   logs = [];
   lines.length = 0;
+  rawArgs.length = 0;
   for (const level of ['log', 'warn']) {
-    console[level] = (line) => {
-      lines.push(String(line));
-      try {
-        logs.push({ level, ...JSON.parse(line) });
-      } catch {
-        /* not a structured event */
-      }
+    console[level] = (entry) => {
+      rawArgs.push(entry);
+      lines.push(JSON.stringify(entry));
+      // Events must be logged as objects so Workers Logs can index their keys.
+      if (entry && typeof entry === 'object') logs.push({ level, ...entry });
     };
   }
 });
@@ -753,4 +753,15 @@ test('metrics: a panel body that fails to read is classified body_read and answe
   const [p] = ev('panel_request');
   assert.deepEqual([p.ok, p.error_type, p.status, p.level], [false, 'body_read', 200, 'warn']);
   assert.equal(ev('arrivals_request')[0].status, 502);
+});
+
+test('metrics: events are logged as objects, never as pre-serialized JSON strings', async () => {
+  globalThis.fetch = panelOk({ n: 0 });
+  await worker.fetch(new Request('http://x/api?stop=1515'));
+  assert.ok(rawArgs.length >= 2, 'events were logged');
+  for (const arg of rawArgs) {
+    assert.equal(typeof arg, 'object', 'console received an object, not a string');
+    assert.equal(typeof arg.event, 'string');
+  }
+  assert.equal(typeof ev('panel_request')[0].panel_duration_ms, 'number', 'durations stay numeric');
 });
