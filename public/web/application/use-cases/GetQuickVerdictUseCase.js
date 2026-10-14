@@ -1,3 +1,4 @@
+import { arrivalsResultOf } from '../ports/TransitDataPort.js';
 import { chooseQuickBus } from '../../domain/planner.js';
 import { findAlightStop, nearestStops, diversifyByLine } from '../../domain/topology.js';
 export class GetQuickVerdictUseCase {
@@ -18,10 +19,14 @@ export class GetQuickVerdictUseCase {
             ? (rawLines.lines ?? rawLines)
             : null;
         const pool = diversifyByLine(nearestStops(stops, input.origin.lat, input.origin.lon, 24), lines, 6);
-        const arrivalsByStop = new Map(await Promise.all(pool.map(async (stop) => [
+        const results = await Promise.all(pool.map(async (stop) => [
             stop.stop,
-            await this.ports.transit.getArrivals(stop.stop),
-        ])));
+            await arrivalsResultOf(this.ports.transit, stop.stop),
+        ]));
+        // No stop answered (live or scheduled): "walk" would be a guess, so give no verdict.
+        if (pool.length > 0 && results.every(([, result]) => result.status === 'unavailable'))
+            return null;
+        const arrivalsByStop = new Map(results.map(([id, result]) => [id, result.status === 'unavailable' ? [] : result.arrivals]));
         let best = null;
         for (const stop of pool) {
             const walkToStopRoute = await this.ports.routing.routeWalking(input.origin, stop);

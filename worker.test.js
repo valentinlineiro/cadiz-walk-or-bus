@@ -353,17 +353,23 @@ test('geocode fails closed when Turso is down on a cache miss', async () => {
   assert.equal(nominatim, 0);
 });
 
-test('concurrent geocode misses: only one reaches Nominatim per slot', async () => {
-  let nominatim = 0;
+test('concurrent geocode misses: calls to Nominatim are never closer than the global gap', async () => {
+  const stamps = [];
   withTurso(async () => {
-    nominatim++;
+    stamps.push(Date.now());
     return { ok: true, status: 200, text: async () => NOMINATIM_HIT };
   });
   const res = await Promise.all(
     ['uno', 'dos', 'tres'].map((q) => worker.fetch(new Request(`http://x/geocode?q=${q}`), TURSO_ENV)),
   );
-  assert.deepEqual(res.map((r) => r.status).sort(), [200, 503, 503]);
-  assert.equal(nominatim, 1);
+  const ok = res.filter((r) => r.status === 200).length;
+  const busy = res.filter((r) => r.status === 503).length;
+  assert.equal(ok + busy, 3, 'every request either got a slot or a controlled 503');
+  assert.ok(ok >= 1, 'at least one request is served');
+  assert.equal(stamps.length, ok, 'only requests that got a slot reach Nominatim');
+  for (let i = 1; i < stamps.length; i++) {
+    assert.ok(stamps[i] - stamps[i - 1] >= 1000, `calls must be >= ~1s apart, got ${stamps[i] - stamps[i - 1]}ms`);
+  }
 });
 
 test('valid JSON with the wrong shape is rejected and never cached', async () => {

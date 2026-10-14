@@ -1,3 +1,4 @@
+import { arrivalsResultOf } from '../ports/TransitDataPort.js';
 import { WALK_METERS_PER_MINUTE, DEFAULT_PLANNING_POLICY, } from '../../domain/constants.js';
 import { computeLastMile } from '../../domain/last-mile.js';
 import { filterDiverseAlternatives } from '../../domain/diversity.js';
@@ -30,8 +31,14 @@ export class FindBestJourneysUseCase {
         const pool = nearestStops(stops, origin.lat, origin.lon, 32);
         const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
         const busCandidates = [];
+        let stopsWithData = 0;
         await Promise.all(nearbyStops.map(async (stop) => {
-            const arrivals = await this.ports.transit.getArrivals(stop.stop).catch(() => []);
+            const result = await arrivalsResultOf(this.ports.transit, stop.stop);
+            // `[]` below is only ever "a source answered with nothing"; a source that did not answer
+            // is counted separately so the caller can refuse to recommend walking on missing data.
+            if (result.status !== 'unavailable')
+                stopsWithData += 1;
+            const arrivals = result.status === 'unavailable' ? [] : result.arrivals;
             const stopDist = haversineMeters(origin.lat, origin.lon, stop.lat, stop.lon);
             const walkToStopMinutes = Math.max(0, Math.round(stopDist / WALK_METERS_PER_MINUTE));
             const resolveAlight = (arr) => {
@@ -54,6 +61,11 @@ export class FindBestJourneysUseCase {
             });
             busCandidates.push(...cands);
         }));
+        const transitData = nearbyStops.length === 0 || stopsWithData === nearbyStops.length
+            ? 'available'
+            : stopsWithData === 0
+                ? 'unavailable'
+                : 'partial';
         // 2. CHEAP SELECTION GATE (Hard budget enforcement <= 3)
         const { primary: cheapPrimary, alternatives: cheapAlternatives } = selectCandidates([walkCandidate, ...busCandidates], policy);
         const selected = cheapPrimary ? [cheapPrimary, ...cheapAlternatives] : [walkCandidate];
@@ -155,6 +167,7 @@ export class FindBestJourneysUseCase {
                 hero: null,
                 alternatives: [],
                 walkMinutes: null,
+                transitData,
             };
         }
         // 4. EXACT RE-RANKING (Definitive Hero Selection)
@@ -208,6 +221,7 @@ export class FindBestJourneysUseCase {
             hero: finalHero,
             alternatives,
             walkMinutes: exactWalk ? exactWalk.totalMinutes : null,
+            transitData,
         };
     }
 }

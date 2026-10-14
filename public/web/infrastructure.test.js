@@ -746,6 +746,11 @@ test('cachedTransitPort: conforms to TransitDataPort and handles in-memory stops
   assert.equal(typeof cachedTransitPort.getStops, 'function');
   assert.equal(typeof cachedTransitPort.getLines, 'function');
   assert.equal(typeof cachedTransitPort.getArrivals, 'function');
+  assert.equal(
+    typeof cachedTransitPort.getArrivalsResult,
+    'function',
+    'the composed port must expose getArrivalsResult or failed sources look like empty answers',
+  );
 
   // Verify caching logic bridge:
   let stopsCalls = 0;

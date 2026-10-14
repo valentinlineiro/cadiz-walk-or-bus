@@ -1,5 +1,5 @@
 import type { TransitDataPort } from '../../application/ports/TransitDataPort.js';
-import type { Arrival, LinesTopology, Stop } from '../../domain/models.js';
+import type { Arrival, LinesTopology, Stop, ArrivalsResult } from '../../domain/models.js';
 
 export class MunicipalTransitAdapter implements TransitDataPort {
   private readonly fetchImpl: typeof fetch;
@@ -19,6 +19,14 @@ export class MunicipalTransitAdapter implements TransitDataPort {
     if (!r.ok) throw new Error(`lines ${r.status}`);
     const data = await r.json();
     return (data?.lines ?? null) as LinesTopology | null;
+  }
+
+  async getArrivalsResult(stopId: string | number): Promise<ArrivalsResult> {
+    try {
+      return { status: 'live', arrivals: await this.getArrivals(stopId) };
+    } catch {
+      return { status: 'unavailable', cause: 'source_error' };
+    }
   }
 
   async getArrivals(stopId: string | number): Promise<Arrival[]> {

@@ -533,6 +533,7 @@ test('FindBestJourneysUseCase: handles pedestrian routing failure gracefully wit
     hero: null,
     alternatives: [],
     walkMinutes: null,
+    transitData: 'available',
   });
 });
 

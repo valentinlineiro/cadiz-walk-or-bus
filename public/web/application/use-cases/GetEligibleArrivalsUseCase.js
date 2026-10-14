@@ -1,3 +1,4 @@
+import { arrivalsResultOf } from '../ports/TransitDataPort.js';
 import { findAlightStop } from '../../domain/topology.js';
 import { resolveEligibleArrivals } from '../../domain/planner.js';
 export class GetEligibleArrivalsUseCase {
@@ -15,7 +16,8 @@ export class GetEligibleArrivalsUseCase {
             : null;
         const stops = topologyStops.length > 0 ? topologyStops : input.stops;
         const entries = await Promise.all(input.stops.map(async (boardingStop) => {
-            const arrivals = await this.ports.transit.getArrivals(boardingStop.stop).catch(() => []);
+            const result = await arrivalsResultOf(this.ports.transit, boardingStop.stop);
+            const arrivals = result.status === 'unavailable' ? [] : result.arrivals;
             const eligible = resolveEligibleArrivals(arrivals, lines
                 ? (arrival) => findAlightStop({
                     line: arrival.line,

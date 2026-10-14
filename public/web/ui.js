@@ -179,6 +179,23 @@ export function errorCardHTML(query, customMessage) {
   return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
 }
 
+// Shown when no nearby stop returned live OR scheduled data. The walking time is information,
+// never a verdict: with no transit data we cannot say the bus is not better.
+export function noTransitDataCardHTML(walkMinutes) {
+  const walk = typeof walkMinutes === 'number' ? `<div class="decision-fact">Andando: ${Math.round(walkMinutes)}′</div>` : '';
+  return `
+    <div class="decision-card no-data">
+      <div class="decision-mode">SIN DATOS DE HORARIOS</div>
+      <div class="decision-line">Ahora mismo no tenemos llegadas ni horarios de las paradas cercanas, así que no podemos comparar con el bus.</div>
+      ${walk}
+    </div>
+  `;
+}
+
+export function partialTransitDataNoteHTML() {
+  return '<div class="decision-note">Faltan datos de algunas paradas cercanas: podría haber un bus mejor que ir andando.</div>';
+}
+
 export function buildAlternativeCardHTML(alt, primary) {
   const diff = formatAlternativeDiff(alt, primary);
   const altTotal = alt.totalMinutes ?? alt.exactJourney?.totalMinutes ?? alt.estimatedMinutes;
@@ -712,6 +729,22 @@ async function routeToDestination(dest) {
   lastWalkRoute = decision.hero.routes?.walkRoute ?? null;
   setState('ROUTED');
 
+  if (decision.transitData === 'unavailable') {
+    // No stop answered (live or scheduled): do not recommend walking, do not log a "choice".
+    currentPlanningSession = null;
+    lastNear = [];
+    arrivalsByStop = new Map();
+    const box = document.getElementById('decision');
+    if (box) {
+      box.innerHTML = noTransitDataCardHTML(decision.walkMinutes);
+      box.classList.remove('hidden');
+    }
+    applyCandidateToMap(decision.hero);
+    updateFavToggle();
+    setState('DONE', '');
+    return;
+  }
+
   const winningHero = decision.hero;
   const candidatesForUI = [decision.hero, ...decision.alternatives.map((a) => a.journey)];
 
@@ -771,6 +804,9 @@ async function routeToDestination(dest) {
   };
 
   renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
+  if (decision.transitData === 'partial' && winningHero.mode === 'walk') {
+    document.getElementById('decision')?.insertAdjacentHTML('beforeend', partialTransitDataNoteHTML());
+  }
   applyCandidateToMap(winningHero);
 
   if (winningHero && destCoords && destLabel) {

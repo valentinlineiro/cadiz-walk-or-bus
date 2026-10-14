@@ -46,6 +46,9 @@ export const cachedTransitPort = {
     return cachedLines;
   },
   getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
+  // Must be exposed here: without it the use cases fall back to getArrivals and a failed source
+  // looks like an empty answer ("no buses").
+  getArrivalsResult: (stopId) => transitAdapter.getArrivalsResult(stopId),
 };
 
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
