@@ -3,3 +3,13 @@ main = "worker.js"
 compatibility_date = "2026-09-01"
 
 assets = { directory = "./public/" }
+
+# Per-client-IP ceiling for /api, /geocode and /route/*. Per-location and approximate by design.
+# A route search costs ~22 calls, so this allows roughly 10 searches/minute per IP.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "7301"
+
+  [ratelimits.simple]
+  limit = 240
+  period = 60
