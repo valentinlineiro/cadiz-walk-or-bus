@@ -13,12 +13,13 @@ const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 // FRONTIER C: MUNICIPAL HTML PARSER ADVERSARIAL STRESS TEST
 // ============================================================================
 
-test('Frontier C: parseArrivals survives null, undefined, empty, and non-string inputs', () => {
-  assert.deepEqual(parseArrivals(''), []);
-  assert.deepEqual(parseArrivals(null), []);
-  assert.deepEqual(parseArrivals(undefined), []);
-  assert.deepEqual(parseArrivals(123), []);
-  assert.deepEqual(parseArrivals('<html><body>No tables here</body></html>'), []);
+test('Frontier C: parseArrivals returns null for malformed, non-table, or non-string inputs', () => {
+  assert.equal(parseArrivals(''), null);
+  assert.equal(parseArrivals(null), null);
+  assert.equal(parseArrivals(undefined), null);
+  assert.equal(parseArrivals(123), null);
+  assert.equal(parseArrivals('<html><body>No tables here</body></html>'), null);
+  assert.equal(parseArrivals('<table><tr><td>Only one column error</td></tr></table>'), null);
 });
 
 test('Frontier C: parseArrivals strictly supports Inminente variants as 0 minutes', () => {

@@ -21,7 +21,10 @@ export class MunicipalTransitAdapter {
         if (!r.ok)
             throw new Error(`arrivals ${r.status}`);
         const data = await r.json();
-        return (data?.arrivals ?? []).map((arrival) => ({
+        if (!data || !Array.isArray(data.arrivals)) {
+            throw new Error('malformed arrivals response');
+        }
+        return data.arrivals.map((arrival) => ({
             ...arrival,
             source: 'realtime',
         }));

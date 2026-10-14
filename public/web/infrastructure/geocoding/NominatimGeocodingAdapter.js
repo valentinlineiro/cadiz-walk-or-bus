@@ -38,8 +38,14 @@ function normalizeSearchText(str) {
 }
 export class NominatimGeocodingAdapter {
     fetchImpl;
-    constructor(fetchImpl = globalThis.fetch) {
+    baseUrl;
+    minIntervalMs;
+    cache = new Map();
+    lastRequestTime = 0;
+    constructor(fetchImpl = globalThis.fetch, options = {}) {
         this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+        this.baseUrl = options.baseUrl ?? 'https://nominatim.openstreetmap.org/search';
+        this.minIntervalMs = options.minIntervalMs ?? 0;
     }
     async search(query, limit = 5) {
         if (!query || query.trim().length < 2)
@@ -50,7 +56,20 @@ export class NominatimGeocodingAdapter {
         if (!hasStreetPrefix && EXTERNAL_REGIONS.has(normQuery)) {
             return [];
         }
-        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
+        const cacheKey = `${normQuery}::${limit}`;
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            return cached;
+        }
+        if (this.minIntervalMs > 0) {
+            const elapsed = Date.now() - this.lastRequestTime;
+            if (elapsed < this.minIntervalMs) {
+                await new Promise((resolve) => setTimeout(resolve, this.minIntervalMs - elapsed));
+            }
+        }
+        this.lastRequestTime = Date.now();
+        const separator = this.baseUrl.includes('?') ? '&' : '?';
+        const url = `${this.baseUrl}${separator}format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
         let r;
         try {
             r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
@@ -69,7 +88,7 @@ export class NominatimGeocodingAdapter {
         }
         if (!Array.isArray(hits))
             return [];
-        return hits
+        const results = hits
             .filter((hit) => {
             const lat = Number(hit.lat);
             const lon = Number(hit.lon);
@@ -90,6 +109,8 @@ export class NominatimGeocodingAdapter {
             };
         })
             .slice(0, limit);
+        this.cache.set(cacheKey, results);
+        return results;
     }
     async geocode(query) {
         if (!query || !query.trim())

@@ -51,6 +51,33 @@ test('GET /api maps upstream throw to 502', async () => {
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
+test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async () => {
+  // Upstream returns an error page without tables
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<html><body>Internal Server Error</body></html>' });
+  const noTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(noTableRes.status, 502);
+  assert.deepEqual(await noTableRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns an ASP.NET error page with a table that has no transit columns
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Server Error in / Application</td></tr></table>' });
+  const errorTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(errorTableRes.status, 502);
+  assert.deepEqual(await errorTableRes.json(), { error: 'malformed upstream response' });
+});
+
+test('GET /api returns 200 and authoritative empty arrivals on valid empty panel table', async () => {
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tbody></tbody></table>' });
+  const emptyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(emptyRes.status, 200);
+  assert.deepEqual(await emptyRes.json(), { arrivals: [] });
+
+  const validTableWithHeaders = '<table class="tablePanel"><thead><tr><th>Línea</th><th>Destino</th><th>Llegada</th></tr></thead><tbody></tbody></table>';
+  globalThis.fetch = async () => ({ ok: true, text: async () => validTableWithHeaders });
+  const headersRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(headersRes.status, 200);
+  assert.deepEqual(await headersRes.json(), { arrivals: [] });
+});
+
 test('GET /api without stop returns 400', async () => {
   const res = await worker.fetch(new Request('http://x/api'));
   assert.equal(res.status, 400);

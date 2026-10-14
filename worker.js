@@ -14,14 +14,19 @@ export function decide(arrivals, walkMinutes) {
 }
 
 export function parseArrivals(html) {
-  if (typeof html !== 'string') return [];
+  if (typeof html !== 'string' || !html.trim()) return null;
+  if (!/<table[^>]*>/i.test(html)) return null;
+
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
   const arrivals = [];
+  let foundCandidateRow = false;
+
   for (const row of rows) {
     const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
       m[1].replace(/&nbsp;|<[^>]+>/g, '').trim(),
     );
     if (cells.length < 3) continue;
+    foundCandidateRow = true;
     const [line, destination, arrival] = cells;
     if (!line || !destination) continue;
 
@@ -37,6 +42,14 @@ export function parseArrivals(html) {
 
     arrivals.push({ line, destination, minutes });
   }
+
+  // If the table contains <td> data rows but none conformed to the 3-column transit structure,
+  // the page structure is unrecognizable or an error table.
+  const allTdRows = rows.filter((r) => /<td[^>]*>/i.test(r));
+  if (allTdRows.length > 0 && !foundCandidateRow) {
+    return null;
+  }
+
   return arrivals;
 }
 
@@ -130,7 +143,11 @@ async function handleFetch(request) {
       return Response.json({ error: 'upstream unreachable' }, { status: 502 });
     }
     if (!upstream.ok) return Response.json({ error: `upstream ${upstream.status}` }, { status: 502 });
-    return Response.json({ arrivals: parseArrivals(await upstream.text()) });
+    const arrivals = parseArrivals(await upstream.text());
+    if (arrivals === null) {
+      return Response.json({ error: 'malformed upstream response' }, { status: 502 });
+    }
+    return Response.json({ arrivals });
   }
   if (url.pathname === '/' || url.pathname === '/map' || url.pathname === '/map.html') {
     return new Response(MAP_HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } });

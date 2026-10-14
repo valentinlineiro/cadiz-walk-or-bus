@@ -9,6 +9,7 @@ import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTrans
 import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedStops as _setStops, setCachedLines as _setLines } from './application/composition.js';
 
 import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
+import realGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
 const appendEntry = (entry, storage, max = 200) => {
   const adapter = new LocalStorageJourneyLogAdapter(storage);
@@ -222,6 +223,22 @@ test('MunicipalTransitAdapter: getArrivals marks realtime data and throws on err
   await assert.rejects(async () => failAdapter.getArrivals('1106'), /arrivals 502/);
 });
 
+test('MunicipalTransitAdapter: getArrivals throws when arrivals payload is missing or not an array', async () => {
+  const fakeFetchMalformed = async () => ({
+    ok: true,
+    json: async () => ({ error: 'malformed upstream response' }),
+  });
+  const adapter = new MunicipalTransitAdapter(fakeFetchMalformed);
+  await assert.rejects(async () => adapter.getArrivals('1106'), /malformed arrivals response/);
+
+  const fakeFetchNull = async () => ({
+    ok: true,
+    json: async () => ({ arrivals: null }),
+  });
+  const adapterNull = new MunicipalTransitAdapter(fakeFetchNull);
+  await assert.rejects(async () => adapterNull.getArrivals('1106'), /malformed arrivals response/);
+});
+
 test('NominatimGeocodingAdapter: search formats query with viewbox and normalizes results', async () => {
   let calledUrl = '';
   const fakeFetch = async (url) => {
@@ -316,6 +333,56 @@ test('NominatimGeocodingAdapter: short-circuits empty and single-character queri
   assert.equal(await adapter.geocode(''), null);
   assert.equal(await adapter.geocode('   '), null);
   assert.equal(fetchCalled, false);
+});
+
+test('NominatimGeocodingAdapter: caches search results in-memory and does not repeat fetch for same query', async () => {
+  let callCount = 0;
+  const fakeFetch = async () => {
+    callCount += 1;
+    return {
+      ok: true,
+      json: async () => [
+        {
+          name: 'Catedral',
+          display_name: 'Catedral, Cádiz, España',
+          lat: '36.5289',
+          lon: '-6.2952',
+        },
+      ],
+    };
+  };
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch);
+  const res1 = await adapter.search('Catedral', 3);
+  assert.equal(callCount, 1);
+  assert.equal(res1.length, 1);
+
+  // Calling search again with identical query hits cache
+  const res2 = await adapter.search('Catedral', 3);
+  assert.equal(callCount, 1, 'repeated query must be served from cache without extra fetch');
+  assert.deepEqual(res2, res1);
+
+  // Normalization matches case-insensitively with accents
+  const res3 = await adapter.search('catedral', 3);
+  assert.equal(callCount, 1, 'normalized query must hit cache');
+  assert.deepEqual(res3, res1);
+});
+
+test('NominatimGeocodingAdapter: respects custom baseUrl option for proxying or self-hosted endpoint', async () => {
+  let calledUrl = '';
+  const fakeFetch = async (url) => {
+    calledUrl = url;
+    return {
+      ok: true,
+      json: async () => [],
+    };
+  };
+
+  const customBaseUrl = 'https://nominatim-proxy.internal.net/search';
+  const adapter = new NominatimGeocodingAdapter(fakeFetch, { baseUrl: customBaseUrl });
+  await adapter.search('Plaza Mina');
+
+  assert.ok(calledUrl.startsWith(customBaseUrl), 'must query the custom baseUrl proxy');
 });
 
 class MockStorage {
@@ -913,4 +980,76 @@ test('GtfsTransitAdapter: enforces calendar active windows, inactive weekdays, a
   });
   assert.deepEqual(await removedExceptionAdapter.getArrivals('A'), []);
 });
+
+test('GTFS production snapshot: validates feed validity window, calendar services, and active dates', () => {
+  assert.ok(realGtfsSnapshot.feedVersion, 'snapshot must have feedVersion');
+  assert.match(realGtfsSnapshot.feedVersion, /^nap-\d{4}-\d{2}-\d{2}$/);
+  assert.ok(realGtfsSnapshot.services.length > 0, 'snapshot must contain services');
+  assert.ok(Object.keys(realGtfsSnapshot.stops).length > 0, 'snapshot must contain stops');
+  assert.ok(Object.keys(realGtfsSnapshot.lines).length > 0, 'snapshot must contain lines');
+
+  // Verify service calendar bounds
+  const endDates = realGtfsSnapshot.services.map((s) => s.endDate);
+  const maxEndDate = endDates.reduce((max, d) => (d > max ? d : max), '0');
+  assert.ok(maxEndDate >= '20261231', `feed must be valid through 2026-12-31 (found ${maxEndDate})`);
+
+  // Verify that services exist for weekdays (L-V) and weekends (S-D)
+  const hasWeekdayService = realGtfsSnapshot.services.some((s) => s.weekdays.slice(0, 5).some(Boolean));
+  const hasWeekendService = realGtfsSnapshot.services.some((s) => s.weekdays[5] || s.weekdays[6]);
+  assert.ok(hasWeekdayService, 'feed must contain active weekday service definitions');
+  assert.ok(hasWeekendService, 'feed must contain active weekend service definitions');
+
+  // Verify Cádiz local exception dates exist (Carnaval, festivos)
+  const allAddedDates = new Set(realGtfsSnapshot.services.flatMap((s) => s.addedDates));
+  assert.ok(allAddedDates.has('20260211'), 'feed must include Cádiz Carnaval local holiday (2026-02-11)');
+  assert.ok(allAddedDates.has('20261012'), 'feed must include Fiesta Nacional (2026-10-12)');
+  assert.ok(allAddedDates.has('20261225'), 'feed must include Navidad (2026-12-25)');
+});
+
+test('ResilientTransitAdapter + MunicipalTransitAdapter integration: malformed upstream response triggers scheduled fallback', async () => {
+  const fakeFetchMalformed = async () => ({
+    ok: false,
+    status: 502,
+    json: async () => ({ error: 'malformed upstream response' }),
+  });
+  const municipal = new MunicipalTransitAdapter(fakeFetchMalformed);
+  const scheduled = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => [
+      { line: '1', destination: 'Plaza España', minutes: 12, source: 'scheduled' },
+    ],
+  };
+
+  const resilient = new ResilientTransitAdapter(municipal, scheduled);
+  const arrivals = await resilient.getArrivals('1106');
+
+  assert.equal(arrivals.length, 1);
+  assert.equal(arrivals[0].source, 'scheduled');
+  assert.equal(arrivals[0].minutes, 12);
+});
+
+test('ResilientTransitAdapter + MunicipalTransitAdapter integration: authoritative 200 [] does NOT trigger scheduled fallback', async () => {
+  let scheduledCalled = false;
+  const fakeFetchEmpty = async () => ({
+    ok: true,
+    json: async () => ({ arrivals: [] }),
+  });
+  const municipal = new MunicipalTransitAdapter(fakeFetchEmpty);
+  const scheduled = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => {
+      scheduledCalled = true;
+      return [{ line: '1', destination: 'Plaza España', minutes: 12, source: 'scheduled' }];
+    },
+  };
+
+  const resilient = new ResilientTransitAdapter(municipal, scheduled);
+  const arrivals = await resilient.getArrivals('1106');
+
+  assert.deepEqual(arrivals, []);
+  assert.equal(scheduledCalled, false, 'Authoritative empty 200 [] must not invoke scheduled fallback');
+});
+
 

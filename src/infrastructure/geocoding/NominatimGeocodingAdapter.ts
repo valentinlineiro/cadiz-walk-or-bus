@@ -50,11 +50,25 @@ function normalizeSearchText(str: string): string {
     .replace(/\s+/g, ' ');
 }
 
+export interface NominatimGeocodingAdapterOptions {
+  baseUrl?: string;
+  minIntervalMs?: number;
+}
+
 export class NominatimGeocodingAdapter implements GeocodingPort {
   private readonly fetchImpl: typeof fetch;
+  private readonly baseUrl: string;
+  private readonly minIntervalMs: number;
+  private readonly cache = new Map<string, GeocodingResult[]>();
+  private lastRequestTime = 0;
 
-  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+  constructor(
+    fetchImpl: typeof fetch = globalThis.fetch,
+    options: NominatimGeocodingAdapterOptions = {},
+  ) {
     this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+    this.baseUrl = options.baseUrl ?? 'https://nominatim.openstreetmap.org/search';
+    this.minIntervalMs = options.minIntervalMs ?? 0;
   }
 
   async search(query: string, limit: number = 5): Promise<GeocodingResult[]> {
@@ -67,7 +81,22 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
       return [];
     }
 
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
+    const cacheKey = `${normQuery}::${limit}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    if (this.minIntervalMs > 0) {
+      const elapsed = Date.now() - this.lastRequestTime;
+      if (elapsed < this.minIntervalMs) {
+        await new Promise((resolve) => setTimeout(resolve, this.minIntervalMs - elapsed));
+      }
+    }
+    this.lastRequestTime = Date.now();
+
+    const separator = this.baseUrl.includes('?') ? '&' : '?';
+    const url = `${this.baseUrl}${separator}format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
     let r: Response;
     try {
       r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
@@ -84,7 +113,7 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
     }
 
     if (!Array.isArray(hits)) return [];
-    return hits
+    const results = hits
       .filter((hit) => {
         const lat = Number(hit.lat);
         const lon = Number(hit.lon);
@@ -104,6 +133,9 @@ export class NominatimGeocodingAdapter implements GeocodingPort {
         };
       })
       .slice(0, limit);
+
+    this.cache.set(cacheKey, results);
+    return results;
   }
 
   async geocode(query: string): Promise<(Coordinates & { name?: string }) | null> {

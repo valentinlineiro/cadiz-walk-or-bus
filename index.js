@@ -15,14 +15,19 @@ export function decide(arrivals, walkMinutes) {
 }
 
 export function parseArrivals(html) {
-  if (typeof html !== 'string') return [];
+  if (typeof html !== 'string' || !html.trim()) return null;
+  if (!/<table[^>]*>/i.test(html)) return null;
+
   const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
   const arrivals = [];
+  let foundCandidateRow = false;
+
   for (const row of rows) {
     const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
       m[1].replace(/&nbsp;|<[^>]+>/g, '').trim(),
     );
     if (cells.length < 3) continue;
+    foundCandidateRow = true;
     const [line, destination, arrival] = cells;
     if (!line || !destination) continue;
 
@@ -40,6 +45,14 @@ export function parseArrivals(html) {
 
     arrivals.push({ line, destination, minutes });
   }
+
+  // If the table contains <td> data rows but none conformed to the 3-column transit structure,
+  // the page structure is unrecognizable or an error table.
+  const allTdRows = rows.filter((r) => /<td[^>]*>/i.test(r));
+  if (allTdRows.length > 0 && !foundCandidateRow) {
+    return null;
+  }
+
   return arrivals;
 }
 
@@ -52,6 +65,10 @@ async function main(stop, route, walkMinutes) {
   }
   const html = await res.text();
   const arrivals = parseArrivals(html);
+  if (arrivals === null) {
+    console.error(`Failed to parse arrival panel: malformed upstream response for stop ${stop} / route ${route}.`);
+    process.exit(1);
+  }
   // Waiting for the bus costs (time until it arrives) -- boarding is
   // effectively instant compared to the bus's own travel time, which
   // this MVP does not model yet (deferred: bus travel time to destination).

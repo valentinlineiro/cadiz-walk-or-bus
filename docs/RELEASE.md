@@ -63,11 +63,18 @@ not deliberately disrupt the public production service.
 ### Data dependencies
 
 - [ ] The municipal realtime endpoint is reachable.
-- [ ] The GTFS snapshot is present and valid.
-- [ ] The GTFS snapshot freshness is known.
-- [ ] Required stop and route data is available.
-- [ ] The geocoding provider is reachable.
-- [ ] The routing provider is reachable.
+- [ ] Realtime proxy distinguishes between valid empty boards (HTTP 200 `[]`) and malformed upstream HTML (HTTP 502).
+- [ ] The GTFS snapshot (`public/fixtures/gtfs-cadiz.snapshot.json`) is present and valid:
+  - `feedVersion` is current (e.g. `nap-YYYY-MM-DD`).
+  - Active calendar service bounds verified: service windows cover current dates through `2026-12-31`.
+  - Service coverage verified across weekdays (L-V), weekends (S-D), and local Cádiz exception dates (Carnaval, Semana Santa, festivos locales y nacionales).
+  - Snapshot `feedVersion` matches `GTFS_FEED_VERSION` in `public/sw.js` ensuring cache invalidation.
+- [ ] Required stop and route data is available (`stops.json`, `lines.json`).
+- [ ] The geocoding provider (Nominatim) is reachable:
+  - Queries are dispatched on explicit form submission only (no keystroke bombardment).
+  - In-memory search cache deduplicates repeated and normalized queries.
+  - Endpoint/proxy URL is configurable via `baseUrl` option to allow operational redirection without client codebase updates.
+- [ ] The routing provider (OSRM) is reachable with timeout and fallback protection.
 - [ ] External dependency failure behavior is documented and controlled.
 
 ### PWA

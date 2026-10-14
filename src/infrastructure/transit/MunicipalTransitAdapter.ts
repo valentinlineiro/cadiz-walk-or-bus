@@ -25,7 +25,10 @@ export class MunicipalTransitAdapter implements TransitDataPort {
     const r = await this.fetchImpl(`/api?stop=${encodeURIComponent(String(stopId))}`);
     if (!r.ok) throw new Error(`arrivals ${r.status}`);
     const data = await r.json();
-    return ((data?.arrivals ?? []) as Omit<Arrival, 'source'>[]).map((arrival) => ({
+    if (!data || !Array.isArray(data.arrivals)) {
+      throw new Error('malformed arrivals response');
+    }
+    return (data.arrivals as Omit<Arrival, 'source'>[]).map((arrival) => ({
       ...arrival,
       source: 'realtime' as const,
     }));
