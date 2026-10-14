@@ -693,3 +693,64 @@ test('metrics: proxy_request reports kind, status and cache_status for geocode a
   const raw = lines.join('\n');
   assert.equal(raw.includes('catedral'), false, 'user queries must not be logged');
 });
+
+// Fails Turso statements matching `failOn(sql)` while leaving the rest of the fake working.
+function withTursoFailing(upstream, failOn) {
+  const cache = withTurso(upstream);
+  const inner = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL) && failOn(JSON.parse(init.body).requests[0].stmt.sql)) {
+      throw new TypeError('turso statement failed');
+    }
+    return inner(url, init);
+  };
+  return cache;
+}
+
+test('metrics: a failed Turso read is a turso_error (not an empty cache) and the request still succeeds', async () => {
+  withTursoFailing(panelOk({ n: 0 }), (sql) => sql.startsWith('SELECT'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
+  assert.equal(res.status, 200);
+  assert.deepEqual(ev('turso_error').map((e) => e.op), ['read']);
+  assert.equal(ev('arrivals_degraded').length, 0);
+});
+
+test('metrics: a failed publish to proxy_cache is a turso_error even though the answer is a miss', async () => {
+  withTursoFailing(panelOk({ n: 0 }), (sql) => sql.includes('INSERT OR REPLACE INTO proxy_cache'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-arrivals-cache'), 'miss');
+  assert.deepEqual(ev('turso_error').map((e) => e.op), ['publish']);
+});
+
+test('metrics: a failed lock release is a turso_error', async () => {
+  withTursoFailing(panelOk({ n: 0 }), (sql) => sql.startsWith('DELETE FROM proxy_slot'));
+  const res = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
+  assert.equal(res.status, 200);
+  assert.deepEqual(ev('turso_error').map((e) => e.op), ['release']);
+});
+
+test('metrics: Turso fully down produces one read error and one degraded event, not a flood', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    return { ok: true, status: 200, text: async () => PANEL_HTML };
+  };
+  await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
+  assert.deepEqual(ev('turso_error').map((e) => e.op), ['read']);
+  assert.deepEqual(ev('arrivals_degraded').map((e) => e.op), ['lock']);
+});
+
+test('metrics: a panel body that fails to read is classified body_read and answered 502, not thrown', async () => {
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => {
+      throw new TypeError('network connection lost');
+    },
+  });
+  const res = await worker.fetch(new Request('http://x/api?stop=1515'));
+  assert.equal(res.status, 502);
+  const [p] = ev('panel_request');
+  assert.deepEqual([p.ok, p.error_type, p.status, p.level], [false, 'body_read', 200, 'warn']);
+  assert.equal(ev('arrivals_request')[0].status, 502);
+});
