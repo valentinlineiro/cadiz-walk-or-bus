@@ -15,15 +15,25 @@ interface OsrmResponse {
   routes?: OsrmRoute[];
 }
 
+export interface OsrmRoutingAdapterOptions {
+  /** Base URLs ending right before `{lon},{lat};{lon},{lat}`; point at a proxy to avoid hitting public demo servers. */
+  footBaseUrl?: string;
+  driveBaseUrl?: string;
+}
+
 export class OsrmRoutingAdapter implements RoutingPort {
   private readonly fetchImpl: typeof fetch;
+  private readonly footBaseUrl: string;
+  private readonly driveBaseUrl: string;
 
-  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+  constructor(fetchImpl: typeof fetch = globalThis.fetch, options: OsrmRoutingAdapterOptions = {}) {
     this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+    this.footBaseUrl = options.footBaseUrl ?? 'https://routing.openstreetmap.de/routed-foot/route/v1/foot';
+    this.driveBaseUrl = options.driveBaseUrl ?? 'https://router.project-osrm.org/route/v1/driving';
   }
 
   async routeWalking(from: Coordinates, to: Coordinates): Promise<Route | null> {
-    const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+    const url = `${this.footBaseUrl}/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
     let r: Response;
     try {
       r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
@@ -62,7 +72,7 @@ export class OsrmRoutingAdapter implements RoutingPort {
 
   private async busRouteHop(from: Coordinates, to: Coordinates): Promise<[number, number][]> {
     const straightLine = (): [number, number][] => [[from.lat, from.lon], [to.lat, to.lon]];
-    const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+    const url = `${this.driveBaseUrl}/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
     let r: Response;
     try {
       r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
