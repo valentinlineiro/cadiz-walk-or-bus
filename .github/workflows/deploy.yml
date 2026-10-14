@@ -3,6 +3,8 @@ name: Deploy
 on:
   push:
     branches: [main]
+  # Manual re-run (Actions tab / `gh workflow run Deploy`) when a push event is dropped.
+  workflow_dispatch:
 
 jobs:
   test:
