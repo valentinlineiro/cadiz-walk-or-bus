@@ -14,32 +14,58 @@ export function decide(arrivals, walkMinutes) {
   return { decision, soonest };
 }
 
+const LIVE_ARRIVAL_PATTERN = /^(\d+\s*min|inminente)$/i;
+const OUT_OF_SERVICE_PATTERN = /^(sin servicio|en cochera|fuera de servicio)$/i;
+
 export function parseArrivals(html) {
-  if (typeof html !== 'string') return [];
-  const rows = html.match(/<tr>[\s\S]*?<\/tr>/g) || [];
+  if (typeof html !== 'string' || !html.trim()) return null;
+  if (!/<table[^>]*>/i.test(html)) return null;
+
+  const rows = html.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
   const arrivals = [];
+  let hasAuthoritativeStatus = false;
+  let hasLiveArrival = false;
+
   for (const row of rows) {
-    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) =>
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map((m) =>
       m[1].replace(/&nbsp;|<[^>]+>/g, '').trim(),
     );
     if (cells.length < 3) continue;
     const [line, destination, arrival] = cells;
     if (!line || !destination) continue;
 
-    let minutes;
-    const relMatch = arrival.match(/^(\d+)\s*min$/i);
-    if (relMatch) {
-      minutes = Number(relMatch[1]);
-    } else if (/^inminente$/i.test(arrival.trim())) {
-      // In the municipal panel, "Inminente" signifies the vehicle is arriving at the platform (< 1 min wait)
-      minutes = 0;
-    } else {
-      // Absolute clock times (e.g. "15:30"), out-of-service ("Sin servicio"), bounds ("> 45 min"), or empty cells are ignored
+    const trimmedArrival = arrival.trim();
+
+    // Check if this row is an explicit out-of-service status (confirmed by operator)
+    if (OUT_OF_SERVICE_PATTERN.test(trimmedArrival)) {
+      hasAuthoritativeStatus = true;
       continue;
     }
 
-    arrivals.push({ line, destination, minutes });
+    // Check if this row has live relative minutes or imminent arrival
+    if (LIVE_ARRIVAL_PATTERN.test(trimmedArrival)) {
+      hasLiveArrival = true;
+      let minutes = 0;
+      const relMatch = trimmedArrival.match(/^(\d+)\s*min$/i);
+      if (relMatch) {
+        minutes = Number(relMatch[1]);
+      }
+      arrivals.push({ line, destination, minutes });
+      continue;
+    }
+
+    // Clock times (e.g. "15:30") or bounds (e.g. "> 45 min") indicate static timetables
+    // or entries beyond live telemetry horizon. They are skipped here.
   }
+
+  // If the table contains <td> data rows but we found neither actionable live arrivals
+  // nor an explicit out-of-service status (e.g. only static clock times, bounds, error messages,
+  // or empty cells), live realtime tracking is unavailable -> return null to allow GTFS scheduled fallback.
+  const allTdRows = rows.filter((r) => /<td[^>]*>/i.test(r));
+  if (allTdRows.length > 0 && !hasLiveArrival && !hasAuthoritativeStatus) {
+    return null;
+  }
+
   return arrivals;
 }
 
@@ -52,6 +78,10 @@ async function main(stop, route, walkMinutes) {
   }
   const html = await res.text();
   const arrivals = parseArrivals(html);
+  if (arrivals === null) {
+    console.error(`Failed to parse arrival panel: malformed upstream response for stop ${stop} / route ${route}.`);
+    process.exit(1);
+  }
   // Waiting for the bus costs (time until it arrives) -- boarding is
   // effectively instant compared to the bus's own travel time, which
   // this MVP does not model yet (deferred: bus travel time to destination).

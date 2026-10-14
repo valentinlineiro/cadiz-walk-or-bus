@@ -38,8 +38,15 @@ function normalizeSearchText(str) {
 }
 export class NominatimGeocodingAdapter {
     fetchImpl;
-    constructor(fetchImpl = globalThis.fetch) {
+    baseUrl;
+    minIntervalMs;
+    cache = new Map();
+    requestQueue = Promise.resolve();
+    lastRequestTime = 0;
+    constructor(fetchImpl = globalThis.fetch, options = {}) {
         this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+        this.baseUrl = options.baseUrl ?? 'https://nominatim.openstreetmap.org/search';
+        this.minIntervalMs = options.minIntervalMs ?? 1000;
     }
     async search(query, limit = 5) {
         if (!query || query.trim().length < 2)
@@ -50,46 +57,71 @@ export class NominatimGeocodingAdapter {
         if (!hasStreetPrefix && EXTERNAL_REGIONS.has(normQuery)) {
             return [];
         }
-        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
-        let r;
-        try {
-            r = await this.fetchImpl(url);
+        const cacheKey = `${normQuery}::${limit}`;
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            return cached;
         }
-        catch {
-            return [];
-        }
-        if (!r.ok)
-            return [];
-        let hits;
-        try {
-            hits = await r.json();
-        }
-        catch {
-            return [];
-        }
-        if (!Array.isArray(hits))
-            return [];
-        return hits
-            .filter((hit) => {
-            const lat = Number(hit.lat);
-            const lon = Number(hit.lon);
-            if (!Number.isFinite(lat) || !Number.isFinite(lon))
-                return false;
-            return isPointInCadiz(lat, lon);
-        })
-            .map((hit) => {
-            const displayName = String(hit.display_name ?? '');
-            const main = hit.name || displayName.split(',')[0].trim();
-            const parts = displayName.split(',').map((p) => p.trim());
-            const sub = parts.length > 1 ? parts.slice(1, 3).join(', ') : '';
-            return {
-                label: String(main),
-                sub,
-                lat: Number(hit.lat),
-                lon: Number(hit.lon),
-            };
-        })
-            .slice(0, limit);
+        const executeNetworkSearch = async () => {
+            // Re-check cache in case an identical in-flight query already resolved
+            const freshCache = this.cache.get(cacheKey);
+            if (freshCache)
+                return freshCache;
+            if (this.minIntervalMs > 0) {
+                const now = Date.now();
+                const elapsed = now - this.lastRequestTime;
+                if (elapsed < this.minIntervalMs) {
+                    await new Promise((resolve) => setTimeout(resolve, this.minIntervalMs - elapsed));
+                }
+            }
+            this.lastRequestTime = Date.now();
+            const separator = this.baseUrl.includes('?') ? '&' : '?';
+            const url = `${this.baseUrl}${separator}format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(query)}`;
+            let r;
+            try {
+                r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
+            }
+            catch {
+                return [];
+            }
+            if (!r.ok)
+                return [];
+            let hits;
+            try {
+                hits = await r.json();
+            }
+            catch {
+                return [];
+            }
+            if (!Array.isArray(hits))
+                return [];
+            const results = hits
+                .filter((hit) => {
+                const lat = Number(hit.lat);
+                const lon = Number(hit.lon);
+                if (!Number.isFinite(lat) || !Number.isFinite(lon))
+                    return false;
+                return isPointInCadiz(lat, lon);
+            })
+                .map((hit) => {
+                const displayName = String(hit.display_name ?? '');
+                const main = hit.name || displayName.split(',')[0].trim();
+                const parts = displayName.split(',').map((p) => p.trim());
+                const sub = parts.length > 1 ? parts.slice(1, 3).join(', ') : '';
+                return {
+                    label: String(main),
+                    sub,
+                    lat: Number(hit.lat),
+                    lon: Number(hit.lon),
+                };
+            })
+                .slice(0, limit);
+            this.cache.set(cacheKey, results);
+            return results;
+        };
+        const task = this.requestQueue.then(executeNetworkSearch, executeNetworkSearch);
+        this.requestQueue = task.then(() => { }, () => { });
+        return task;
     }
     async geocode(query) {
         if (!query || !query.trim())

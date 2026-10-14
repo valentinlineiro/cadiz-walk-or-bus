@@ -9,6 +9,7 @@ import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTrans
 import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedStops as _setStops, setCachedLines as _setLines } from './application/composition.js';
 
 import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
+import realGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
 const appendEntry = (entry, storage, max = 200) => {
   const adapter = new LocalStorageJourneyLogAdapter(storage);
@@ -51,6 +52,23 @@ test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns fo
     [36.520, -6.280],
     [36.525, -6.285],
   ]);
+});
+
+test('OsrmRoutingAdapter: passes AbortSignal and returns service_failure on timeout', async () => {
+  let passedSignal = null;
+  const timeoutFetch = async (url, options) => {
+    passedSignal = options?.signal;
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  };
+
+  const adapter = new OsrmRoutingAdapter(timeoutFetch);
+  const route = await adapter.routeWalking(
+    { lat: 36.520, lon: -6.280 },
+    { lat: 36.525, lon: -6.285 },
+  );
+
+  assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
+  assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
 });
 
 test('OsrmRoutingAdapter: routeWalking rejects degenerate route shorter than straight-line distance', async () => {
@@ -205,6 +223,22 @@ test('MunicipalTransitAdapter: getArrivals marks realtime data and throws on err
   await assert.rejects(async () => failAdapter.getArrivals('1106'), /arrivals 502/);
 });
 
+test('MunicipalTransitAdapter: getArrivals throws when arrivals payload is missing or not an array', async () => {
+  const fakeFetchMalformed = async () => ({
+    ok: true,
+    json: async () => ({ error: 'malformed upstream response' }),
+  });
+  const adapter = new MunicipalTransitAdapter(fakeFetchMalformed);
+  await assert.rejects(async () => adapter.getArrivals('1106'), /malformed arrivals response/);
+
+  const fakeFetchNull = async () => ({
+    ok: true,
+    json: async () => ({ arrivals: null }),
+  });
+  const adapterNull = new MunicipalTransitAdapter(fakeFetchNull);
+  await assert.rejects(async () => adapterNull.getArrivals('1106'), /malformed arrivals response/);
+});
+
 test('NominatimGeocodingAdapter: search formats query with viewbox and normalizes results', async () => {
   let calledUrl = '';
   const fakeFetch = async (url) => {
@@ -270,6 +304,20 @@ test('NominatimGeocodingAdapter: returns empty array or null on network error', 
   assert.equal(geocodeResult, null);
 });
 
+test('NominatimGeocodingAdapter: passes AbortSignal and returns empty array on timeout', async () => {
+  let passedSignal = null;
+  const timeoutFetch = async (url, options) => {
+    passedSignal = options?.signal;
+    throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  };
+
+  const adapter = new NominatimGeocodingAdapter(timeoutFetch);
+  const results = await adapter.search('Plaza de Mina');
+
+  assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
+  assert.deepEqual(results, []);
+});
+
 test('NominatimGeocodingAdapter: short-circuits empty and single-character queries without calling fetch', async () => {
   let fetchCalled = false;
   const fakeFetch = async () => {
@@ -285,6 +333,77 @@ test('NominatimGeocodingAdapter: short-circuits empty and single-character queri
   assert.equal(await adapter.geocode(''), null);
   assert.equal(await adapter.geocode('   '), null);
   assert.equal(fetchCalled, false);
+});
+
+test('NominatimGeocodingAdapter: caches search results in-memory and does not repeat fetch for same query', async () => {
+  let callCount = 0;
+  const fakeFetch = async () => {
+    callCount += 1;
+    return {
+      ok: true,
+      json: async () => [
+        {
+          name: 'Catedral',
+          display_name: 'Catedral, Cádiz, España',
+          lat: '36.5289',
+          lon: '-6.2952',
+        },
+      ],
+    };
+  };
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch);
+  const res1 = await adapter.search('Catedral', 3);
+  assert.equal(callCount, 1);
+  assert.equal(res1.length, 1);
+
+  // Calling search again with identical query hits cache
+  const res2 = await adapter.search('Catedral', 3);
+  assert.equal(callCount, 1, 'repeated query must be served from cache without extra fetch');
+  assert.deepEqual(res2, res1);
+
+  // Normalization matches case-insensitively with accents
+  const res3 = await adapter.search('catedral', 3);
+  assert.equal(callCount, 1, 'normalized query must hit cache');
+  assert.deepEqual(res3, res1);
+});
+
+test('NominatimGeocodingAdapter: respects custom baseUrl option for proxying or self-hosted endpoint', async () => {
+  let calledUrl = '';
+  const fakeFetch = async (url) => {
+    calledUrl = url;
+    return {
+      ok: true,
+      json: async () => [],
+    };
+  };
+
+  const customBaseUrl = 'https://nominatim-proxy.internal.net/search';
+  const adapter = new NominatimGeocodingAdapter(fakeFetch, { baseUrl: customBaseUrl });
+  await adapter.search('Plaza Mina');
+
+  assert.ok(calledUrl.startsWith(customBaseUrl), 'must query the custom baseUrl proxy');
+});
+
+test('NominatimGeocodingAdapter: serializes concurrent network requests and enforces minIntervalMs spacing', async () => {
+  const requestTimes = [];
+  const fakeFetch = async () => {
+    requestTimes.push(Date.now());
+    return {
+      ok: true,
+      json: async () => [],
+    };
+  };
+
+  const adapter = new NominatimGeocodingAdapter(fakeFetch, { minIntervalMs: 40 });
+  await Promise.all([
+    adapter.search('Plaza de Mina'),
+    adapter.search('Plaza de San Antonio'),
+  ]);
+
+  assert.equal(requestTimes.length, 2);
+  const diff = requestTimes[1] - requestTimes[0];
+  assert.ok(diff >= 35, `Concurrent searches must be serialized and spaced (elapsed: ${diff}ms)`);
 });
 
 class MockStorage {
@@ -727,7 +846,7 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
 
 test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled source', async () => {
   const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T07:55:00+02:00'),
+    now: () => new Date('2026-09-18T09:15:00+02:00'),
   });
 
   assert.equal(adapter.getMetadata().feedVersion, 'nap-test-2026-09-17');
@@ -737,31 +856,45 @@ test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled sour
   assert.deepEqual(await adapter.getArrivals('A'), [{
     line: '1',
     destination: 'Centro',
-    minutes: 125,
+    minutes: 45,
     source: 'scheduled',
   }]);
 });
 
-test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight service-day times', async () => {
-  const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-17T23:30:00+02:00'),
+test('GtfsTransitAdapter: bounds lookahead horizon to 60 minutes (MAX_LOOKAHEAD_SECONDS)', async () => {
+  // At 07:55: departure at 10:00 is 125 min (> 3600s) -> excluded
+  const farAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T07:55:00+02:00'),
   });
+  assert.deepEqual(await farAdapter.getArrivals('A'), []);
 
-  const arrivals = await adapter.getArrivals('A');
-  assert.deepEqual(arrivals, [{
+  // At 09:15: departure at 10:00 is 45 min (<= 3600s) -> included
+  const nearAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T09:15:00+02:00'),
+  });
+  assert.deepEqual(await nearAdapter.getArrivals('A'), [{
     line: '1',
     destination: 'Centro',
-    minutes: 100,
+    minutes: 45,
     source: 'scheduled',
   }]);
+});
 
+test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight service-day times within lookahead', async () => {
+  // At 23:30 on 2026-09-17: next departure is at 25:10 (100 min away, > 3600s) -> excluded
+  const beforeMidnightFar = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-17T23:30:00+02:00'),
+  });
+  assert.deepEqual(await beforeMidnightFar.getArrivals('A'), []);
+
+  // At 00:30 on 2026-09-18: departure at 25:10 is 40 min away (<= 3600s) -> included
   const afterMidnight = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2026-09-18T00:30:00+02:00'),
   });
   assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
 });
 
-test('ResilientTransitAdapter: falls back on realtime errors and on empty realtime response (Bug 7)', async () => {
+test('ResilientTransitAdapter: falls back on realtime errors but treats empty array as authoritative (Issue #21)', async () => {
   let scheduledCalls = 0;
   const scheduled = {
     getStops: async () => [{ stop: 'A', lat: 36.52, lon: -6.28 }],
@@ -778,20 +911,214 @@ test('ResilientTransitAdapter: falls back on realtime errors and on empty realti
   assert.equal((await adapter.getArrivals('A'))[0].source, 'scheduled');
   assert.equal(scheduledCalls, 1);
 
-  // Bug 7: When realtime returns empty array [], fallback to scheduled GTFS if available
+  // Issue #21 (Policy A): When realtime returns empty array [], it is authoritative; do not fallback to scheduled
   const emptyRealtime = { ...realtime, getArrivals: async () => [] };
   const emptyAdapter = new ResilientTransitAdapter(emptyRealtime, scheduled, 50);
   scheduledCalls = 0;
   const fallbackArrivals = await emptyAdapter.getArrivals('A');
-  assert.equal(fallbackArrivals[0].source, 'scheduled');
-  assert.equal(scheduledCalls, 1, 'scheduled source must be queried when realtime returns empty array');
+  assert.deepEqual(fallbackArrivals, []);
+  assert.equal(scheduledCalls, 0, 'scheduled source must not be queried when realtime returns empty array');
 
-  // When both realtime and scheduled are empty, returns empty array
-  const emptyScheduled = {
+  // When both realtime and scheduled fail, returns empty array
+  const failingScheduled = {
     ...scheduled,
-    getArrivals: async () => [],
+    getArrivals: async () => { throw new Error('scheduled failed'); },
   };
-  const bothEmptyAdapter = new ResilientTransitAdapter(emptyRealtime, emptyScheduled, 50);
-  assert.deepEqual(await bothEmptyAdapter.getArrivals('A'), []);
+  const bothFailingAdapter = new ResilientTransitAdapter(realtime, failingScheduled, 50);
+  assert.deepEqual(await bothFailingAdapter.getArrivals('A'), []);
 });
+
+test('ResilientTransitAdapter: slow realtime resolving after timeout falls back cleanly without leaking side effects', async () => {
+  let realtimeResolved = false;
+  const slowRealtime = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      realtimeResolved = true;
+      return [{ line: '1', destination: 'Late Bus', minutes: 1, source: 'realtime' }];
+    },
+  };
+  const scheduled = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => [
+      { line: '1', destination: 'Scheduled Bus', minutes: 10, source: 'scheduled' },
+    ],
+  };
+
+  const adapter = new ResilientTransitAdapter(slowRealtime, scheduled, 15); // 15ms timeout
+  const arrivals = await adapter.getArrivals('A');
+
+  // Must immediately receive scheduled arrivals due to timeout
+  assert.equal(arrivals.length, 1);
+  assert.equal(arrivals[0].source, 'scheduled');
+  assert.equal(arrivals[0].destination, 'Scheduled Bus');
+  assert.equal(realtimeResolved, false, 'realtime call should still be pending when fallback returned');
+
+  // Wait for the delayed realtime promise to settle in the background
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  assert.equal(realtimeResolved, true);
+
+  // Subsequent reads of the returned result are unchanged
+  assert.equal(arrivals[0].source, 'scheduled');
+  assert.equal(arrivals[0].destination, 'Scheduled Bus');
+});
+
+test('GtfsTransitAdapter: enforces calendar active windows, inactive weekdays, and exception dates', async () => {
+  // 1. Before startDate (2020-09-25) -> no service active -> []
+  const pastAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2020-09-25T07:30:00+02:00'),
+  });
+  assert.deepEqual(await pastAdapter.getArrivals('A'), []);
+
+  // 2. After endDate (2035-09-25) -> no service active -> []
+  const futureAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2035-09-25T07:30:00+02:00'),
+  });
+  assert.deepEqual(await futureAdapter.getArrivals('A'), []);
+
+  // 3. Normal active Friday (2026-09-25): WEEKDAY is active, next departure at 08:10 (40 min)
+  const activeFriday = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-25T07:30:00+02:00'),
+  });
+  assert.deepEqual(await activeFriday.getArrivals('A'), [{
+    line: '1',
+    destination: 'Centro',
+    minutes: 40,
+    source: 'scheduled',
+  }]);
+
+  // 4. Inactive weekday (Sunday 2026-09-27 at 07:30): WEEKDAY does not run on Sundays
+  const sundayAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-27T07:30:00+02:00'),
+  });
+  assert.deepEqual(await sundayAdapter.getArrivals('A'), []);
+
+  // 5. Exception removedDate (2026-09-18): WEEKDAY removed, so weekday-1 (at 08:10) is excluded
+  const removedExceptionAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
+    now: () => new Date('2026-09-18T07:30:00+02:00'),
+  });
+  assert.deepEqual(await removedExceptionAdapter.getArrivals('A'), []);
+});
+
+test('GTFS production snapshot: validates feed validity window, calendar services, and active dates', () => {
+  assert.ok(realGtfsSnapshot.feedVersion, 'snapshot must have feedVersion');
+  assert.match(realGtfsSnapshot.feedVersion, /^nap-\d{4}-\d{2}-\d{2}$/);
+  assert.ok(realGtfsSnapshot.services.length > 0, 'snapshot must contain services');
+  assert.ok(Object.keys(realGtfsSnapshot.stops).length > 0, 'snapshot must contain stops');
+  assert.ok(Object.keys(realGtfsSnapshot.lines).length > 0, 'snapshot must contain lines');
+
+  // Verify service calendar bounds
+  const endDates = realGtfsSnapshot.services.map((s) => s.endDate);
+  const maxEndDate = endDates.reduce((max, d) => (d > max ? d : max), '0');
+  assert.ok(maxEndDate >= '20261231', `feed must be valid through 2026-12-31 (found ${maxEndDate})`);
+
+  // Verify that services exist for weekdays (L-V) and weekends (S-D)
+  const hasWeekdayService = realGtfsSnapshot.services.some((s) => s.weekdays.slice(0, 5).some(Boolean));
+  const hasWeekendService = realGtfsSnapshot.services.some((s) => s.weekdays[5] || s.weekdays[6]);
+  assert.ok(hasWeekdayService, 'feed must contain active weekday service definitions');
+  assert.ok(hasWeekendService, 'feed must contain active weekend service definitions');
+
+  // Verify Cádiz local exception dates exist (Carnaval, festivos)
+  const allAddedDates = new Set(realGtfsSnapshot.services.flatMap((s) => s.addedDates));
+  assert.ok(allAddedDates.has('20260211'), 'feed must include Cádiz Carnaval local holiday (2026-02-11)');
+  assert.ok(allAddedDates.has('20261012'), 'feed must include Fiesta Nacional (2026-10-12)');
+  assert.ok(allAddedDates.has('20261225'), 'feed must include Navidad (2026-12-25)');
+});
+
+test('GTFS production snapshot: executes calendar and exception engine returning active scheduled arrivals for weekdays, weekends, and holidays', async () => {
+  const stopId = realGtfsSnapshot.stops[0].stop; // '2_1' (Avda. Del Puerto)
+
+  // 1. Regular Monday (2026-10-19 10:00 Madrid time): evaluates active Monday service calendar
+  const mondayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-10-19T10:00:00+02:00'),
+  });
+  const mondayArrivals = await mondayAdapter.getArrivals(stopId);
+  assert.ok(mondayArrivals.length > 0, 'Monday must return active scheduled arrivals');
+  assert.equal(mondayArrivals[0].source, 'scheduled');
+  assert.ok(mondayArrivals[0].minutes >= 0 && mondayArrivals[0].minutes <= 60);
+
+  // 2. Regular Sunday (2026-10-18 10:00 Madrid time): evaluates Sunday service schedule
+  const sundayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-10-18T10:00:00+02:00'),
+  });
+  const sundayArrivals = await sundayAdapter.getArrivals(stopId);
+  assert.ok(sundayArrivals.length > 0, 'Sunday must return active scheduled arrivals');
+  assert.equal(sundayArrivals[0].source, 'scheduled');
+
+  // 3. Local holiday exception: Carnaval de Cádiz (Wednesday 2026-02-11 10:00 Madrid time):
+  // 20260211 is defined in addedDates for holiday services (e.g. M-021, which only runs on weekends and added holiday dates)
+  const carnavalAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-02-11T10:00:00+01:00'),
+  });
+  const carnavalArrivals = await carnavalAdapter.getArrivals(stopId);
+  assert.ok(carnavalArrivals.length > 0, 'Carnaval holiday must return active scheduled arrivals');
+  assert.equal(carnavalArrivals[0].source, 'scheduled');
+
+  // Prove that Carnaval arrivals strictly originate from addedDates exception services:
+  // Contrast against a regular non-holiday Wednesday (2026-02-18 10:00)
+  const normalWednesdayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2026-02-18T10:00:00+01:00'),
+  });
+  const normalWednesdayArrivals = await normalWednesdayAdapter.getArrivals(stopId);
+  const hasCarnavalExceptionLine = carnavalArrivals.some((a) => a.line === 'M-021');
+  const normalWednesdayHasLine = normalWednesdayArrivals.some((a) => a.line === 'M-021');
+  assert.ok(hasCarnavalExceptionLine, 'Carnaval Wednesday must activate holiday exception service line M-021 via addedDates');
+  assert.equal(normalWednesdayHasLine, false, 'Weekend-only line M-021 must NOT run on a normal Wednesday');
+
+  // 4. Past or future date outside feed validity window (e.g. 2035-01-01): returns empty []
+  const expiredAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
+    now: () => new Date('2035-01-01T10:00:00+01:00'),
+  });
+  const expiredArrivals = await expiredAdapter.getArrivals(stopId);
+  assert.deepEqual(expiredArrivals, [], 'Date outside feed bounds must return empty arrivals');
+});
+
+test('ResilientTransitAdapter + MunicipalTransitAdapter integration: malformed upstream response triggers scheduled fallback', async () => {
+  const fakeFetchMalformed = async () => ({
+    ok: false,
+    status: 502,
+    json: async () => ({ error: 'malformed upstream response' }),
+  });
+  const municipal = new MunicipalTransitAdapter(fakeFetchMalformed);
+  const scheduled = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => [
+      { line: '1', destination: 'Plaza España', minutes: 12, source: 'scheduled' },
+    ],
+  };
+
+  const resilient = new ResilientTransitAdapter(municipal, scheduled);
+  const arrivals = await resilient.getArrivals('1106');
+
+  assert.equal(arrivals.length, 1);
+  assert.equal(arrivals[0].source, 'scheduled');
+  assert.equal(arrivals[0].minutes, 12);
+});
+
+test('ResilientTransitAdapter + MunicipalTransitAdapter integration: authoritative 200 [] does NOT trigger scheduled fallback', async () => {
+  let scheduledCalled = false;
+  const fakeFetchEmpty = async () => ({
+    ok: true,
+    json: async () => ({ arrivals: [] }),
+  });
+  const municipal = new MunicipalTransitAdapter(fakeFetchEmpty);
+  const scheduled = {
+    getStops: async () => [],
+    getLines: async () => ({}),
+    getArrivals: async () => {
+      scheduledCalled = true;
+      return [{ line: '1', destination: 'Plaza España', minutes: 12, source: 'scheduled' }];
+    },
+  };
+
+  const resilient = new ResilientTransitAdapter(municipal, scheduled);
+  const arrivals = await resilient.getArrivals('1106');
+
+  assert.deepEqual(arrivals, []);
+  assert.equal(scheduledCalled, false, 'Authoritative empty 200 [] must not invoke scheduled fallback');
+});
+
 

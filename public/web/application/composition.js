@@ -46,7 +46,7 @@ export const cachedTransitPort = {
 };
 
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
-const geocodingAdapter = new NominatimGeocodingAdapter(fetch);
+const geocodingAdapter = new NominatimGeocodingAdapter(fetch, { minIntervalMs: 1000 });
 
 export const searchDestinationsUseCase = new SearchDestinationsUseCase(geocodingAdapter);
 export const findBestJourneysUseCase = new FindBestJourneysUseCase({

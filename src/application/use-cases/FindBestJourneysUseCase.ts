@@ -187,7 +187,7 @@ export class FindBestJourneysUseCase {
           identity: cand.identity,
           mode: 'bus',
           totalMinutes,
-          dataQuality: lastMileDegraded ? 'degraded' : 'live',
+          dataQuality: lastMileDegraded ? 'degraded' : cand.dataQuality,
           breakdown: {
             walkToStopMinutes: walkToStopMins,
             waitMinutes: cand.estimate.waitMinutes ?? 0,

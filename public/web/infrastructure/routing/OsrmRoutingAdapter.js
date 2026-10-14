@@ -8,7 +8,7 @@ export class OsrmRoutingAdapter {
         const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
         let r;
         try {
-            r = await this.fetchImpl(url);
+            r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
         }
         catch {
             return { status: 'service_failure', coordinates: [] };
@@ -45,7 +45,7 @@ export class OsrmRoutingAdapter {
         const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
         let r;
         try {
-            r = await this.fetchImpl(url);
+            r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
         }
         catch {
             return straightLine();

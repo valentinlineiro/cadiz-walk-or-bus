@@ -554,6 +554,42 @@ function renderQuickPicks() {
   dropdown.classList.remove('hidden');
 }
 
+function renderMatchingLocalPicks(q) {
+  const dropdown = document.getElementById('dropdown');
+  if (!dropdown) return;
+  const normQ = q.toLowerCase();
+  let favorites = [];
+  let destinations = [];
+  try {
+    favorites = getFavorites().filter((f) => (f.label || '').toLowerCase().includes(normQ));
+  } catch {
+    favorites = [];
+  }
+  try {
+    destinations = journeyLogAdapter.getRecentDestinations(20)
+      .filter((d) => !isFavorite(d) && (d.label || '').toLowerCase().includes(normQ))
+      .slice(0, 5);
+    if (destinations.length === 0) {
+      destinations = getRecent()
+        .filter((r) => !isFavorite(r) && (r.label || '').toLowerCase().includes(normQ))
+        .slice(0, 5);
+    }
+  } catch {
+    destinations = [];
+  }
+  dropdown.replaceChildren();
+  if (favorites.length === 0 && destinations.length === 0) {
+    const row = document.createElement('div');
+    row.className = 'dropdown-header';
+    row.textContent = `Pulsa Buscar o Enter para buscar "${q}"`;
+    dropdown.appendChild(row);
+  } else {
+    appendDropdownSection(dropdown, 'Habituales', favorites, ICON.starFill, { removable: true, badge: true });
+    appendDropdownSection(dropdown, 'Mis destinos', destinations, ICON.history);
+  }
+  dropdown.classList.remove('hidden');
+}
+
 function renderSuggestions(hits) {
   const dropdown = document.getElementById('dropdown');
   if (!dropdown) return;
@@ -898,7 +934,6 @@ export function initUI() {
   const changeDestBtn = document.getElementById('btn-change-dest');
   const dropdown = document.getElementById('dropdown');
   const favBtn = document.getElementById('fav-toggle');
-  let debounce = null;
 
   if (searchTrigger) {
     searchTrigger.addEventListener('click', () => {
@@ -942,7 +977,6 @@ export function initUI() {
     });
 
     input.addEventListener('input', () => {
-      clearTimeout(debounce);
       const q = input.value.trim();
       if (clearBtn) {
         clearBtn.classList.toggle('hidden', input.value.length === 0);
@@ -951,13 +985,9 @@ export function initUI() {
         renderQuickPicks();
         return;
       }
-      debounce = setTimeout(async () => {
-        const hits = await searchDestinationsUseCase.execute(q, 3);
-        if (input.value.trim() === q) {
-          if (hits.length === 0) renderNoResultsHint(q);
-          else renderSuggestions(hits);
-        }
-      }, 400);
+      // Nominatim policy prohibits autocomplete as-you-type search against their public service.
+      // Search matches local favorites and recents on keystroke, querying Nominatim only on submit.
+      renderMatchingLocalPicks(q);
     });
   }
 
@@ -1004,7 +1034,6 @@ export function initUI() {
   if (form) {
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      clearTimeout(debounce);
       if (input) {
         onFormSubmit(input.value);
       }

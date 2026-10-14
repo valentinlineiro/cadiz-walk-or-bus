@@ -51,9 +51,101 @@ test('GET /api maps upstream throw to 502', async () => {
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
+test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async () => {
+  // Upstream returns an error page without tables
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<html><body>Internal Server Error</body></html>' });
+  const noTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(noTableRes.status, 502);
+  assert.deepEqual(await noTableRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns an ASP.NET error page with a table that has no transit columns
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Server Error in / Application</td></tr></table>' });
+  const errorTableRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(errorTableRes.status, 502);
+  assert.deepEqual(await errorTableRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns a 3-column error table (e.g. Error / Details / Code 500) which must NOT be treated as a candidate transit row
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>' });
+  const threeColErrorRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(threeColErrorRes.status, 502);
+  assert.deepEqual(await threeColErrorRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns a table where arrival cell is empty/blank without recognized status -> treated as malformed (502)
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td></td></tr></table>' });
+  const emptyArrivalRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(emptyArrivalRes.status, 502);
+  assert.deepEqual(await emptyArrivalRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns a table containing ONLY timetable clock times (e.g. 15:30) and no live relative arrivals -> 502 to trigger scheduled GTFS fallback
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>15:30</td></tr></table>' });
+  const clockOnlyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(clockOnlyRes.status, 502);
+  assert.deepEqual(await clockOnlyRes.json(), { error: 'malformed upstream response' });
+
+  // Upstream returns a table containing ONLY bounds (e.g. > 45 min) without live arrivals or out-of-service indicator -> 502 to trigger scheduled GTFS fallback
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>> 45 min</td></tr></table>' });
+  const boundsOnlyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(boundsOnlyRes.status, 502);
+  assert.deepEqual(await boundsOnlyRes.json(), { error: 'malformed upstream response' });
+});
+
+test('GET /api parses tables with row attributes like class or style properly', async () => {
+  const htmlWithTrClass = '<table class="tablePanel"><tr class="odd"><td>1</td><td>CORTADURA</td><td>5min</td></tr></table>';
+  globalThis.fetch = async () => ({ ok: true, text: async () => htmlWithTrClass });
+  const res = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 5 }] });
+});
+
+test('GET /api returns 200 and authoritative empty arrivals on valid empty panel table', async () => {
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tbody></tbody></table>' });
+  const emptyRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(emptyRes.status, 200);
+  assert.deepEqual(await emptyRes.json(), { arrivals: [] });
+
+  const validTableWithHeaders = '<table class="tablePanel"><thead><tr><th>Línea</th><th>Destino</th><th>Llegada</th></tr></thead><tbody></tbody></table>';
+  globalThis.fetch = async () => ({ ok: true, text: async () => validTableWithHeaders });
+  const headersRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(headersRes.status, 200);
+  assert.deepEqual(await headersRes.json(), { arrivals: [] });
+
+  // Valid transit table with out-of-service status
+  const outOfServiceTable = '<table class="tablePanel"><tr class="row"><td>1</td><td>CORTADURA</td><td>Sin servicio</td></tr></table>';
+  globalThis.fetch = async () => ({ ok: true, text: async () => outOfServiceTable });
+  const oosRes = await worker.fetch(new Request('http://x/api?stop=1106'));
+  assert.equal(oosRes.status, 200);
+  assert.deepEqual(await oosRes.json(), { arrivals: [] });
+});
+
 test('GET /api without stop returns 400', async () => {
   const res = await worker.fetch(new Request('http://x/api'));
   assert.equal(res.status, 400);
+});
+
+test('GET /api validates stop and route parameters against injection and invalid characters', async () => {
+  globalThis.fetch = async () => ({ ok: true, text: async () => '<table></table>' });
+
+  // Valid request: /api?stop=101&route=1 passes
+  const validRes = await worker.fetch(new Request('http://x/api?stop=101&route=1'));
+  assert.equal(validRes.status, 200);
+
+  // Injection / special chars: /api?stop=101%26admin=1 returns 400
+  const injectionRes = await worker.fetch(new Request('http://x/api?stop=101%26admin=1'));
+  assert.equal(injectionRes.status, 400);
+  assert.deepEqual(await injectionRes.json(), { error: 'missing or invalid stop' });
+
+  // Characters outside [a-zA-Z0-9_-] in stop
+  const badStopRes = await worker.fetch(new Request('http://x/api?stop=101;drop'));
+  assert.equal(badStopRes.status, 400);
+
+  // Characters outside [a-zA-Z0-9_-] in route
+  const badRouteRes = await worker.fetch(new Request('http://x/api?stop=101&route=1%20or%201'));
+  assert.equal(badRouteRes.status, 400);
+  assert.deepEqual(await badRouteRes.json(), { error: 'invalid route' });
+
+  // Overlong parameters (> 16 chars)
+  const longStopRes = await worker.fetch(new Request('http://x/api?stop=12345678901234567'));
+  assert.equal(longStopRes.status, 400);
 });
 
 test('GET /stops returns the stop directory', async () => {

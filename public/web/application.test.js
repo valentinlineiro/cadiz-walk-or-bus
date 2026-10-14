@@ -132,6 +132,8 @@ test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and
   assert.equal(result.hero.mode, 'bus');
   assert.match(result.hero.metadata?.line, /^M-/);
   assert.equal(result.hero.metadata?.source, 'scheduled');
+  assert.notEqual(result.hero.dataQuality, 'live');
+  assert.equal(result.hero.dataQuality, 'estimated');
   assert.equal(typeof result.walkMinutes, 'number');
 });
 
@@ -687,3 +689,39 @@ test('FindBestJourneysUseCase: flags degraded last-mile when pedestrian routing 
   assert.equal(decision.hero.breakdown.lastMileDegraded, true);
   assert.ok(decision.hero.breakdown.lastMileMinutes > 0);
 });
+
+test('FindBestJourneysUseCase: scheduled arrival never produces dataQuality live', async () => {
+  const origin = { lat: 36.520, lon: -6.280 };
+  const destination = { lat: 36.530, lon: -6.290 };
+  const fakeRouting = {
+    routeWalking: async (from, to) => {
+      if (from === origin && to === destination) return { minutes: 50, coordinates: [] };
+      return { minutes: 1, coordinates: [] };
+    },
+    routeBus: async () => ({ minutes: 10, coordinates: [] }),
+  };
+  const fakeTransit = {
+    getStops: async () => [
+      { stop: '101', lat: 36.520, lon: -6.280 },
+      { stop: '201', lat: 36.530, lon: -6.290 },
+    ],
+    getLines: async () => ({
+      '1': { 'Centro': ['101', '201'] },
+    }),
+    getArrivals: async () => [
+      { line: '1', destination: 'Centro', minutes: 5, source: 'scheduled' },
+    ],
+  };
+
+  const useCase = new FindBestJourneysUseCase({
+    routing: fakeRouting,
+    transit: fakeTransit,
+  });
+
+  const decision = await useCase.execute({ origin, destination });
+  assert.equal(decision.hero.mode, 'bus');
+  assert.equal(decision.hero.metadata?.source, 'scheduled');
+  assert.notEqual(decision.hero.dataQuality, 'live');
+  assert.equal(decision.hero.dataQuality, 'estimated');
+});
+

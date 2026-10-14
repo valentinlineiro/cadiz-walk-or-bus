@@ -13,12 +13,27 @@ const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 // FRONTIER C: MUNICIPAL HTML PARSER ADVERSARIAL STRESS TEST
 // ============================================================================
 
-test('Frontier C: parseArrivals survives null, undefined, empty, and non-string inputs', () => {
-  assert.deepEqual(parseArrivals(''), []);
-  assert.deepEqual(parseArrivals(null), []);
-  assert.deepEqual(parseArrivals(undefined), []);
-  assert.deepEqual(parseArrivals(123), []);
-  assert.deepEqual(parseArrivals('<html><body>No tables here</body></html>'), []);
+test('Frontier C: parseArrivals returns null for malformed, non-table, or non-string inputs', () => {
+  assert.equal(parseArrivals(''), null);
+  assert.equal(parseArrivals(null), null);
+  assert.equal(parseArrivals(undefined), null);
+  assert.equal(parseArrivals(123), null);
+  assert.equal(parseArrivals('<html><body>No tables here</body></html>'), null);
+  assert.equal(parseArrivals('<table><tr><td>Only one column error</td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td></td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>15:30</td></tr></table>'), null);
+  assert.equal(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>> 45 min</td></tr></table>'), null);
+  assert.deepEqual(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>Sin servicio</td></tr></table>'), []);
+  assert.deepEqual(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>En cochera</td></tr></table>'), []);
+});
+
+test('Frontier C: parseArrivals correctly parses rows with attributes like tr class', () => {
+  const htmlWithAttrs = '<table class="tablePanel"><tr class="even-row" style="background:#fff"><td>1</td><td>Plaza España</td><td>3 min</td></tr></table>';
+  const arrivals = parseArrivals(htmlWithAttrs);
+  assert.ok(arrivals);
+  assert.equal(arrivals.length, 1);
+  assert.deepEqual(arrivals[0], { line: '1', destination: 'Plaza España', minutes: 3 });
 });
 
 test('Frontier C: parseArrivals strictly supports Inminente variants as 0 minutes', () => {

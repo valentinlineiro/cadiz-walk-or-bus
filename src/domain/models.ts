@@ -106,11 +106,13 @@ export interface CandidateMetadata {
  * The identity is a structured Value Object, not a serialized string.
  * There is no back-reference to EvaluatedJourney — evaluation is a one-way transformation.
  */
+export type DataQuality = 'live' | 'degraded' | 'estimated';
+
 export interface JourneyCandidate {
   identity: JourneyIdentity;
   mode: 'walk' | 'bus';
   estimatedMinutes: number;
-  dataQuality: 'live' | 'degraded' | 'estimated';
+  dataQuality: DataQuality;
   estimate: CandidateEstimate;
   metadata?: CandidateMetadata;
 }
@@ -139,7 +141,7 @@ export interface EvaluatedJourney {
   identity: JourneyIdentity;
   mode: 'walk' | 'bus';
   totalMinutes: number;
-  dataQuality: 'live' | 'degraded';
+  dataQuality: DataQuality;
   breakdown: EvaluatedJourneyBreakdown;
   routes: EvaluatedJourneyRoutes;
   metadata?: CandidateMetadata;
