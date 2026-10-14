@@ -355,15 +355,13 @@ function arrivalsResponse(arrivals, fetchedAt, source) {
   );
 }
 
-async function fetchPanelArrivals(stop, route) {
+async function fetchPanelArrivals(stop) {
   const encodedStop = encodeURIComponent(stop);
   // Workers' fetch() rejects plain-HTTP requests to a bare IP literal with its
   // own error 1003 ("Direct IP access not allowed") before the request ever
   // leaves Cloudflare's network. PANEL_HOST is the panel server's real reverse-DNS
   // name (resolves to the same 77.224.241.76) -- using it sidesteps that entirely.
-  const panel = route
-    ? `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}&route=${encodeURIComponent(route)}`
-    : `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}`;
+  const panel = `http://${PANEL_HOST}/urbanos/mobile/panel.aspx?stop=${encodedStop}`;
   const started = Date.now();
   const done = (fields) => {
     const ok = !fields.error_type;
@@ -423,14 +421,19 @@ function rememberArrivals(key, entry) {
 
 async function handleArrivals(url, env) {
   const stop = url.searchParams.get('stop');
-  const route = url.searchParams.get('route');
   if (!stop || !/^[a-zA-Z0-9_-]{1,16}$/.test(stop)) {
     return Response.json({ error: 'missing or invalid stop' }, { status: 400 });
   }
-  if (route !== null && route !== '' && !/^[a-zA-Z0-9_-]{1,16}$/.test(route)) {
-    return Response.json({ error: 'invalid route' }, { status: 400 });
+  // Only the municipal stops we ship are served. Anything else is rejected BEFORE caches, locks
+  // or the panel, so arbitrary ids cannot be used to make the Worker hammer the municipal server.
+  // The list is stops.json: refresh it (scrape-stops.js) when the operator adds stops.
+  if (!KNOWN_STOPS.has(stop)) {
+    logEvent('arrivals_rejected', { reason: 'unknown_stop' });
+    return Response.json({ error: 'unknown stop' }, { status: 404 });
   }
-  const key = `arr:${stop}:${route ?? ''}`;
+  // `route` is not part of the client contract: it is ignored (never forwarded, never part of the
+  // cache key), so it cannot be used to bypass the per-stop cache.
+  const key = `arr:${stop}`;
   const started = Date.now();
   const finish = (res, cache_status) => {
     logEvent(
@@ -452,7 +455,7 @@ async function handleArrivals(url, env) {
   // its own Response from the settled result.
   let load = inflightArrivals.get(key);
   if (!load) {
-    load = loadArrivals(key, stop, route, env).finally(() => inflightArrivals.delete(key));
+    load = loadArrivals(key, stop, env).finally(() => inflightArrivals.delete(key));
     inflightArrivals.set(key, load);
   }
   const r = await load;
@@ -462,7 +465,7 @@ async function handleArrivals(url, env) {
   return finish(arrivalsResponse(r.arrivals, r.t, r.source), r.source);
 }
 
-async function loadArrivals(key, stop, route, env) {
+async function loadArrivals(key, stop, env) {
   const lockName = `lock:${key}`;
   const db = tursoDb(env);
   let lockUntil = null; // the next_at value we wrote: it identifies OUR acquisition
@@ -512,7 +515,7 @@ async function loadArrivals(key, stop, route, env) {
   }
 
   try {
-    const fetched = await fetchPanelArrivals(stop, route);
+    const fetched = await fetchPanelArrivals(stop);
     if (fetched.fail) return fetched;
     const { arrivals } = fetched;
     const entry = { t: Date.now(), arrivals };

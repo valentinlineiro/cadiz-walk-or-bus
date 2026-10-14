@@ -35,10 +35,12 @@ Walk: 19 min.
 ```
 
 Data source: Cadiz's own live transit arrival panel
-(`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=<stop>&route=<route>`)
-— the same source BusCadiz uses. `stop`/`route` are the transit system's
-internal numeric IDs (e.g. `1106`/`110001`), not the display line number
-(e.g. "1").
+(`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=<stop>`)
+— the same source BusCadiz uses. `stop` is the transit system's internal
+numeric ID (e.g. `1106`), not the display line number. The Worker's
+`/api?stop=<stop>` only serves the stops listed in `stops.json` (refresh
+it with `scrape-stops.js` when the operator adds stops); unknown ids get
+`404` and the `route` parameter is ignored.
 
 ## Estado
 
