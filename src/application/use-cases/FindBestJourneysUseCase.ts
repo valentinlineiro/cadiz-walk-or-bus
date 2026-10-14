@@ -1,5 +1,5 @@
 import type { RoutingPort } from '../ports/RoutingPort.js';
-import type { TransitDataPort } from '../ports/TransitDataPort.js';
+import { arrivalsResultOf, type TransitDataPort } from '../ports/TransitDataPort.js';
 import type {
   Arrival,
   Coordinates,
@@ -10,6 +10,7 @@ import type {
   LinesTopology,
   Route,
   Stop,
+  TransitDataStatus,
 } from '../../domain/models.js';
 import type { JourneyIdentity } from '../../domain/identity.js';
 import {
@@ -69,9 +70,14 @@ export class FindBestJourneysUseCase {
     const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
 
     const busCandidates: JourneyCandidate[] = [];
+    let stopsWithData = 0;
     await Promise.all(
       nearbyStops.map(async (stop) => {
-        const arrivals = await this.ports.transit.getArrivals(stop.stop).catch(() => [] as Arrival[]);
+        const result = await arrivalsResultOf(this.ports.transit, stop.stop);
+        // `[]` below is only ever "a source answered with nothing"; a source that did not answer
+        // is counted separately so the caller can refuse to recommend walking on missing data.
+        if (result.status !== 'unavailable') stopsWithData += 1;
+        const arrivals: Arrival[] = result.status === 'unavailable' ? [] : result.arrivals;
         const stopDist = haversineMeters(origin.lat, origin.lon, stop.lat, stop.lon);
         const walkToStopMinutes = Math.max(0, Math.round(stopDist / WALK_METERS_PER_MINUTE));
 
@@ -96,6 +102,13 @@ export class FindBestJourneysUseCase {
         busCandidates.push(...cands);
       }),
     );
+
+    const transitData: TransitDataStatus =
+      nearbyStops.length === 0 || stopsWithData === nearbyStops.length
+        ? 'available'
+        : stopsWithData === 0
+          ? 'unavailable'
+          : 'partial';
 
     // 2. CHEAP SELECTION GATE (Hard budget enforcement <= 3)
     const { primary: cheapPrimary, alternatives: cheapAlternatives } = selectCandidates(
@@ -213,6 +226,7 @@ export class FindBestJourneysUseCase {
         hero: null,
         alternatives: [],
         walkMinutes: null,
+        transitData,
       };
     }
 
@@ -276,6 +290,7 @@ export class FindBestJourneysUseCase {
       hero: finalHero,
       alternatives,
       walkMinutes: exactWalk ? exactWalk.totalMinutes : null,
+      transitData,
     };
   }
 }

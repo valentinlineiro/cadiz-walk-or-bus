@@ -16,6 +16,14 @@ export class MunicipalTransitAdapter {
         const data = await r.json();
         return (data?.lines ?? null);
     }
+    async getArrivalsResult(stopId) {
+        try {
+            return { status: 'live', arrivals: await this.getArrivals(stopId) };
+        }
+        catch {
+            return { status: 'unavailable', cause: 'source_error' };
+        }
+    }
     async getArrivals(stopId) {
         const r = await this.fetchImpl(`/api?stop=${encodeURIComponent(String(stopId))}`);
         if (!r.ok)

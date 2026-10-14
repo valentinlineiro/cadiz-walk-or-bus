@@ -1,5 +1,6 @@
 import type { TransitDataPort } from '../../application/ports/TransitDataPort.js';
-import type { Arrival, LinesTopology, Stop } from '../../domain/models.js';
+import type { Arrival, ArrivalsResult, LinesTopology, Stop } from '../../domain/models.js';
+import { arrivalsResultOf } from '../../application/ports/TransitDataPort.js';
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return operation;
@@ -33,6 +34,29 @@ export class ResilientTransitAdapter implements TransitDataPort {
     } catch {
       return this.scheduled.getLines();
     }
+  }
+
+  /**
+   * Same policy as getArrivals, but the answer says where it came from:
+   * - live panel answer (even an authoritative empty list) -> `live`
+   * - live source failed and the schedule can answer for this stop -> `scheduled` (+ cause)
+   * - live source failed and the schedule cannot answer -> `unavailable`
+   * Callers must not turn `unavailable` into "no buses".
+   */
+  async getArrivalsResult(stopId: string | number): Promise<ArrivalsResult> {
+    let live: ArrivalsResult;
+    try {
+      live = typeof this.realtime.getArrivalsResult === 'function'
+        ? await withTimeout(this.realtime.getArrivalsResult(stopId), this.timeoutMs)
+        : { status: 'live', arrivals: await withTimeout(this.realtime.getArrivals(stopId), this.timeoutMs) };
+    } catch {
+      live = { status: 'unavailable', cause: 'source_error' };
+    }
+    if (live.status === 'live') return live;
+
+    const scheduled = await arrivalsResultOf(this.scheduled, stopId);
+    if (scheduled.status === 'scheduled') return { ...scheduled, cause: 'source_error' };
+    return { status: 'unavailable', cause: live.status === 'unavailable' ? live.cause : 'source_error' };
   }
 
   /**

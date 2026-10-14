@@ -1,5 +1,5 @@
 import type { TransitDataPort } from '../../application/ports/TransitDataPort.js';
-import type { Arrival, LinesTopology, Stop } from '../../domain/models.js';
+import type { Arrival, ArrivalsResult, LinesTopology, Stop } from '../../domain/models.js';
 
 export interface GtfsService {
   serviceId: string;
@@ -84,12 +84,31 @@ function previousDateKey(dateKey: string): string {
 
 export class GtfsTransitAdapter implements TransitDataPort {
   private readonly clock: Clock;
+  private readonly scheduledStopIds: Set<string>;
 
   constructor(
     private readonly snapshot: GtfsSnapshot,
     clock: Clock = { now: () => new Date() },
   ) {
     this.clock = clock;
+    this.scheduledStopIds = new Set(
+      snapshot.trips.flatMap((trip) => trip.stopTimes.map((time) => String(time.stop))),
+    );
+  }
+
+  /**
+   * Scheduled arrivals ONLY when the schedule can actually answer for this stop today.
+   * An id the feed does not know, or a feed with no service running now (expired/not yet valid),
+   * is `unavailable`: an empty list from such a feed would be a guess, not "no buses".
+   */
+  async getArrivalsResult(stopId: string | number): Promise<ArrivalsResult> {
+    if (!this.scheduledStopIds.has(String(stopId))) {
+      return { status: 'unavailable', cause: 'no_schedule' };
+    }
+    const { dateKey, weekday } = madridNow(this.clock.now());
+    const anyServiceToday = this.snapshot.services.some((service) => serviceRuns(service, dateKey, weekday));
+    if (!anyServiceToday) return { status: 'unavailable', cause: 'no_schedule' };
+    return { status: 'scheduled', arrivals: await this.getArrivals(stopId) };
   }
 
   getMetadata(): Pick<GtfsSnapshot, 'feedVersion' | 'generatedAt' | 'source'> {

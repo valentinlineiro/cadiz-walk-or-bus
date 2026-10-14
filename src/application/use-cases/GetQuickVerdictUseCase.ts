@@ -1,5 +1,5 @@
 import type { RoutingPort } from '../ports/RoutingPort.js';
-import type { TransitDataPort } from '../ports/TransitDataPort.js';
+import { arrivalsResultOf, type TransitDataPort } from '../ports/TransitDataPort.js';
 import type { Arrival, Coordinates, LinesTopology, Stop } from '../../domain/models.js';
 import { chooseQuickBus } from '../../domain/planner.js';
 import { findAlightStop, nearestStops, diversifyByLine } from '../../domain/topology.js';
@@ -40,11 +40,14 @@ export class GetQuickVerdictUseCase {
       lines,
       6,
     );
+    const results = await Promise.all(pool.map(async (stop) => [
+      stop.stop,
+      await arrivalsResultOf(this.ports.transit, stop.stop),
+    ] as const));
+    // No stop answered (live or scheduled): "walk" would be a guess, so give no verdict.
+    if (pool.length > 0 && results.every(([, result]) => result.status === 'unavailable')) return null;
     const arrivalsByStop = new Map<string, Arrival[]>(
-      await Promise.all(pool.map(async (stop) => [
-        stop.stop,
-        await this.ports.transit.getArrivals(stop.stop),
-      ] as const)),
+      results.map(([id, result]) => [id, result.status === 'unavailable' ? [] : result.arrivals] as const),
     );
 
     let best: QuickVerdict | null = null;

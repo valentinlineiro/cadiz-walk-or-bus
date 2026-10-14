@@ -37,9 +37,26 @@ function previousDateKey(dateKey) {
 export class GtfsTransitAdapter {
     snapshot;
     clock;
+    scheduledStopIds;
     constructor(snapshot, clock = { now: () => new Date() }) {
         this.snapshot = snapshot;
         this.clock = clock;
+        this.scheduledStopIds = new Set(snapshot.trips.flatMap((trip) => trip.stopTimes.map((time) => String(time.stop))));
+    }
+    /**
+     * Scheduled arrivals ONLY when the schedule can actually answer for this stop today.
+     * An id the feed does not know, or a feed with no service running now (expired/not yet valid),
+     * is `unavailable`: an empty list from such a feed would be a guess, not "no buses".
+     */
+    async getArrivalsResult(stopId) {
+        if (!this.scheduledStopIds.has(String(stopId))) {
+            return { status: 'unavailable', cause: 'no_schedule' };
+        }
+        const { dateKey, weekday } = madridNow(this.clock.now());
+        const anyServiceToday = this.snapshot.services.some((service) => serviceRuns(service, dateKey, weekday));
+        if (!anyServiceToday)
+            return { status: 'unavailable', cause: 'no_schedule' };
+        return { status: 'scheduled', arrivals: await this.getArrivals(stopId) };
     }
     getMetadata() {
         return {

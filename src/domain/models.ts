@@ -154,10 +154,27 @@ export interface DecisionAlternative {
   divergenceType: DivergenceType;
 }
 
+/**
+ * What we know about a stop's arrivals, and where it came from. A bare `[]` never means
+ * "nothing is coming" unless `status` is `live`/`scheduled` (a source actually answered).
+ */
+export type ArrivalsResult =
+  | { status: 'live'; arrivals: Arrival[] }
+  | { status: 'scheduled'; arrivals: Arrival[]; cause?: 'source_error' } // `cause` is set when this replaced a failed live source
+  | { status: 'unavailable'; cause: 'source_error' | 'no_schedule' };
+
+/**
+ * `available`: every nearby stop returned data. `partial`: some did not, so a walk verdict is
+ * not fully informed. `unavailable`: no nearby stop returned usable data, so NO bus-vs-walk
+ * recommendation may be made.
+ */
+export type TransitDataStatus = 'available' | 'partial' | 'unavailable';
+
 export interface Decision {
   hero: EvaluatedJourney | null;
   alternatives: DecisionAlternative[];
   walkMinutes: number | null;
+  transitData: TransitDataStatus;
 }
 
 /**
