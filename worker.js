@@ -131,8 +131,9 @@ initUI();
 
 
 // --- Upstream proxy: Nominatim + OSRM, cached/rate-limited via optional Turso. ---
-// Needs secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN; without them it still proxies
-// (no shared cache, no global spacing).
+// Needs secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN. Nominatim cache misses FAIL CLOSED
+// (503 + Retry-After) when the global limiter is unavailable; cache hits and OSRM keep working.
+// Staleness contract: shared cache 24h; browsers may reuse a response for 1h.
 const PROXY_UA = 'cadiz-walk-or-bus/0.1 (+https://github.com/valentinlineiro/cadiz-walk-or-bus)';
 const PROXY_TTL_S = 24 * 60 * 60;
 const NOMINATIM_GAP_MS = 1100;
@@ -172,7 +173,19 @@ function tursoDb(env) {
   };
 }
 
-async function upstreamJson(url) {
+const isCoord = (n) => Number.isFinite(Number(n));
+// Shape guards: a 200 with the wrong body must never be cached as a good answer.
+const validNominatim = (j) => Array.isArray(j) && j.every((h) => h && typeof h === 'object' && isCoord(h.lat) && isCoord(h.lon));
+const validOsrm = (j) =>
+  !!j &&
+  (j.code === 'NoRoute' ||
+    (j.code === 'Ok' &&
+      Array.isArray(j.routes) &&
+      j.routes.every(
+        (r) => Number.isFinite(r?.distance) && Number.isFinite(r?.duration) && Array.isArray(r?.geometry?.coordinates),
+      )));
+
+async function upstreamJson(url, isValid) {
   let r;
   try {
     r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA }, signal: AbortSignal.timeout(5000) });
@@ -180,13 +193,22 @@ async function upstreamJson(url) {
     return Response.json({ error: 'upstream unreachable' }, { status: 502 });
   }
   if (r.status >= 500) return Response.json({ error: `upstream ${r.status}` }, { status: 502 });
-  if (!r.ok) return Response.json({ error: `upstream ${r.status}` }, { status: 404 });
+  if (r.status === 400 || r.status === 404) return Response.json({ error: `upstream ${r.status}` }, { status: 404 });
+  if (!r.ok) {
+    // 403/429/...: provider limits or blocks are recoverable, never "not found".
+    return Response.json(
+      { error: `upstream ${r.status}` },
+      { status: 503, headers: { 'retry-after': r.headers?.get?.('retry-after') ?? '5' } },
+    );
+  }
   const text = await r.text();
+  let parsed;
   try {
-    JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
     return Response.json({ error: 'malformed upstream response' }, { status: 502 });
   }
+  if (!isValid(parsed)) return Response.json({ error: 'unexpected upstream response' }, { status: 502 });
   return text;
 }
 
@@ -213,7 +235,7 @@ async function proxyCached(env, key, produce) {
 
 // Atomic slot claim: one row, advanced only if the previous slot has elapsed.
 async function claimNominatimSlot(db) {
-  if (!db) return true;
+  if (!db) return false;
   for (let i = 0; i < 4; i++) {
     const now = Date.now();
     const changed = await db
@@ -222,7 +244,8 @@ async function claimNominatimSlot(db) {
         [now + NOMINATIM_GAP_MS, now],
       )
       .catch(() => null);
-    if (changed === null || changed > 0) return true; // a Turso failure must not take search down
+    if (changed === null) return false; // limiter unavailable: fail closed
+    if (changed > 0) return true;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   return false;
@@ -238,6 +261,7 @@ function handleGeocode(url, env) {
     }
     return upstreamJson(
       `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(q)}`,
+      validNominatim,
     );
   });
 }
@@ -253,12 +277,26 @@ function handleRoute(url, env) {
   }
   const coords = `${lon1.toFixed(5)},${lat1.toFixed(5)};${lon2.toFixed(5)},${lat2.toFixed(5)}`;
   return proxyCached(env, `route:${m[1]}:${coords}`, () =>
-    upstreamJson(`${ROUTE_UPSTREAM[m[1]]}${coords}?overview=full&geometries=geojson`),
+    upstreamJson(`${ROUTE_UPSTREAM[m[1]]}${coords}?overview=full&geometries=geojson`, validOsrm),
   );
+}
+
+// Deployment gate: 200 only when Turso is configured, reachable and migrated.
+async function handleProxyHealth(env) {
+  const db = tursoDb(env);
+  if (!db) return Response.json({ turso: 'not configured' }, { status: 503 });
+  try {
+    await db.first('SELECT 1 FROM proxy_cache LIMIT 1', []);
+    await db.first('SELECT 1 FROM proxy_slot LIMIT 1', []);
+    return Response.json({ turso: 'ok' });
+  } catch {
+    return Response.json({ turso: 'unavailable or not migrated' }, { status: 503 });
+  }
 }
 
 async function handleFetch(request, env) {
   const url = new URL(request.url);
+  if (url.pathname === '/proxy-health') return handleProxyHealth(env);
   if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
     if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
     return url.pathname === '/geocode' ? handleGeocode(url, env) : handleRoute(url, env);

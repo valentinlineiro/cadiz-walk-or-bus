@@ -192,3 +192,14 @@ A release cannot proceed with any of the following unresolved:
 
 Non-blocking findings should be recorded as GitHub issues and assigned a
 follow-up priority rather than silently ignored.
+
+## Upstream proxy gate (Turso)
+
+Before releasing a version that serves `/geocode` and `/route/*`:
+
+1. `turso db shell <db> < migrations/0001_proxy_cache.sql` applied.
+2. `wrangler secret put TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set on the Worker.
+3. `GET /proxy-health` returns `200 {"turso":"ok"}` (503 means missing secrets, outage or missing migration).
+4. Real-service smoke: one `/geocode?q=Plaza de España` (miss, then hit via `x-proxy-cache`), one `/route/foot/...`.
+
+Without Turso, Nominatim cache misses return `503 Retry-After` by design (fail closed); OSRM routes still proxy.

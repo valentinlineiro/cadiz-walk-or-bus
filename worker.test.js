@@ -262,19 +262,72 @@ test('GET /route proxies foot and drive, validates coordinates, maps upstream er
   assert.equal((await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), env)).status, 502);
 });
 
-test('proxy works without Turso secrets (no cache, no spacing)', async () => {
-  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => '[]' });
-  const res = await worker.fetch(new Request('http://x/geocode?q=cadiz'));
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get('x-proxy-cache'), 'miss');
+test('geocode fails closed (503 + retry-after) without Turso secrets, but routes still proxy', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return { ok: true, status: 200, text: async () => '{"code":"Ok","routes":[]}' };
+  };
+  const geo = await worker.fetch(new Request('http://x/geocode?q=cadiz'));
+  assert.equal(geo.status, 503);
+  assert.ok(geo.headers.get('retry-after'));
+  assert.equal(calls, 0, 'Nominatim must not be reached without a global limiter');
+  const route = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'));
+  assert.equal(route.status, 200);
 });
 
-test('proxy keeps serving when Turso is down', async () => {
+test('geocode fails closed when Turso is down on a cache miss', async () => {
+  let nominatim = 0;
   globalThis.fetch = async (url) => {
     if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    nominatim++;
     return { ok: true, status: 200, text: async () => NOMINATIM_HIT };
   };
   const res = await worker.fetch(new Request('http://x/geocode?q=cadiz'), TURSO_ENV);
-  assert.equal(res.status, 200);
-  assert.equal(await res.text(), NOMINATIM_HIT);
+  assert.equal(res.status, 503);
+  assert.equal(nominatim, 0);
+});
+
+test('concurrent geocode misses: only one reaches Nominatim per slot', async () => {
+  let nominatim = 0;
+  withTurso(async () => {
+    nominatim++;
+    return { ok: true, status: 200, text: async () => NOMINATIM_HIT };
+  });
+  const res = await Promise.all(
+    ['uno', 'dos', 'tres'].map((q) => worker.fetch(new Request(`http://x/geocode?q=${q}`), TURSO_ENV)),
+  );
+  assert.deepEqual(res.map((r) => r.status).sort(), [200, 503, 503]);
+  assert.equal(nominatim, 1);
+});
+
+test('valid JSON with the wrong shape is rejected and never cached', async () => {
+  const cache = withTurso(async (url) => ({
+    ok: true,
+    status: 200,
+    text: async () => (String(url).includes('nominatim') ? '{"error":"rate limited"}' : '{"foo":1}'),
+  }));
+  const geo = await worker.fetch(new Request('http://x/geocode?q=cadiz'), TURSO_ENV);
+  assert.equal(geo.status, 502);
+  const route = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  assert.equal(route.status, 502);
+  assert.equal(cache.size, 0);
+});
+
+test('upstream 429 becomes 503 with retry-after, not 404; upstream 400 stays "no result"', async () => {
+  withTurso(async () => ({ ok: false, status: 429, headers: new Headers({ 'retry-after': '30' }), text: async () => '' }));
+  const limited = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  assert.equal(limited.status, 503);
+  assert.equal(limited.headers.get('retry-after'), '30');
+  withTurso(async () => ({ ok: false, status: 400, text: async () => '' }));
+  const bad = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  assert.equal(bad.status, 404);
+});
+
+test('/proxy-health reports 503 unconfigured and 200 when Turso answers', async () => {
+  assert.equal((await worker.fetch(new Request('http://x/proxy-health'))).status, 503);
+  withTurso(async () => assert.fail('no upstream calls'));
+  const ok = await worker.fetch(new Request('http://x/proxy-health'), TURSO_ENV);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { turso: 'ok' });
 });
