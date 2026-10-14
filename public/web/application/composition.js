@@ -15,7 +15,10 @@ import {
 } from '../infrastructure/index.js';
 import gtfsSnapshot from '../../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
-const routingAdapter = new OsrmRoutingAdapter(fetch);
+const routingAdapter = new OsrmRoutingAdapter(fetch, {
+  footBaseUrl: '/route/foot',
+  driveBaseUrl: '/route/drive',
+});
 const scheduledAdapter = new GtfsTransitAdapter(gtfsSnapshot);
 let transitAdapter = new ResilientTransitAdapter(new MunicipalTransitAdapter(fetch), scheduledAdapter);
 let cachedStops = [];
@@ -46,7 +49,7 @@ export const cachedTransitPort = {
 };
 
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
-const geocodingAdapter = new NominatimGeocodingAdapter(fetch, { minIntervalMs: 1000 });
+const geocodingAdapter = new NominatimGeocodingAdapter(fetch, { baseUrl: '/geocode', minIntervalMs: 1000 });
 
 export const searchDestinationsUseCase = new SearchDestinationsUseCase(geocodingAdapter);
 export const findBestJourneysUseCase = new FindBestJourneysUseCase({

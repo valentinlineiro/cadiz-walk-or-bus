@@ -1,11 +1,15 @@
 import { haversineMeters } from '../../domain/topology.js';
 export class OsrmRoutingAdapter {
     fetchImpl;
-    constructor(fetchImpl = globalThis.fetch) {
+    footBaseUrl;
+    driveBaseUrl;
+    constructor(fetchImpl = globalThis.fetch, options = {}) {
         this.fetchImpl = (fetchImpl ?? globalThis.fetch).bind(globalThis);
+        this.footBaseUrl = options.footBaseUrl ?? 'https://routing.openstreetmap.de/routed-foot/route/v1/foot';
+        this.driveBaseUrl = options.driveBaseUrl ?? 'https://router.project-osrm.org/route/v1/driving';
     }
     async routeWalking(from, to) {
-        const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+        const url = `${this.footBaseUrl}/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
         let r;
         try {
             r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
@@ -42,7 +46,7 @@ export class OsrmRoutingAdapter {
     }
     async busRouteHop(from, to) {
         const straightLine = () => [[from.lat, from.lon], [to.lat, to.lon]];
-        const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
+        const url = `${this.driveBaseUrl}/${from.lon},${from.lat};${to.lon},${to.lat}?overview=full&geometries=geojson`;
         let r;
         try {
             r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
