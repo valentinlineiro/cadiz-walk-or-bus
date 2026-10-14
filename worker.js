@@ -338,12 +338,12 @@ async function fetchPanelArrivals(stop, route) {
   try {
     upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
   } catch {
-    return Response.json({ error: 'upstream unreachable' }, { status: 502 });
+    return { fail: { status: 502, body: { error: 'upstream unreachable' } } };
   }
-  if (!upstream.ok) return Response.json({ error: `upstream ${upstream.status}` }, { status: 502 });
+  if (!upstream.ok) return { fail: { status: 502, body: { error: `upstream ${upstream.status}` } } };
   const arrivals = parseArrivals(await upstream.text());
-  if (arrivals === null) return Response.json({ error: 'malformed upstream response' }, { status: 502 });
-  return arrivals;
+  if (arrivals === null) return { fail: { status: 502, body: { error: 'malformed upstream response' } } };
+  return { arrivals };
 }
 
 async function readSharedArrivals(db, key) {
@@ -379,12 +379,19 @@ async function handleArrivals(url, env) {
   if (mem && Date.now() - mem.t < ARRIVALS_TTL_S * 1000) return arrivalsResponse(mem.arrivals, mem.t, 'mem');
 
   // Concurrent requests in this isolate share one load (one Turso lookup, one panel fetch).
+  // Only plain data is shared: Workers forbid touching a Response/stream created by another
+  // request ("Cannot perform I/O on behalf of a different request"), so each request builds
+  // its own Response from the settled result.
   let load = inflightArrivals.get(key);
   if (!load) {
     load = loadArrivals(key, stop, route, env).finally(() => inflightArrivals.delete(key));
     inflightArrivals.set(key, load);
   }
-  return (await load).clone();
+  const r = await load;
+  if (r.fail) {
+    return Response.json(r.fail.body, { status: r.fail.status, headers: r.fail.headers ?? {} });
+  }
+  return arrivalsResponse(r.arrivals, r.t, r.source);
 }
 
 async function loadArrivals(key, stop, route, env) {
@@ -396,7 +403,7 @@ async function loadArrivals(key, stop, route, env) {
     const shared = await readSharedArrivals(db, key);
     if (shared) {
       rememberArrivals(key, shared);
-      return arrivalsResponse(shared.arrivals, shared.t, 'hit');
+      return { arrivals: shared.arrivals, t: shared.t, source: 'hit' };
     }
     const now = Date.now();
     const claimed = await db
@@ -412,10 +419,10 @@ async function loadArrivals(key, stop, route, env) {
         const polled = await readSharedArrivals(db, key);
         if (polled) {
           rememberArrivals(key, polled);
-          return arrivalsResponse(polled.arrivals, polled.t, 'hit');
+          return { arrivals: polled.arrivals, t: polled.t, source: 'hit' };
         }
       }
-      return Response.json({ error: 'busy' }, { status: 503, headers: { 'retry-after': '2' } });
+      return { fail: { status: 503, body: { error: 'busy' }, headers: { 'retry-after': '2' } } };
     }
     if (claimed === null) {
       degraded = true;
@@ -426,8 +433,9 @@ async function loadArrivals(key, stop, route, env) {
   }
 
   try {
-    const arrivals = await fetchPanelArrivals(stop, route);
-    if (arrivals instanceof Response) return arrivals;
+    const fetched = await fetchPanelArrivals(stop, route);
+    if (fetched.fail) return fetched;
+    const { arrivals } = fetched;
     const entry = { t: Date.now(), arrivals };
     rememberArrivals(key, entry);
     if (db && !degraded) {
@@ -443,7 +451,7 @@ async function loadArrivals(key, stop, route, env) {
         await db.run('DELETE FROM proxy_cache WHERE expires_at < ?1', [Math.floor(entry.t / 1000)]).catch(() => {});
       }
     }
-    return arrivalsResponse(arrivals, entry.t, degraded ? 'degraded' : 'miss');
+    return { arrivals, t: entry.t, source: degraded ? 'degraded' : 'miss' };
   } finally {
     // Release only our own acquisition: if it expired and someone else re-acquired, next_at differs.
     if (lockUntil !== null) {

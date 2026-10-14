@@ -564,3 +564,18 @@ test('GET /api: panel near its timeout plus a slow cache publish still resolves 
   assert.equal((await owner).status, 200);
   assert.equal(n, 1, 'only the owner reached the panel');
 });
+
+test('GET /api never clones or shares a Response between requests (Workers I/O isolation)', async () => {
+  const realClone = Response.prototype.clone;
+  Response.prototype.clone = () => assert.fail('a Response created by one request must not be reused by another');
+  try {
+    const c = { n: 0 };
+    globalThis.fetch = panelOk(c);
+    const res = await Promise.all(Array.from({ length: 5 }, () => worker.fetch(new Request('http://x/api?stop=3006'))));
+    assert.deepEqual(new Set(res.map((r) => r.status)), new Set([200]));
+    assert.equal(c.n, 1);
+    assert.equal(new Set(res).size, 5, 'each request gets its own Response');
+  } finally {
+    Response.prototype.clone = realClone;
+  }
+});
