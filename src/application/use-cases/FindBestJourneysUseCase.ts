@@ -20,13 +20,15 @@ import {
 } from '../../domain/constants.js';
 import { computeLastMile } from '../../domain/last-mile.js';
 import { filterDiverseAlternatives, type StructurallyDiverseItem } from '../../domain/diversity.js';
-import { haversineMeters, findAlightStop, nearestStops, diversifyByLine } from '../../domain/topology.js';
+import { haversineMeters, findAlightStop, nearestStops, diversifyByLine, stopLineMap } from '../../domain/topology.js';
 import { createWalkCandidate, createBusCandidates, selectCandidates } from '../../domain/planner.js';
 
 export interface FindBestJourneysInput {
   origin: Coordinates;
   destination: Coordinates & { label?: string };
   policy?: PlanningPolicyOverrides;
+  /** Bus route geometry costs one routing call per hop and is only needed to draw the map. */
+  withBusGeometry?: boolean;
 }
 
 interface ReRankItem extends StructurallyDiverseItem {
@@ -70,14 +72,17 @@ export class FindBestJourneysUseCase {
     const pool = nearestStops(stops ?? [], origin.lat, origin.lon, 32);
     const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
 
+    // A stop the topology does not know cannot be matched to any line: it was not evaluated,
+    // exactly like a stop that did not answer (e.g. fallback topology with foreign stop ids).
+    const knownToTopology = lines ? stopLineMap(lines) : new Map<string, Set<string>>();
     const busCandidates: JourneyCandidate[] = [];
     let stopsWithData = 0;
     await Promise.all(
       nearbyStops.map(async (stop) => {
         const result = await arrivalsResultOf(this.ports.transit, stop.stop);
-        // `[]` below is only ever "a source answered with nothing"; a source that did not answer
-        // is counted separately so the caller can refuse to recommend walking on missing data.
-        if (result.status !== 'unavailable') stopsWithData += 1;
+        // `[]` below is only ever "a source answered with nothing"; a stop that did not answer or
+        // that the topology cannot place is not counted, so the caller can refuse to recommend walking.
+        if (result.status !== 'unavailable' && knownToTopology.has(String(stop.stop))) stopsWithData += 1;
         const arrivals: Arrival[] = result.status === 'unavailable' ? [] : result.arrivals;
         const stopDist = haversineMeters(origin.lat, origin.lon, stop.lat, stop.lon);
         const walkToStopMinutes = Math.max(0, Math.round(stopDist / WALK_METERS_PER_MINUTE));
@@ -104,8 +109,10 @@ export class FindBestJourneysUseCase {
       }),
     );
 
+    // Without the line topology no bus can be matched to the destination: buses were not
+    // evaluated, so "walk" would be a guess, not a conclusion.
     const transitData: TransitDataStatus =
-      !stopsLoaded
+      !stopsLoaded || !lines
         ? 'unavailable'
         : nearbyStops.length === 0 || stopsWithData === nearbyStops.length
         ? 'available'
@@ -185,7 +192,7 @@ export class FindBestJourneysUseCase {
 
         const [walkToStopRoute, routedBus, lastMileRoute] = await Promise.all([
           boardStop ? this.ports.routing.routeWalking(origin, boardStop).catch(() => null) : null,
-          boardStop && alightStop
+          boardStop && alightStop && input.withBusGeometry !== false
             ? this.ports.routing.routeBus(boardStop, alightStop, pathCoords).catch(() => null)
             : null,
           alightStop ? this.ports.routing.routeWalking(alightStop, destination).catch(() => null) : null,

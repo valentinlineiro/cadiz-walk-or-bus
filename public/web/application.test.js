@@ -72,7 +72,7 @@ test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
     },
     transit: {
       getStops: async () => [{ stop: '1', lat: 36.525, lon: -6.28 }],
-      getLines: async () => null,
+      getLines: async () => ({ L0: { X: ['1'] } }),
       getArrivals: async () => [],
     },
   });

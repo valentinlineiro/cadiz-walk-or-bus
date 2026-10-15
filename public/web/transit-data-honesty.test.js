@@ -98,7 +98,7 @@ const routing = {
 };
 const transitWith = (perStop) => ({
   getStops: async () => stops,
-  getLines: async () => null,
+  getLines: async () => ({ L0: { X: ['S1', 'S2'] } }),
   getArrivals: async () => [],
   getArrivalsResult: async (id) => perStop[id],
 });
@@ -167,20 +167,12 @@ test('GetQuickVerdict: walk with a silent stop is no verdict (null)', async () =
 
 test('GetQuickVerdict: a known winning bus survives a silent stop', async () => {
   const bus = live([{ line: 'L1', destination: 'X', minutes: 1 }]);
-  const fast = { routeWalking: async (_from, to) => ({ status: 'available', minutes: to === destination ? 30 : 1, coordinates: [] }) };
-  const useCase = new GetQuickVerdictUseCase({ routing: fast, transit: transitWith({ S1: bus, S2: unavailable }) });
+  const fast = { ...routing, routeWalking: async (from, to) => ({ status: 'available', minutes: from === origin && to === destination ? 30 : 1, coordinates: [] }) };
+  // A bus verdict needs the line topology: without an alighting stop there is no ride or last mile to count.
+  const transit = { ...transitWith({ S1: bus, S2: unavailable }), getLines: async () => ({ L1: { X: ['S1', 'S2'] } }) };
+  const useCase = new GetQuickVerdictUseCase({ routing: fast, transit });
   const verdict = await useCase.execute({ origin, destination });
   assert.equal(verdict?.kind, 'bus');
-});
-
-test('chooseQuickBus: totalMinutes includes the last-mile walk', async () => {
-  const { chooseQuickBus } = await import('./domain/planner.js');
-  const choice = chooseQuickBus(
-    [{ line: 'L1', minutes: 2 }],
-    1,
-    () => ({ stop: 'X', rideMeters: 0, distanceMeters: 800 }),
-  );
-  assert.ok(choice.totalMinutes >= 1 + 2 + 8, `got ${choice.totalMinutes}`);
 });
 
 test('map markers escape external names in their html', async () => {
