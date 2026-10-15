@@ -285,7 +285,6 @@ export function heroCardHTML(cand) {
           <span class="segment bus"><span class="icon">${ICON.bus}</span>${rideMins}′</span>
           <span class="segment walk"><span class="icon">${ICON.walk}</span>${lastMileLabel}′</span>
         </div>
-        <button type="button" class="start-journey">Iniciar trayecto</button>
       </div>
     `;
   }
@@ -296,7 +295,6 @@ export function heroCardHTML(cand) {
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
       <div class="decision-wait">${totalMins}<span class="unit">′</span></div>
       <div class="decision-line">Ruta directa a pie</div>
-      <button type="button" class="start-journey">Iniciar trayecto</button>
     </div>
   `;
 }
@@ -317,21 +315,32 @@ export function planningCardsHTML(selectedCandidates, activeIndex = 0, context =
     return `${heroHTML}${explanationHTML}`;
   }
   const altsHTML = `
-    <div class="alternatives-container">
-      <div class="alternatives-heading">Otras opciones competitivas</div>
-      ${alternatives.map((alt) => buildAlternativeCardHTML(alt, hero)).join('')}
-    </div>
+    <details class="alternatives-details">
+      <summary>Ver otras opciones (${alternatives.length})</summary>
+      <div class="alternatives-container">
+        ${alternatives.map((alt) => buildAlternativeCardHTML(alt, hero)).join('')}
+      </div>
+    </details>
   `;
   return `${heroHTML}${explanationHTML}\n${altsHTML}`;
 }
 
-export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null, context = {}, onStart = null) {
+export function renderDecisionWithAlternatives(selectedCandidates, activeIndex = 0, onPromote = null, context = {}) {
   const html = planningCardsHTML(selectedCandidates, activeIndex, context);
   if (typeof document !== 'undefined') {
     const decision = document.getElementById('decision');
     if (decision) {
       decision.innerHTML = html;
       decision.classList.remove('hidden');
+      const alternativesDisclosure = typeof decision.querySelector === 'function'
+        ? decision.querySelector('.alternatives-details')
+        : null;
+      if (alternativesDisclosure && typeof alternativesDisclosure.addEventListener === 'function') {
+        alternativesDisclosure.addEventListener('toggle', () => {
+          const activeCandidate = selectedCandidates[activeIndex];
+          if (activeCandidate) applyCandidateToMap(activeCandidate);
+        });
+      }
       const buttons = decision.querySelectorAll('.alternative-card');
       buttons.forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -341,7 +350,7 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
             ? selectedCandidates.findIndex((c) => isSameIdentity(c.identity, parsedIdentity))
             : -1;
           if (nextIndex !== -1) {
-            renderDecisionWithAlternatives(selectedCandidates, nextIndex, onPromote, context, onStart);
+            renderDecisionWithAlternatives(selectedCandidates, nextIndex, onPromote, context);
             if (typeof onPromote === 'function') {
               onPromote(selectedCandidates[nextIndex], nextIndex);
             }
@@ -350,21 +359,6 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
       });
       if (typeof decision.querySelector === 'function') {
         const heroEl = decision.querySelector('.decision-card');
-        const startButton = decision.querySelector('.start-journey');
-        if (startButton && typeof startButton.addEventListener === 'function') {
-          startButton.addEventListener('click', (event) => {
-            event?.stopPropagation?.();
-            if (selectedCandidates[activeIndex]) {
-              const action = typeof onStart === 'function' ? onStart : onPromote;
-              if (typeof action === 'function') {
-                action(selectedCandidates[activeIndex], activeIndex);
-              }
-            }
-            startButton.textContent = 'Trayecto iniciado';
-            startButton.disabled = true;
-            startButton.setAttribute?.('aria-label', 'Trayecto iniciado');
-          });
-        }
         if (heroEl && typeof heroEl.addEventListener === 'function') {
           heroEl.addEventListener('click', () => {
             if (typeof onPromote === 'function' && selectedCandidates[activeIndex]) {
@@ -805,7 +799,7 @@ async function routeToDestination(dest) {
   if (id !== requestId) return;
   arrivalsByStop = eligibleArrivals;
 
-  const recordSelection = (promoted, started = false) => {
+  const recordSelection = (promoted) => {
     applyCandidateToMap(promoted);
     if (destCoords && destLabel && winningHero) {
       const chosenAlternative = decision.alternatives.find((a) => isSameIdentity(a.journey.identity, promoted.identity)) ?? null;
@@ -815,22 +809,17 @@ async function routeToDestination(dest) {
           recommendation: winningHero,
           choice: chosenAlternative,
         };
-        if (started) {
-          recordUserChoiceUseCase.start(input);
-        } else {
-          recordUserChoiceUseCase.execute(input);
-        }
+        recordUserChoiceUseCase.execute(input);
       } catch {}
     }
     updateFavToggle();
   };
   const onPromote = (promoted) => recordSelection(promoted);
-  const onStart = (promoted) => recordSelection(promoted, true);
 
   const promote = (cand) => {
     const idx = candidatesForUI.findIndex((c) => isSameIdentity(c.identity, cand.identity));
     if (idx !== -1) {
-      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
+      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote, { walkMinutes: decision.walkMinutes });
       onPromote(candidatesForUI[idx]);
     }
   };
@@ -840,7 +829,7 @@ async function routeToDestination(dest) {
     onPromote: promote,
   };
 
-  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
+  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes });
   if (decision.transitData === 'partial' && winningHero.mode === 'walk') {
     document.getElementById('decision')?.insertAdjacentHTML('beforeend', partialTransitDataNoteHTML());
   }

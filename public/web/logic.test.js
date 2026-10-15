@@ -1799,12 +1799,12 @@ test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and a
   assert.ok(html0.includes('14<span class="unit">′ total</span>'));
   assert.ok(html0.includes('L1 · Bájate en Plaza Mina'));
   assert.ok(html0.includes('class="alternatives-container"'));
-  assert.ok(html0.includes('Otras opciones competitivas'));
+  assert.ok(html0.includes('Ver otras opciones (1)'));
   assert.ok(html0.includes('data-identity="walk:direct"'));
   assert.ok(html0.includes('+4′'));
   assert.ok(html0.includes('Bus te ahorra 4′ frente a ir andando.'));
   assert.ok(html0.includes('Tiempo real'));
-  assert.ok(html0.includes('Iniciar trayecto'));
+  assert.ok(!html0.includes('Iniciar trayecto'));
 
   // Case 2: activeIndex = 1 (Walk is Hero, Bus is alternative)
   const html1 = planningCardsHTML([cBus, cWalk], 1, { walkMinutes: 18 });
@@ -1924,50 +1924,6 @@ test('ui: promoting an alternative preserves the comparison context', () => {
     renderDecisionWithAlternatives([cBus, cWalk], 0, () => {}, { walkMinutes: 18 });
     listeners[0]();
     assert.match(mockDecision.innerHTML, /El bus es 4′ más rápido que ir andando\./);
-  } finally {
-    delete globalThis.document;
-  }
-});
-
-test('ui: start journey action persists started state without changing navigation mode', () => {
-  const cWalk = {
-    identity: createWalkIdentity(),
-    mode: 'walk',
-    estimatedMinutes: 18,
-    exactJourney: { totalMinutes: 18 },
-  };
-  const listeners = [];
-  const startButton = {
-    addEventListener: (event, handler) => { if (event === 'click') listeners.push(handler); },
-    classList: { add: () => {} },
-    textContent: 'Iniciar trayecto',
-    disabled: false,
-  };
-  const hero = { addEventListener: () => {} };
-  const mockDecision = {
-    innerHTML: '',
-    classList: { remove: () => {} },
-    querySelectorAll: () => [],
-    querySelector: (selector) => selector === '.start-journey' ? startButton : hero,
-  };
-  globalThis.document = { getElementById: (id) => id === 'decision' ? mockDecision : null };
-
-  try {
-    let selected = null;
-    let started = null;
-    renderDecisionWithAlternatives(
-      [cWalk],
-      0,
-      (candidate) => { selected = candidate; },
-      { walkMinutes: 18 },
-      (candidate) => { started = candidate; },
-    );
-    assert.equal(listeners.length, 1);
-    listeners[0]({ stopPropagation: () => {} });
-    assert.equal(selected, null);
-    assert.equal(started, cWalk);
-    assert.equal(startButton.textContent, 'Trayecto iniciado');
-    assert.equal(startButton.disabled, true);
   } finally {
     delete globalThis.document;
   }

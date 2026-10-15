@@ -451,23 +451,6 @@ test('LocalStorageJourneyLogAdapter: append persists valid DecisionRecord and su
   assert.equal(log[0].destination.label, 'Plaza Mina');
 });
 
-test('LocalStorageJourneyLogAdapter: preserves startedAt when persisting a started journey', () => {
-  const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
-  const record = {
-    id: '1002-started',
-    timestamp: 1700000000000,
-    startedAt: 1700000005000,
-    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
-    recommendation: { identity: 'walk:direct', kind: 'walk', walkMinutes: 15, totalMinutes: 15 },
-    choice: null,
-  };
-
-  adapter.append(record);
-
-  assert.equal(adapter.getLog()[0].startedAt, 1700000005000);
-});
-
 test('LocalStorageJourneyLogAdapter: deduplicates evaluations within 5 minutes for same destination', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);

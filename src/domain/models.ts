@@ -184,7 +184,6 @@ export interface Decision {
 export interface DecisionRecord {
   id?: string;
   timestamp: number;
-  startedAt?: number;
   destination: Coordinates & { label: string };
   recommendation: {
     identity: string;
