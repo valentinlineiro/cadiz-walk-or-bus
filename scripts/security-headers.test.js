@@ -14,11 +14,12 @@ const policy = (overrides = {}) => {
     'default-src': "'self'",
     'script-src': `'self' ${hashOf(INLINE)}`,
     'style-src': "'self' 'unsafe-inline'",
-    'img-src': "'self' https://tile.openstreetmap.org",
+    'img-src': "'self' data: https://tile.openstreetmap.org",
     'connect-src': "'self'",
     'object-src': "'none'",
     'base-uri': "'none'",
     'frame-ancestors': "'none'",
+    'form-action': "'self'",
     ...overrides,
   };
   return Object.entries(directives).filter(([, v]) => v !== null).map(([k, v]) => `${k} ${v}`).join('; ');
