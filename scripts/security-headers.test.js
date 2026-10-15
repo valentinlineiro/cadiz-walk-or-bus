@@ -129,6 +129,17 @@ test('shouldRequireBaseUriAndFrameAncestorsNone', (t) => {
   assert.ok(found.some((p) => /frame-ancestors 'none'/.test(p)));
 });
 
+test('shouldReportMissingWorkerSecurityHeaders', (t) => {
+  const worker = {
+    mapHtml: page(),
+    headers: {
+      'content-security-policy': policy(),
+      'x-content-type-options': 'nosniff',
+    },
+  };
+  assert.ok(problems(project(t), worker).some((p) => /worker response must set Permissions-Policy/.test(p)));
+});
+
 test('shouldAcceptWorkerPageWhenPolicyAndScriptsMatch', (t) => {
   const headers = {
     'content-security-policy': policy(),
