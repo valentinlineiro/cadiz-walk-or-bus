@@ -64,7 +64,7 @@ initUI();
 // by the Worker itself). architecture-gate fails if the two drift.
 export const SECURITY_HEADERS = {
   'content-security-policy':
-    "default-src 'self'; script-src 'self' 'sha256-qw9Gtbho6SGxg+t7p2uoPXcR4gzWdAdJ4wSf5r2ev+w=' 'sha256-QLq51P9W4Te60ChkY3EEM0hais/w5klnhC2VD3tnPDc='; style-src 'self' 'unsafe-inline'; img-src 'self' https://tile.openstreetmap.org; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "default-src 'self'; script-src 'self' 'sha256-qw9Gtbho6SGxg+t7p2uoPXcR4gzWdAdJ4wSf5r2ev+w=' 'sha256-QLq51P9W4Te60ChkY3EEM0hais/w5klnhC2VD3tnPDc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'x-content-type-options': 'nosniff',
   'permissions-policy': 'geolocation=(self)',
 };

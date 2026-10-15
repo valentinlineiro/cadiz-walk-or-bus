@@ -2,8 +2,10 @@
 # style-src keeps 'unsafe-inline' on purpose: index.html has an inline <style> block and the map
 # markers are Leaflet divIcons built with style="" attributes. script-src allows no inline code
 # except the exact hashed bootstrap scripts below (the gate checks the hashes match the pages).
+# img-src data: is required by Leaflet itself: it points tile <img> elements at a 1x1 transparent
+# data: GIF while a tile loads or is dropped (observed as CSP violations without it).
 # No Referrer-Policy override: OpenStreetMap's tile policy expects a Referer.
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-qw9Gtbho6SGxg+t7p2uoPXcR4gzWdAdJ4wSf5r2ev+w=' 'sha256-QLq51P9W4Te60ChkY3EEM0hais/w5klnhC2VD3tnPDc='; style-src 'self' 'unsafe-inline'; img-src 'self' https://tile.openstreetmap.org; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-qw9Gtbho6SGxg+t7p2uoPXcR4gzWdAdJ4wSf5r2ev+w=' 'sha256-QLq51P9W4Te60ChkY3EEM0hais/w5klnhC2VD3tnPDc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
   X-Content-Type-Options: nosniff
   Permissions-Policy: geolocation=(self)
