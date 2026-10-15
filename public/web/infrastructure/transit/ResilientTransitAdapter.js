@@ -16,21 +16,28 @@ export class ResilientTransitAdapter {
         this.scheduled = scheduled;
         this.timeoutMs = timeoutMs;
     }
-    async getStops() {
+    /** Catalogues say where they came from: `live` municipal data or the `scheduled` snapshot. */
+    async getStopsResult() {
         try {
-            return await withTimeout(this.realtime.getStops(), this.timeoutMs);
+            return { source: 'live', stops: await withTimeout(this.realtime.getStops(), this.timeoutMs) };
         }
         catch {
-            return this.scheduled.getStops();
+            return { source: 'scheduled', stops: await this.scheduled.getStops() };
         }
     }
-    async getLines() {
+    async getLinesResult() {
         try {
-            return await withTimeout(this.realtime.getLines(), this.timeoutMs);
+            return { source: 'live', lines: await withTimeout(this.realtime.getLines(), this.timeoutMs) };
         }
         catch {
-            return this.scheduled.getLines();
+            return { source: 'scheduled', lines: await this.scheduled.getLines() };
         }
+    }
+    async getStops() {
+        return (await this.getStopsResult()).stops;
+    }
+    async getLines() {
+        return (await this.getLinesResult()).lines;
     }
     /**
      * Same policy as getArrivals, but the answer says where it came from:

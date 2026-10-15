@@ -39,6 +39,8 @@ const scheduledAdapter = new GtfsTransitAdapter(gtfsSnapshot);
 let transitAdapter = new ResilientTransitAdapter(new MunicipalTransitAdapter(fetch), scheduledAdapter);
 let cachedStops = [];
 let cachedLines = null;
+let stopsFallbackAt = null;
+let linesFallbackAt = null;
 
 export function setTransitAdapter(adapter) {
   transitAdapter = new ResilientTransitAdapter(adapter, scheduledAdapter);
@@ -46,25 +48,36 @@ export function setTransitAdapter(adapter) {
 
 export function setCachedStops(nextStops) {
   cachedStops = nextStops ?? [];
+  stopsFallbackAt = null;
 }
 
 export function setCachedLines(nextLines) {
   cachedLines = nextLines ?? null;
+  linesFallbackAt = null;
 }
 
+// A catalogue that came from the scheduled snapshot is a stand-in: it is kept only for a short
+// window and then the municipal one is asked again, so a transient outage does not stick.
+const FALLBACK_RETRY_MS = 30_000;
+const staleFallback = (at) => at !== null && Date.now() - at >= FALLBACK_RETRY_MS;
+
 const loadStops = shareInFlight(async () => {
-  cachedStops = await transitAdapter.getStops().catch(() => []);
+  const { source, stops } = await transitAdapter.getStopsResult().catch(() => ({ source: 'scheduled', stops: [] }));
+  cachedStops = stops;
+  stopsFallbackAt = source === 'live' ? null : Date.now();
   return cachedStops;
 });
 const loadLines = shareInFlight(async () => {
-  cachedLines = await transitAdapter.getLines().catch(() => null);
+  const { source, lines } = await transitAdapter.getLinesResult().catch(() => ({ source: 'scheduled', lines: null }));
+  cachedLines = lines;
+  linesFallbackAt = source === 'live' ? null : Date.now();
   return cachedLines;
 });
 const loadArrivals = shareInFlight((stopId) => transitAdapter.getArrivalsResult(stopId));
 
 export const cachedTransitPort = {
-  getStops: async () => (cachedStops.length === 0 ? loadStops() : cachedStops),
-  getLines: async () => (cachedLines ? cachedLines : loadLines()),
+  getStops: async () => (cachedStops.length === 0 || staleFallback(stopsFallbackAt) ? loadStops() : cachedStops),
+  getLines: async () => (!cachedLines || staleFallback(linesFallbackAt) ? loadLines() : cachedLines),
   getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
   // Must be exposed here: without it the use cases fall back to getArrivals and a failed source
   // looks like an empty answer ("no buses").

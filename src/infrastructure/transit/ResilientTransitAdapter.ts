@@ -20,20 +20,29 @@ export class ResilientTransitAdapter implements TransitDataPort {
     private readonly timeoutMs = 8000,
   ) {}
 
-  async getStops(): Promise<Stop[]> {
+  /** Catalogues say where they came from: `live` municipal data or the `scheduled` snapshot. */
+  async getStopsResult(): Promise<{ source: 'live' | 'scheduled'; stops: Stop[] }> {
     try {
-      return await withTimeout(this.realtime.getStops(), this.timeoutMs);
+      return { source: 'live', stops: await withTimeout(this.realtime.getStops(), this.timeoutMs) };
     } catch {
-      return this.scheduled.getStops();
+      return { source: 'scheduled', stops: await this.scheduled.getStops() };
     }
   }
 
-  async getLines(): Promise<LinesTopology | null> {
+  async getLinesResult(): Promise<{ source: 'live' | 'scheduled'; lines: LinesTopology | null }> {
     try {
-      return await withTimeout(this.realtime.getLines(), this.timeoutMs);
+      return { source: 'live', lines: await withTimeout(this.realtime.getLines(), this.timeoutMs) };
     } catch {
-      return this.scheduled.getLines();
+      return { source: 'scheduled', lines: await this.scheduled.getLines() };
     }
+  }
+
+  async getStops(): Promise<Stop[]> {
+    return (await this.getStopsResult()).stops;
+  }
+
+  async getLines(): Promise<LinesTopology | null> {
+    return (await this.getLinesResult()).lines;
   }
 
   /**
