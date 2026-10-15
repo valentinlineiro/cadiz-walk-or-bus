@@ -1078,38 +1078,22 @@ export function initUI() {
   }
 
   if (dropdown) {
-    dropdown.addEventListener('pointerdown', (e) => {
+    // One path for mouse, touch, keyboard (Enter/Space) and assistive tech: the buttons' native click.
+    dropdown.addEventListener('click', (e) => {
       const removeBtn = e.target.closest('.remove-fav');
-      if (removeBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const itemEl = removeBtn.closest('.dropdown-item');
-        if (itemEl?._data) {
-          removeFavorite(itemEl._data);
-          renderQuickPicks();
-          updateFavToggle();
-        }
+      const itemEl = e.target.closest('.dropdown-item');
+      if (!itemEl?._data) return;
+      if (!removeBtn) {
+        selectDestination(itemEl._data);
         return;
       }
-      const itemEl = e.target.closest('.dropdown-item');
-      if (!itemEl || !itemEl._data) return;
-      e.preventDefault();
-      selectDestination(itemEl._data);
-    });
-    // Keyboard and assistive tech activate with click (detail 0); pointer taps are handled above.
-    dropdown.addEventListener('click', (e) => {
-      if (e.detail !== 0) return;
-      const removeBtn = e.target.closest('.remove-fav');
-      const itemEl = (removeBtn || e.target).closest('.dropdown-item');
-      if (!itemEl?._data) return;
-      if (removeBtn) {
-        removeFavorite(itemEl._data);
-        renderQuickPicks();
-        updateFavToggle();
-        dropdown.querySelector('.dropdown-select')?.focus();
-      } else {
-        selectDestination(itemEl._data);
-      }
+      const index = [...dropdown.querySelectorAll('.dropdown-item')].indexOf(itemEl);
+      removeFavorite(itemEl._data);
+      renderQuickPicks();
+      updateFavToggle();
+      // Keep focus on a live control: the row that took the removed one's place, else the search field.
+      const selects = dropdown.querySelectorAll('.dropdown-select');
+      (selects[Math.min(index, selects.length - 1)] ?? document.getElementById('q'))?.focus();
     });
   }
 
