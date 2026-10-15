@@ -331,12 +331,39 @@ export function __resetArrivalsCache() {
   inflightArrivals.clear();
 }
 
+// IPv6 clients own a whole /64, so key on its 4 hextets; IPv4-mapped IPv6 collapses to its IPv4.
+// Anything that does not parse is returned verbatim (own bucket) rather than merged with others.
+export function rateKey(ip) {
+  if (!ip) return 'unknown';
+  if (!ip.includes(':')) return ip;
+  let s = ip.toLowerCase();
+  const v4 = s.match(/^(.*:)(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const o = v4.slice(2).map(Number);
+    if (o.some((n) => n > 255)) return ip;
+    s = `${v4[1]}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return ip;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves[1] ? halves[1].split(':') : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 2 ? fill < 1 : head.length !== 8) return ip;
+  const g = [...head, ...Array(halves.length === 2 ? fill : 0).fill('0'), ...tail];
+  if (!g.every((x) => /^[0-9a-f]{1,4}$/.test(x))) return ip;
+  const n = g.map((x) => parseInt(x, 16));
+  if (n.slice(0, 5).every((x) => x === 0) && n[5] === 0xffff) {
+    return `${n[6] >> 8}.${n[6] & 255}.${n[7] >> 8}.${n[7] & 255}`;
+  }
+  return n.slice(0, 4).map((x) => x.toString(16)).join(':');
+}
+
 async function rateLimited(request, env) {
   const limiter = env?.RATE_LIMITER;
   if (!limiter) return false;
   // Anonymous public app: the client IP is the only stable key. Limit is generous because
   // mobile carriers share IPs (CGNAT).
-  const key = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  const key = rateKey(request.headers.get('cf-connecting-ip'));
   try {
     return !(await limiter.limit({ key })).success;
   } catch {
@@ -559,10 +586,13 @@ async function handleProxyHealth(env) {
 
 async function handleFetch(request, env) {
   const url = new URL(request.url);
+  const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname.startsWith('/route/');
+  if (dynamic && request.method !== 'GET') {
+    return new Response('method not allowed', { status: 405, headers: { allow: 'GET' } });
+  }
   if (url.pathname === '/proxy-health') return handleProxyHealth(env);
   if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
     if (await rateLimited(request, env)) return rateLimitedResponse(url.pathname);
-    if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
     return url.pathname === '/geocode' ? handleGeocode(url, env) : handleRoute(url, env);
   }
   if (url.pathname === '/stops') return Response.json(stops);
