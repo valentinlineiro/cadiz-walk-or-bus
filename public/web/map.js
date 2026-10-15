@@ -125,6 +125,11 @@ export function clearRoute() {
   if (busLine) { map.removeLayer(busLine); busLine = null; }
 }
 
+export function routeFitBottomPadding(sheetHeight, viewportHeight) {
+  const maxBottom = Math.max(120, viewportHeight - 120);
+  return Math.min(Math.max(sheetHeight + 24, 280), maxBottom);
+}
+
 export function fitRoute(points) {
   if (!map || !points || points.length === 0) return;
   const valid = points
@@ -137,8 +142,8 @@ export function fitRoute(points) {
   }
   const sheetEl = typeof document !== 'undefined' ? document.getElementById('sheet') : null;
   const sheetHeight = sheetEl?.offsetHeight || 0;
-  const maxBottom = typeof window !== 'undefined' ? Math.round(window.innerHeight * 0.55) : 320;
-  const bottomPadding = Math.min(Math.max(sheetHeight + 24, 280), maxBottom || 320);
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 440;
+  const bottomPadding = routeFitBottomPadding(sheetHeight, viewportHeight);
 
   map.fitBounds(valid, {
     paddingTopLeft: [24, 24],
