@@ -332,7 +332,9 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
     if (decision) {
       decision.innerHTML = html;
       decision.classList.remove('hidden');
-      const alternativesDisclosure = decision.querySelector('.alternatives-details');
+      const alternativesDisclosure = typeof decision.querySelector === 'function'
+        ? decision.querySelector('.alternatives-details')
+        : null;
       if (alternativesDisclosure && typeof alternativesDisclosure.addEventListener === 'function') {
         alternativesDisclosure.addEventListener('toggle', () => {
           const activeCandidate = selectedCandidates[activeIndex];
