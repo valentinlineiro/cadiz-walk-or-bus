@@ -80,8 +80,24 @@ export function findSecurityProblems(root = defaultRoot, worker = null) {
 
   const directives = parsePolicy(csp);
   const scriptSrc = directives.get('script-src');
-  if (!directives.has('default-src')) problems.push("CSP must declare default-src");
-  if (!scriptSrc) problems.push('CSP must declare script-src explicitly');
+  const requiredSources = {
+    'default-src': ["'self'"],
+    'script-src': ["'self'"],
+    'style-src': ["'self'", "'unsafe-inline'"],
+    'img-src': ["'self'", 'data:', 'https://tile.openstreetmap.org'],
+    'connect-src': ["'self'"],
+    'form-action': ["'self'"],
+  };
+  for (const [name, required] of Object.entries(requiredSources)) {
+    const tokens = directives.get(name);
+    if (!tokens) {
+      problems.push(`CSP must declare ${name} explicitly`);
+      continue;
+    }
+    for (const token of required) {
+      if (!tokens.includes(token)) problems.push(`CSP ${name} must include ${token}`);
+    }
+  }
   for (const name of REQUIRED_NONE) {
     if (!directives.get(name)?.includes("'none'")) problems.push(`CSP must declare ${name} 'none'`);
   }
@@ -89,7 +105,7 @@ export function findSecurityProblems(root = defaultRoot, worker = null) {
     if (scriptSrc?.includes(token)) problems.push(`CSP script-src must not allow ${token}`);
   }
   if (block.get('x-content-type-options')?.toLowerCase() !== 'nosniff') problems.push('X-Content-Type-Options: nosniff is required');
-  if (!/geolocation=\(self\)/.test(block.get('permissions-policy') ?? '')) problems.push('Permissions-Policy: geolocation=(self) is required');
+  if (!/^geolocation=\(self\)$/.test(block.get('permissions-policy') ?? '')) problems.push('Permissions-Policy: geolocation=(self) is required');
 
   const allowed = new Set((scriptSrc ?? []).filter((t) => t.startsWith("'sha256-")));
   const seen = new Set();
