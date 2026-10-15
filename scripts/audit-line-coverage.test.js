@@ -43,7 +43,9 @@ test('shouldHandleEmptyLinesUnknownStopsAndMalformedEvidence', () => {
   const by = Object.fromEntries(r.municipalLines.map((l) => [l.line, l]));
   assert.equal(by.A.verdict, 'plausible_needs_evidence'); // string evidence is ignored, not trusted
   assert.equal(by.E.stops, 0);
-  assert.equal(by.F.verdict, 'no_apparent_coverage');
+  assert.equal(by.E.verdict, 'indeterminate');
+  assert.equal(by.F.verdict, 'indeterminate');
+  assert.equal(by.U.verdict, 'indeterminate'); // only unknown stops
   assert.equal(r.summary.stopsInLinesButNotInStopsJson, 1);
   assert.equal(r.summary.municipalStopsByVerdict.undefined, undefined);
 });

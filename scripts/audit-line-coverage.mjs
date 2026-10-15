@@ -33,6 +33,7 @@ export function coverage({ municipal, linesFile, gtfs, evidence = {} }) {
     const best = ranked[0]?.share ?? 0;
     const evidenced = (Array.isArray(evidence?.[line]) ? evidence[line] : []).filter((g) => gtfsLines.has(g));
     const verdict = evidenced.length ? 'coverage_confirmed'
+      : ids.length === 0 ? 'indeterminate' // no valid stops = no geometric evidence either way
       : best < NONE ? 'no_apparent_coverage'
         : best >= PLAUSIBLE ? 'plausible_needs_evidence' : 'indeterminate';
     // verdict is geometric/apparent coverage only; share/sharedStops back it, nothing here is operational proof
