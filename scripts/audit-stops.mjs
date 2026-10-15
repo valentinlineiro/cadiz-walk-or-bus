@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const NEAR_M = 50;
 const SEARCH_M = 150;
 
-const haversine = (a, b) => {
+export const haversine = (a, b) => {
   const r = Math.PI / 180;
   const d = Math.sin(((b.lat - a.lat) * r) / 2) ** 2
     + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lon - a.lon) * r) / 2) ** 2;
