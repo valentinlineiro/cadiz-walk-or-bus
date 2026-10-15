@@ -134,3 +134,24 @@ test('shouldNotRequestBusGeometryWhenOnlyAQuickVerdictIsNeeded', async () => {
   assert.ok(calls.arrivals <= 8, `arrivals calls: ${calls.arrivals}`);
   assert.ok(calls.foot <= 5, `walking route calls: ${calls.foot}`);
 });
+
+test('shouldGiveNoVerdictWhenTopologyDoesNotKnowAnyNearbyStop', async () => {
+  // Fallback topology with foreign (GTFS-style) stop ids next to municipal stops with buses due.
+  const gtfsLines = { L1: { DEST: ['2_1', '2_2'] }, L2: { DEST: ['2_3', '2_4'] } };
+  const transit = { ...city(3, [busIn(1, 6), busIn(2, 6), busIn(3, 6)]), getLines: async () => gtfsLines };
+  const { quick, full } = await both(transit);
+
+  assert.equal(full.transitData, 'unavailable');
+  assert.equal(full.hero.mode, 'walk');
+  assert.equal(quick, null);
+});
+
+test('shouldGiveNoVerdictWhenWalkingWinsAndSomeStopsAreUnknownToTopology', async () => {
+  const lines = { L1: { DEST: ['S1', 'D1'] } }; // S2 and S3 are not on any known line
+  const transit = { ...city(3, [empty, empty, empty]), getLines: async () => lines };
+  const { quick, full } = await both(transit);
+
+  assert.equal(full.transitData, 'partial');
+  assert.equal(full.hero.mode, 'walk');
+  assert.equal(quick, null);
+});
