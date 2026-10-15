@@ -16,10 +16,25 @@ import {
 } from '../infrastructure/index.js';
 import gtfsSnapshot from '../../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
-const routingAdapter = new OsrmRoutingAdapter(fetch, {
+// Concurrent identical calls share one request (the home chips ask the same stops and legs at once).
+// Only in-flight: a settled answer is never reused, so nothing here can be stale.
+function shareInFlight(fn) {
+  const pending = new Map();
+  return (...args) => {
+    const key = JSON.stringify(args);
+    if (!pending.has(key)) pending.set(key, fn(...args).finally(() => pending.delete(key)));
+    return pending.get(key);
+  };
+}
+
+const osrm = new OsrmRoutingAdapter(fetch, {
   footBaseUrl: '/route/foot',
   driveBaseUrl: '/route/drive',
 });
+const routingAdapter = {
+  routeWalking: shareInFlight((from, to) => osrm.routeWalking(from, to)),
+  routeBus: (...args) => osrm.routeBus(...args),
+};
 const scheduledAdapter = new GtfsTransitAdapter(gtfsSnapshot);
 let transitAdapter = new ResilientTransitAdapter(new MunicipalTransitAdapter(fetch), scheduledAdapter);
 let cachedStops = [];
@@ -37,19 +52,23 @@ export function setCachedLines(nextLines) {
   cachedLines = nextLines ?? null;
 }
 
+const loadStops = shareInFlight(async () => {
+  cachedStops = await transitAdapter.getStops().catch(() => []);
+  return cachedStops;
+});
+const loadLines = shareInFlight(async () => {
+  cachedLines = await transitAdapter.getLines().catch(() => null);
+  return cachedLines;
+});
+const loadArrivals = shareInFlight((stopId) => transitAdapter.getArrivalsResult(stopId));
+
 export const cachedTransitPort = {
-  getStops: async () => {
-    if (cachedStops.length === 0) cachedStops = await transitAdapter.getStops().catch(() => []);
-    return cachedStops;
-  },
-  getLines: async () => {
-    if (!cachedLines) cachedLines = await transitAdapter.getLines().catch(() => null);
-    return cachedLines;
-  },
+  getStops: async () => (cachedStops.length === 0 ? loadStops() : cachedStops),
+  getLines: async () => (cachedLines ? cachedLines : loadLines()),
   getArrivals: (stopId) => transitAdapter.getArrivals(stopId),
   // Must be exposed here: without it the use cases fall back to getArrivals and a failed source
   // looks like an empty answer ("no buses").
-  getArrivalsResult: (stopId) => transitAdapter.getArrivalsResult(stopId),
+  getArrivalsResult: (stopId) => loadArrivals(stopId),
 };
 
 const journeyLogAdapter = new LocalStorageJourneyLogAdapter();
