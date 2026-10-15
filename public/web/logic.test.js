@@ -1972,3 +1972,42 @@ test('ui: start journey action persists started state without changing navigatio
     delete globalThis.document;
   }
 });
+
+// --- home favorite chips -------------------------------------------------------------------
+test('renderHomeFavorites: no favorites -> nothing shown; favorites -> one chip each with a badge', async () => {
+  const { renderHomeFavorites } = await import('./ui.js');
+  const el = () => ({
+    children: [], className: '', textContent: '', _classes: new Set(), listeners: {},
+    classList: { toggle(c, on) { on ? this.s.add(c) : this.s.delete(c); }, add(c) { this.s.add(c); }, s: null },
+    append(...c) { this.children.push(...c); }, appendChild(c) { this.children.push(c); },
+    replaceChildren() { this.children = []; }, addEventListener(t, f) { this.listeners[t] = f; },
+  });
+  const make = () => { const e = el(); e.classList.s = new Set(); return e; };
+  const box = make();
+  const prevDoc = globalThis.document, prevWin = globalThis.window;
+  const store = new Map();
+  globalThis.window = { localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) } };
+  globalThis.document = { getElementById: (id) => (id === 'home-favorites' ? box : null), createElement: make };
+  try {
+    renderHomeFavorites();
+    assert.equal(box.children.length, 0);
+    assert.ok(box.classList.s.has('hidden'));
+
+    store.set('cadiz_favorite_destinations', JSON.stringify([
+      { label: 'Casa', lat: 36.52, lon: -6.28 },
+      { label: 'Trabajo', lat: 36.53, lon: -6.29 },
+    ]));
+    renderHomeFavorites();
+    assert.deepEqual(box.children.map((c) => c.children[0].textContent), ['Casa', 'Trabajo']);
+    assert.ok(box.children.every((c) => c._badgeEl && typeof c.listeners.click === 'function'));
+    assert.ok(!box.classList.s.has('hidden'));
+
+    globalThis.__SCENARIO__ = { any: true };
+    renderHomeFavorites();
+    assert.equal(box.children.length, 0, 'scenario mode must not read favorites');
+  } finally {
+    delete globalThis.__SCENARIO__;
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
