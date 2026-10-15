@@ -64,6 +64,8 @@ export class GetQuickVerdictUseCase {
       }
     }
 
+    // "Walk" with only some stops answering is not a conclusion: a silent stop could have won.
+    if (!best && results.some(([, result]) => result.status === 'unavailable')) return null;
     return best ?? { kind: 'walk', totalMinutes: walkTotal };
   }
 

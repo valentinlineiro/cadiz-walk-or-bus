@@ -177,7 +177,7 @@ export function chooseQuickBus(
       best = {
         arrival,
         alight,
-        totalMinutes: walkToStop + arrival.minutes + Math.round(rideMinutes),
+        totalMinutes: walkToStop + arrival.minutes + Math.round(rideMinutes + lastMileMinutes),
       };
     }
   }

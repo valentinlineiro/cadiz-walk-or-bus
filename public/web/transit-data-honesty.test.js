@@ -151,3 +151,42 @@ test('no-data card never labels itself as a walk or bus recommendation', () => {
   assert.doesNotMatch(noTransitDataCardHTML(null), /Andando/);
   assert.match(partialTransitDataNoteHTML(), /Faltan datos/);
 });
+
+// --- review F1–F4 -----------------------------------------------------------------------
+
+test('FindBestJourneys: a failed stops load is `unavailable`, never `available`', async () => {
+  const transit = { ...transitWith({}), getStops: async () => { throw new Error('stops down'); } };
+  const decision = await new FindBestJourneysUseCase({ routing, transit }).execute({ origin, destination });
+  assert.equal(decision.transitData, 'unavailable');
+});
+
+test('GetQuickVerdict: walk with a silent stop is no verdict (null)', async () => {
+  const useCase = new GetQuickVerdictUseCase({ routing, transit: transitWith({ S1: live([]), S2: unavailable }) });
+  assert.equal(await useCase.execute({ origin, destination }), null);
+});
+
+test('chooseQuickBus: totalMinutes includes the last-mile walk', async () => {
+  const { chooseQuickBus } = await import('./domain/planner.js');
+  const choice = chooseQuickBus(
+    [{ line: 'L1', minutes: 2 }],
+    1,
+    () => ({ stop: 'X', rideMeters: 0, distanceMeters: 800 }),
+  );
+  assert.ok(choice.totalMinutes >= 1 + 2 + 8, `got ${choice.totalMinutes}`);
+});
+
+test('map markers escape external names in their html', async () => {
+  const html = [];
+  globalThis.L = {
+    divIcon: (o) => { html.push(o.html); return o; },
+    marker: () => ({ addTo() { return this; }, on() {} }),
+  };
+  const { showDestination, showAlightStop, showStops } = await import('./map.js');
+  const evil = '"><img src=x onerror=alert(1)>';
+  showDestination(36.5, -6.3, evil);
+  showAlightStop({ name: evil, lat: 36.5, lon: -6.3 });
+  showStops([{ stop: 'S', name: evil, lat: 36.5, lon: -6.3 }], new Map(), null);
+  delete globalThis.L;
+  assert.equal(html.length, 3);
+  for (const h of html) assert.ok(!h.includes('<img'), h);
+});

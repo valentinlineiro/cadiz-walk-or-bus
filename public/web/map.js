@@ -1,3 +1,14 @@
+// Names come from external data and Leaflet parses divIcon html, so every interpolation is escaped.
+export function escapeHTML(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 let map, me, meAccuracy, destPin, alightPin, walkLine, busLine, pins = new Map();
 
 // Inline SVG glyphs — no emoji on the map, each marker a distinct shape.
@@ -50,7 +61,7 @@ export function showDestination(lat, lon, label) {
   if (lat == null || lon == null) return;
   const icon = L.divIcon({
     className: 'dest-pin',
-    html: `<div title="${label ?? 'Destino'}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><div style="width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#111827;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.4);display:flex;align-items:center;justify-content:center"><span style="display:flex;align-items:center;justify-content:center;transform:rotate(45deg);color:#fff">${SVG.pin}</span></div></div>`,
+    html: `<div title="${escapeHTML(label ?? 'Destino')}" style="width:44px;height:44px;display:flex;align-items:center;justify-content:center"><div style="width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#111827;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.4);display:flex;align-items:center;justify-content:center"><span style="display:flex;align-items:center;justify-content:center;transform:rotate(45deg);color:#fff">${SVG.pin}</span></div></div>`,
     iconSize: [44, 44],
     iconAnchor: [22, 35],
   });
@@ -65,7 +76,7 @@ export function showAlightStop(stop) {
   if (!stop || !Number.isFinite(stop.lat) || !Number.isFinite(stop.lon)) return;
   const icon = L.divIcon({
     className: 'alight-pin',
-    html: `<div style="min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:center"><div title="Bajar en: ${stop.name}" style="height:28px;padding:0 10px;border-radius:14px;background:#2563eb;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #fff;box-shadow:0 2px 8px rgba(37,99,235,.45);white-space:nowrap"><span style="display:flex">${SVG.flag}</span><span>Bájate aquí</span></div></div>`,
+    html: `<div style="min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:center"><div title="Bajar en: ${escapeHTML(stop.name)}" style="height:28px;padding:0 10px;border-radius:14px;background:#2563eb;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;border:2px solid #fff;box-shadow:0 2px 8px rgba(37,99,235,.45);white-space:nowrap"><span style="display:flex">${SVG.flag}</span><span>Bájate aquí</span></div></div>`,
     iconSize: [110, 44],
     iconAnchor: [55, 22],
   });
@@ -158,7 +169,7 @@ function pinIcon(style, name) {
   const ring = style.halo ? ', 0 0 0 6px rgba(217,119,6,.3)' : '';
   return L.divIcon({
     className: 'stop-pin',
-    html: `<div title="${name}" style="width:${size}px;height:${size}px;min-width:44px;min-height:44px;border-radius:50%;background:${COLORS[style.color]};color:#fff;font-weight:800;font-size:${fontSize}px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.28)${ring};cursor:pointer;user-select:none">${style.label}</div>`,
+    html: `<div title="${escapeHTML(name)}" style="width:${size}px;height:${size}px;min-width:44px;min-height:44px;border-radius:50%;background:${COLORS[style.color]};color:#fff;font-weight:800;font-size:${fontSize}px;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 2px 8px rgba(17,24,39,.28)${ring};cursor:pointer;user-select:none">${style.label}</div>`,
     iconSize: [size, size],
     iconAnchor: [Math.round(size / 2), Math.round(size / 2)],
   });
