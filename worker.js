@@ -185,7 +185,9 @@ function tursoDb(env) {
   };
 }
 
-const inRange = (n, max) => Number.isFinite(Number(n)) && Math.abs(Number(n)) <= max;
+// Number(null), Number('') and Number(' ') are all 0: only real numbers and non-blank strings count.
+const inRange = (n, max) =>
+  (typeof n === 'number' || (typeof n === 'string' && n.trim() !== '')) && Number.isFinite(Number(n)) && Math.abs(Number(n)) <= max;
 // Shape guards: a 200 with the wrong body must never be cached as a good answer.
 const MAX_NOMINATIM_HITS = 10; // the proxy asks for <= 5
 const validNominatim = (j) =>

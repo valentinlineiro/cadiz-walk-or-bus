@@ -839,7 +839,7 @@ test('shouldNotConsumeRateLimitWhenMethodIsRejected', async () => {
 
 test('Nominatim hits outside lat/lon range or beyond the cap are rejected and never cached', async () => {
   const hit = (lat, lon) => ({ lat: String(lat), lon: String(lon) });
-  const bad = [[hit(91, -6.3)], [hit(36.5, -181)], Array.from({ length: 11 }, () => hit(36.5, -6.3))];
+  const bad = [[hit(91, -6.3)], [hit(36.5, -181)], [{ lat: null, lon: '' }], [{ lat: ' ', lon: '-6.3' }], [{ lat: [], lon: true }], Array.from({ length: 11 }, () => hit(36.5, -6.3))];
   for (const body of bad) {
     const cache = withTurso(async () => ({ ok: true, status: 200, text: async () => JSON.stringify(body) }));
     const res = await worker.fetch(new Request('http://x/geocode?q=plaza'), TURSO_ENV);
