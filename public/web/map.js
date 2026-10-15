@@ -18,8 +18,13 @@ const SVG = {
 };
 
 export function initMap(onPin, onMapClick) {
-  map = L.map('map').setView([36.5271, -6.2885], 14);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  // The default bottom-right credit would sit under the bottom sheet, so it lives top-right.
+  map = L.map('map', { attributionControl: false }).setView([36.5271, -6.2885], 14);
+  L.control.attribution({ position: 'topright', prefix: false }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  }).addTo(map);
   map._onPin = onPin;
   if (onMapClick) {
     map.on('click', (e) => {

@@ -46,6 +46,8 @@
 
   /* Full-screen Leaflet map */
   #map { position: absolute; inset: 0; z-index: 1; }
+  /* viewport-fit=cover: keep the OSM credit out from under the notch / status bar */
+  .leaflet-top.leaflet-right { margin-top: env(safe-area-inset-top, 0px); }
 
   /* Bottom Sheet */
   #sheet {
