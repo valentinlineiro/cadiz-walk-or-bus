@@ -125,6 +125,12 @@ export function findSecurityProblems(root = defaultRoot, worker = null) {
     if (!wcsp || policyKey(wcsp) !== policyKey(csp)) {
       problems.push('worker Content-Security-Policy differs from public/_headers');
     }
+    if (!worker.headers?.['x-content-type-options'] || worker.headers['x-content-type-options'].toLowerCase() !== 'nosniff') {
+      problems.push('worker response must set X-Content-Type-Options: nosniff');
+    }
+    if (!/^geolocation=\(self\)$/.test(worker.headers?.['permissions-policy'] ?? '')) {
+      problems.push('worker response must set Permissions-Policy: geolocation=(self)');
+    }
     for (const name of POLICY_HEADERS.slice(1)) {
       if ((worker.headers?.[name] ?? '') !== (block.get(name) ?? '')) problems.push(`worker ${name} differs from public/_headers`);
     }
