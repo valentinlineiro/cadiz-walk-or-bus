@@ -185,9 +185,15 @@ function tursoDb(env) {
   };
 }
 
-const isCoord = (n) => Number.isFinite(Number(n));
+// Number(null), Number('') and Number(' ') are all 0: only real numbers and non-blank strings count.
+const inRange = (n, max) =>
+  (typeof n === 'number' || (typeof n === 'string' && n.trim() !== '')) && Number.isFinite(Number(n)) && Math.abs(Number(n)) <= max;
 // Shape guards: a 200 with the wrong body must never be cached as a good answer.
-const validNominatim = (j) => Array.isArray(j) && j.every((h) => h && typeof h === 'object' && isCoord(h.lat) && isCoord(h.lon));
+const MAX_NOMINATIM_HITS = 10; // the proxy asks for <= 5
+const validNominatim = (j) =>
+  Array.isArray(j) &&
+  j.length <= MAX_NOMINATIM_HITS &&
+  j.every((h) => h && typeof h === 'object' && inRange(h.lat, 90) && inRange(h.lon, 180));
 const validOsrm = (j) =>
   !!j &&
   (j.code === 'NoRoute' ||
@@ -586,7 +592,7 @@ async function handleProxyHealth(env) {
 
 async function handleFetch(request, env) {
   const url = new URL(request.url);
-  const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname.startsWith('/route/');
+  const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname === '/proxy-health' || url.pathname.startsWith('/route/');
   if (dynamic && request.method !== 'GET') {
     return new Response('method not allowed', { status: 405, headers: { allow: 'GET' } });
   }
