@@ -99,6 +99,29 @@ test('shouldReportDriftWhenWorkerPolicyDiffersFromHeadersFile', (t) => {
   assert.ok(problems(project(t), worker).some((p) => /differs from public\/_headers/.test(p)));
 });
 
+
+test('shouldRequireSelfForSameOriginScripts', (t) => {
+  const csp = policy({ 'script-src': hashOf(INLINE) });
+  assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /script-src must include 'self'/.test(p)));
+});
+
+test('shouldRequireConnectSrcAndFormAction', (t) => {
+  const csp = policy({ 'connect-src': null, 'form-action': null });
+  const found = problems(project(t, { headers: headersFile(csp) }));
+  assert.ok(found.some((p) => /connect-src explicitly/.test(p)));
+  assert.ok(found.some((p) => /form-action explicitly/.test(p)));
+});
+
+test('shouldRequireDataImageSourceForLeafletPlaceholder', (t) => {
+  const csp = policy({ 'img-src': "'self' https://tile.openstreetmap.org" });
+  assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /img-src must include data:/.test(p)));
+});
+
+test('shouldRequireStyleSrcExplicitly', (t) => {
+  const csp = policy({ 'style-src': null });
+  assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /style-src explicitly/.test(p)));
+});
+
 test('shouldAcceptWorkerPageWhenPolicyAndScriptsMatch', (t) => {
   const headers = {
     'content-security-policy': policy(),
