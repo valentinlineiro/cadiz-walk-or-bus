@@ -122,6 +122,13 @@ test('shouldRequireStyleSrcExplicitly', (t) => {
   assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /style-src explicitly/.test(p)));
 });
 
+test('shouldRequireBaseUriAndFrameAncestorsNone', (t) => {
+  const csp = policy({ 'base-uri': null, 'frame-ancestors': null });
+  const found = problems(project(t, { headers: headersFile(csp) }));
+  assert.ok(found.some((p) => /base-uri 'none'/.test(p)));
+  assert.ok(found.some((p) => /frame-ancestors 'none'/.test(p)));
+});
+
 test('shouldAcceptWorkerPageWhenPolicyAndScriptsMatch', (t) => {
   const headers = {
     'content-security-policy': policy(),
