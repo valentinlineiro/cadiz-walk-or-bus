@@ -165,6 +165,14 @@ test('GetQuickVerdict: walk with a silent stop is no verdict (null)', async () =
   assert.equal(await useCase.execute({ origin, destination }), null);
 });
 
+test('GetQuickVerdict: a known winning bus survives a silent stop', async () => {
+  const bus = live([{ line: 'L1', destination: 'X', minutes: 1 }]);
+  const fast = { routeWalking: async (_from, to) => ({ status: 'available', minutes: to === destination ? 30 : 1, coordinates: [] }) };
+  const useCase = new GetQuickVerdictUseCase({ routing: fast, transit: transitWith({ S1: bus, S2: unavailable }) });
+  const verdict = await useCase.execute({ origin, destination });
+  assert.equal(verdict?.kind, 'bus');
+});
+
 test('chooseQuickBus: totalMinutes includes the last-mile walk', async () => {
   const { chooseQuickBus } = await import('./domain/planner.js');
   const choice = chooseQuickBus(
@@ -188,5 +196,8 @@ test('map markers escape external names in their html', async () => {
   showStops([{ stop: 'S', name: evil, lat: 36.5, lon: -6.3 }], new Map(), null);
   delete globalThis.L;
   assert.equal(html.length, 3);
-  for (const h of html) assert.ok(!h.includes('<img'), h);
+  for (const h of html) {
+    assert.ok(!h.includes('<img'), h);
+    assert.match(h, /title="[^"]*&quot;&gt;&lt;img/);
+  }
 });
