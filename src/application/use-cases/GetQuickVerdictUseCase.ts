@@ -25,7 +25,7 @@ export class GetQuickVerdictUseCase {
   }
 
   async execute(input: GetQuickVerdictInput): Promise<QuickVerdict | null> {
-    const { hero, transitData } = await this.findBestJourneys.execute(input);
+    const { hero, transitData } = await this.findBestJourneys.execute({ ...input, withBusGeometry: false });
     if (!hero || transitData === 'unavailable') return null;
     // A silent stop could hold a better bus, and a degraded walk is only a straight-line guess.
     if (hero.mode === 'walk' && (transitData === 'partial' || hero.dataQuality === 'degraded')) return null;

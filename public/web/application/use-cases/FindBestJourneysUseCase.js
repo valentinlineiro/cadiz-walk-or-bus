@@ -62,7 +62,9 @@ export class FindBestJourneysUseCase {
             });
             busCandidates.push(...cands);
         }));
-        const transitData = !stopsLoaded
+        // Without the line topology no bus can be matched to the destination: buses were not
+        // evaluated, so "walk" would be a guess, not a conclusion.
+        const transitData = !stopsLoaded || !lines
             ? 'unavailable'
             : nearbyStops.length === 0 || stopsWithData === nearbyStops.length
                 ? 'available'
@@ -136,7 +138,7 @@ export class FindBestJourneysUseCase {
             const pathCoords = cand.metadata?.path?.map((p) => ({ lat: p.lat, lon: p.lon })) ?? [];
             const [walkToStopRoute, routedBus, lastMileRoute] = await Promise.all([
                 boardStop ? this.ports.routing.routeWalking(origin, boardStop).catch(() => null) : null,
-                boardStop && alightStop
+                boardStop && alightStop && input.withBusGeometry !== false
                     ? this.ports.routing.routeBus(boardStop, alightStop, pathCoords).catch(() => null)
                     : null,
                 alightStop ? this.ports.routing.routeWalking(alightStop, destination).catch(() => null) : null,

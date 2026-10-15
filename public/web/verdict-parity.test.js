@@ -107,3 +107,30 @@ test('shouldGiveNoVerdictWhenWalkingIsOnlyAStraightLineGuess', async () => {
 
   assert.equal(quick, null);
 });
+
+test('shouldGiveNoVerdictWhenLineTopologyIsMissingEvenIfBusesAreDue', async () => {
+  for (const getLines of [async () => null, async () => { throw new Error('lines down'); }]) {
+    const transit = { ...city(3, [busIn(1, 6), busIn(2, 6), busIn(3, 6)]), getLines };
+    const { quick, full } = await both(transit);
+
+    assert.equal(full.transitData, 'unavailable');
+    assert.equal(quick, null);
+  }
+});
+
+test('shouldNotRequestBusGeometryWhenOnlyAQuickVerdictIsNeeded', async () => {
+  const calls = { arrivals: 0, foot: 0, bus: 0 };
+  const counting = {
+    routeWalking: (a, b) => { calls.foot += 1; return routing.routeWalking(a, b); },
+    routeBus: (...args) => { calls.bus += 1; return routing.routeBus(...args); },
+  };
+  const base = city(8, Array.from({ length: 8 }, (_, i) => (i >= 6 ? busIn(i + 1, 10) : empty)));
+  const transit = { ...base, getArrivalsResult: (id) => { calls.arrivals += 1; return base.getArrivalsResult(id); } };
+
+  const quick = await new GetQuickVerdictUseCase({ routing: counting, transit }).execute({ origin, destination });
+
+  assert.equal(quick.kind, 'bus');
+  assert.equal(calls.bus, 0);
+  assert.ok(calls.arrivals <= 8, `arrivals calls: ${calls.arrivals}`);
+  assert.ok(calls.foot <= 5, `walking route calls: ${calls.foot}`);
+});

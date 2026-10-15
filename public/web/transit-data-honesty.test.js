@@ -98,7 +98,7 @@ const routing = {
 };
 const transitWith = (perStop) => ({
   getStops: async () => stops,
-  getLines: async () => null,
+  getLines: async () => ({}),
   getArrivals: async () => [],
   getArrivalsResult: async (id) => perStop[id],
 });

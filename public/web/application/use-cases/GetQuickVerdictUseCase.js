@@ -9,7 +9,7 @@ export class GetQuickVerdictUseCase {
         this.findBestJourneys = new FindBestJourneysUseCase(ports);
     }
     async execute(input) {
-        const { hero, transitData } = await this.findBestJourneys.execute(input);
+        const { hero, transitData } = await this.findBestJourneys.execute({ ...input, withBusGeometry: false });
         if (!hero || transitData === 'unavailable')
             return null;
         // A silent stop could hold a better bus, and a degraded walk is only a straight-line guess.

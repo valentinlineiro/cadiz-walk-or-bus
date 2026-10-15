@@ -27,6 +27,8 @@ export interface FindBestJourneysInput {
   origin: Coordinates;
   destination: Coordinates & { label?: string };
   policy?: PlanningPolicyOverrides;
+  /** Bus route geometry costs one routing call per hop and is only needed to draw the map. */
+  withBusGeometry?: boolean;
 }
 
 interface ReRankItem extends StructurallyDiverseItem {
@@ -104,8 +106,10 @@ export class FindBestJourneysUseCase {
       }),
     );
 
+    // Without the line topology no bus can be matched to the destination: buses were not
+    // evaluated, so "walk" would be a guess, not a conclusion.
     const transitData: TransitDataStatus =
-      !stopsLoaded
+      !stopsLoaded || !lines
         ? 'unavailable'
         : nearbyStops.length === 0 || stopsWithData === nearbyStops.length
         ? 'available'
@@ -185,7 +189,7 @@ export class FindBestJourneysUseCase {
 
         const [walkToStopRoute, routedBus, lastMileRoute] = await Promise.all([
           boardStop ? this.ports.routing.routeWalking(origin, boardStop).catch(() => null) : null,
-          boardStop && alightStop
+          boardStop && alightStop && input.withBusGeometry !== false
             ? this.ports.routing.routeBus(boardStop, alightStop, pathCoords).catch(() => null)
             : null,
           alightStop ? this.ports.routing.routeWalking(alightStop, destination).catch(() => null) : null,
