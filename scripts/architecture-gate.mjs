@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, normalize, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findShellHashProblems } from './shell-hash.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = dirname(dirname(scriptPath));
@@ -138,6 +139,7 @@ export function findServiceWorkerShellProblems() {
   }
 
   problems.push(...findMissingServiceWorkerShellImports());
+  problems.push(...findShellHashProblems(root));
 
   const gtfsPath = join(root, 'public/fixtures/gtfs-cadiz.snapshot.json');
   if (existsSync(gtfsPath)) {

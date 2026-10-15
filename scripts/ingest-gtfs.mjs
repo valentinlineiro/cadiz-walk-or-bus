@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { writeShellHash } from './shell-hash.mjs';
 
 function parseCsv(text) {
   const rows = [];
@@ -197,4 +198,5 @@ if (pathToFileURL(resolve(process.argv[1] ?? '')).href === import.meta.url) {
   // Automatically synchronize public/sw.js with the new feed version
   const swPath = resolve(dirname(args.output), '..', 'sw.js');
   syncServiceWorkerFeedVersion(swPath, args['feed-version']);
+  writeShellHash(dirname(dirname(swPath)));
 }
