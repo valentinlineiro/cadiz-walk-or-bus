@@ -332,6 +332,13 @@ export function renderDecisionWithAlternatives(selectedCandidates, activeIndex =
     if (decision) {
       decision.innerHTML = html;
       decision.classList.remove('hidden');
+      const alternativesDisclosure = decision.querySelector('.alternatives-details');
+      if (alternativesDisclosure && typeof alternativesDisclosure.addEventListener === 'function') {
+        alternativesDisclosure.addEventListener('toggle', () => {
+          const activeCandidate = selectedCandidates[activeIndex];
+          if (activeCandidate) applyCandidateToMap(activeCandidate);
+        });
+      }
       const buttons = decision.querySelectorAll('.alternative-card');
       buttons.forEach((btn) => {
         btn.addEventListener('click', () => {
