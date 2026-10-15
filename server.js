@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import worker from './worker.js';
+import { SECURITY_HEADERS } from './map-page.js';
 
 // ponytail: thin adapter so the Worker handler runs anywhere Node runs (Docker, laptop)
 const port = Number(process.env.PORT || 8080);
@@ -11,7 +12,10 @@ http
       const file = path === '/map' ? 'public/map.html' : `public${path}`;
       try {
         const body = fs.readFileSync(file);
-        res.writeHead(200, { 'content-type': file.endsWith('.html') ? 'text/html' : 'text/javascript' });
+        res.writeHead(200, {
+          'content-type': file.endsWith('.html') ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8',
+          ...(file.endsWith('.html') ? SECURITY_HEADERS : {}),
+        });
         res.end(body);
       } catch { res.writeHead(404); res.end('not found'); }
       return;

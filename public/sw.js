@@ -3,17 +3,19 @@ const GTFS_FEED_VERSION = 'nap-2026-09-18';
 // SHELL_HASH fingerprints every file in SHELL_URLS plus this file. Never edit it by hand:
 // `npm run shell:hash` rewrites it, and the architecture gate fails while it is stale. A new
 // hash is what makes installed clients drop the previous cache-first shell.
-const SHELL_HASH = '4200855defda';
+const SHELL_HASH = '48125d380050';
 const CACHE_VERSION = `${SHELL_HASH}-${GTFS_FEED_VERSION}`;
 const CACHE_NAME = `andar-o-bus-shell-${CACHE_VERSION}`;
 
 // Explicit allowlist, not a wildcard — only these exact paths are ever
 // served cache-first. Live data (/stops, /lines, /api, OSRM, Nominatim,
-// FOSSGIS, Leaflet's CDN) must never be answered from this cache.
+// FOSSGIS) must never be answered from this cache.
 const SHELL_URLS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/vendor/leaflet/leaflet.js',
+  '/vendor/leaflet/leaflet.css',
   '/web/ui.js',
   '/web/favorites.js',
   '/web/geo.js',
