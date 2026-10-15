@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, normalize, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findShellHashProblems } from './shell-hash.mjs';
+import { findSecurityProblems } from './security-headers.mjs';
+import { MAP_HTML, SECURITY_HEADERS } from '../map-page.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = dirname(dirname(scriptPath));
@@ -213,6 +215,7 @@ export function collectArchitectureViolations() {
 
   violations.push(...findCompositionSeamProblems());
   violations.push(...findServiceWorkerShellProblems());
+  violations.push(...findSecurityProblems(root, { mapHtml: MAP_HTML, headers: SECURITY_HEADERS }));
   return violations;
 }
 
