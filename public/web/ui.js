@@ -470,6 +470,10 @@ function buildDropdownRow(icon, item, { badge } = {}) {
   const row = document.createElement('div');
   row.className = 'dropdown-item';
   row._data = item;
+  // The pick target is a real button so it takes focus and Enter/Space; the row only lays it out.
+  const select = document.createElement('button');
+  select.type = 'button';
+  select.className = 'dropdown-select';
   const iconEl = document.createElement('span');
   iconEl.className = 'icon';
   iconEl.innerHTML = icon;
@@ -485,12 +489,13 @@ function buildDropdownRow(icon, item, { badge } = {}) {
     sub.textContent = item.sub;
     text.appendChild(sub);
   }
-  row.append(iconEl, text);
+  select.append(iconEl, text);
+  row.appendChild(select);
   if (badge) {
     const badgeEl = document.createElement('span');
     badgeEl.className = 'quick-verdict';
     badgeEl.textContent = '⋯';
-    row.appendChild(badgeEl);
+    select.appendChild(badgeEl);
     row._badgeEl = badgeEl;
   }
   return row;
@@ -498,17 +503,25 @@ function buildDropdownRow(icon, item, { badge } = {}) {
 
 // Fills a favorite's badge with a quick bus-or-walk read, computed in the
 // background — lets the list itself answer the question, no tap needed.
+export function quickVerdictBadge(v) {
+  if (v?.kind !== 'bus' && v?.kind !== 'walk') return null;
+  const bus = v.kind === 'bus';
+  // Mode is carried by icon and hidden text, never by colour alone.
+  return {
+    className: `quick-verdict ${v.kind}`,
+    html: `${bus ? ICON.bus : ICON.walk}<span class="sr-only">${bus ? 'En bus' : 'A pie'}, </span>${v.totalMinutes}′`,
+  };
+}
+
 export function fillQuickVerdictBadge(row, dest) {
   quickVerdictFor(dest)
     .then((v) => {
       const badgeEl = row._badgeEl;
       if (!badgeEl) return;
-      if (v?.kind === 'bus') {
-        badgeEl.textContent = `${v.totalMinutes}′`;
-        badgeEl.className = 'quick-verdict bus';
-      } else if (v?.kind === 'walk') {
-        badgeEl.textContent = `${v.totalMinutes}′`;
-        badgeEl.className = 'quick-verdict walk';
+      const badge = quickVerdictBadge(v);
+      if (badge) {
+        badgeEl.innerHTML = badge.html;
+        badgeEl.className = badge.className;
       } else {
         badgeEl.textContent = '';
       }
@@ -1065,23 +1078,22 @@ export function initUI() {
   }
 
   if (dropdown) {
-    dropdown.addEventListener('pointerdown', (e) => {
+    // One path for mouse, touch, keyboard (Enter/Space) and assistive tech: the buttons' native click.
+    dropdown.addEventListener('click', (e) => {
       const removeBtn = e.target.closest('.remove-fav');
-      if (removeBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        const itemEl = removeBtn.closest('.dropdown-item');
-        if (itemEl?._data) {
-          removeFavorite(itemEl._data);
-          renderQuickPicks();
-          updateFavToggle();
-        }
+      const itemEl = e.target.closest('.dropdown-item');
+      if (!itemEl?._data) return;
+      if (!removeBtn) {
+        selectDestination(itemEl._data);
         return;
       }
-      const itemEl = e.target.closest('.dropdown-item');
-      if (!itemEl || !itemEl._data) return;
-      e.preventDefault();
-      selectDestination(itemEl._data);
+      const index = [...dropdown.querySelectorAll('.dropdown-item')].indexOf(itemEl);
+      removeFavorite(itemEl._data);
+      renderQuickPicks();
+      updateFavToggle();
+      // Keep focus on a live control: the row that took the removed one's place, else the search field.
+      const selects = dropdown.querySelectorAll('.dropdown-select');
+      (selects[Math.min(index, selects.length - 1)] ?? document.getElementById('q'))?.focus();
     });
   }
 
