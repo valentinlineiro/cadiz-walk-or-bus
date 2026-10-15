@@ -85,6 +85,7 @@ not deliberately disrupt the public production service.
 - [ ] The service worker activates successfully.
 - [ ] A newly deployed version updates correctly.
 - [ ] A stale application shell does not unexpectedly survive a release.
+  (`SHELL_HASH` in `public/sw.js` is checked by the architecture gate; run `npm run shell:hash` after any shell change.)
 
 ### UX
 
