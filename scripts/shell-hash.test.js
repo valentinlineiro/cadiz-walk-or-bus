@@ -18,7 +18,13 @@ function project(t, files = {}) {
   const root = mkdtempSync(join(tmpdir(), 'shell-hash-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'public/web'), { recursive: true });
-  const all = { 'public/sw.js': SW('0'), 'public/index.html': '<html></html>', 'public/web/ui.js': 'export {};', ...files };
+  const all = {
+    'public/sw.js': SW('0'),
+    'public/index.html': '<html></html>',
+    'public/web/ui.js': 'export {};',
+    'worker.js': 'const MAP_HTML = `<html>root</html>`;',
+    ...files,
+  };
   for (const [path, content] of Object.entries(all)) writeFileSync(join(root, path), content);
   return root;
 }
@@ -61,6 +67,15 @@ test('shouldChangeHashWhenServiceWorkerSourceChanges', (t) => {
   const before = computeShellHash(root);
 
   writeFileSync(join(root, 'public/sw.js'), SW('0').replace('nap-1', 'nap-2'));
+
+  assert.notEqual(computeShellHash(root), before);
+});
+
+test('shouldChangeHashWhenWorkerRootResponseSourceChanges', (t) => {
+  const root = project(t);
+  const before = computeShellHash(root);
+
+  writeFileSync(join(root, 'worker.js'), 'const MAP_HTML = `<html>updated root</html>`;');
 
   assert.notEqual(computeShellHash(root), before);
 });
