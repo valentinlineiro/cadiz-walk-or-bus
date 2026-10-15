@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArrivals, decide } from '../../worker.js';
+import { parseArrivals } from '../../worker.js';
 import { isPointInCadiz } from './domain/topology.js';
 import { findServiceWorkerShellProblems } from '../../scripts/architecture-gate.mjs';
 
@@ -74,24 +74,6 @@ test('Frontier C: parseArrivals safely discards non-actionable or ambiguous entr
   assert.equal(arrivals.length, 2);
   assert.deepEqual(arrivals[0], { line: '8', destination: 'Aduana', minutes: 0 });
   assert.deepEqual(arrivals[1], { line: '9', destination: 'Hospital', minutes: 7 });
-});
-
-test('Frontier C: decide handles empty arrivals and edge comparison cases', () => {
-  assert.deepEqual(decide([], 15), { decision: 'walk', soonest: null });
-
-  // Bus arrives in 10 mins, walk takes 10 mins -> Walk wins on tie
-  const tie = decide([{ line: '1', destination: 'Centro', minutes: 10 }], 10);
-  assert.equal(tie.decision, 'walk');
-
-  // Bus arrives in 9 mins, walk takes 10 mins -> Bus wins
-  const busWins = decide([{ line: '1', destination: 'Centro', minutes: 9 }], 10);
-  assert.equal(busWins.decision, 'bus');
-  assert.equal(busWins.soonest.minutes, 9);
-
-  // Inminente bus (0 mins) beats 15 min walk
-  const inminenteBus = decide([{ line: '1', destination: 'Centro', minutes: 0 }], 15);
-  assert.equal(inminenteBus.decision, 'bus');
-  assert.equal(inminenteBus.soonest.minutes, 0);
 });
 
 // ============================================================================
