@@ -31,11 +31,15 @@ export function coverage({ municipal, linesFile, gtfs, evidence = {} }) {
       return { gtfsLine: gl, trips: g.trips, sharedStops: hit, share: Math.round((100 * hit) / (ids.length || 1)) / 100 };
     }).sort((a, b) => b.share - a.share || a.gtfsLine.localeCompare(b.gtfsLine));
     const best = ranked[0]?.share ?? 0;
-    const evidenced = (evidence[line] ?? []).filter((g) => gtfsLines.has(g));
+    const evidenced = (Array.isArray(evidence?.[line]) ? evidence[line] : []).filter((g) => gtfsLines.has(g));
     const verdict = evidenced.length ? 'coverage_confirmed'
       : best < NONE ? 'no_apparent_coverage'
         : best >= PLAUSIBLE ? 'plausible_needs_evidence' : 'indeterminate';
-    return { line, stops: ids.length, verdict, evidencedGtfsLines: evidenced, bestCandidates: ranked.slice(0, 3) };
+    // verdict is geometric/apparent coverage only; share/sharedStops back it, nothing here is operational proof
+    return {
+      line, stops: ids.length, verdict, share: best, sharedStops: ranked[0]?.sharedStops ?? 0,
+      evidencedGtfsLines: evidenced, bestCandidates: ranked.slice(0, 3),
+    };
   });
 
   const verdictByLine = new Map(municipalLines.map((l) => [l.line, l.verdict]));
@@ -43,23 +47,30 @@ export function coverage({ municipal, linesFile, gtfs, evidence = {} }) {
   for (const [line, dirs] of Object.entries(lines)) {
     for (const id of new Set(Object.values(dirs).flat().map(String))) stopLines.set(id, [...(stopLines.get(id) ?? []), line]);
   }
-  const stopVerdicts = {};
+  // A physical stop is only as covered as its LEAST covered service: per-line verdicts are kept and
+  // the overall one is conservative (confirmed/none only when every line agrees, else indeterminate).
+  const stops = {};
   for (const [id, ls] of [...stopLines].sort(([a], [b]) => a.localeCompare(b))) {
-    const vs = ls.map((l) => verdictByLine.get(l));
-    stopVerdicts[id] = vs.includes('coverage_confirmed') ? 'coverage_confirmed'
-      : vs.includes('plausible_needs_evidence') ? 'plausible_needs_evidence'
-        : vs.every((v) => v === 'no_apparent_coverage') ? 'no_apparent_coverage' : 'indeterminate';
+    const perLine = Object.fromEntries(ls.map((l) => [l, verdictByLine.get(l)]));
+    const vs = new Set(Object.values(perLine));
+    stops[id] = {
+      known: coords.has(id),
+      lines: perLine,
+      overall: vs.size === 1 ? [...vs][0] : 'indeterminate',
+    };
   }
+  const stopVerdicts = Object.fromEntries(Object.entries(stops).map(([id, v]) => [id, v.overall]));
   const tally = (o) => Object.values(o).reduce((m, v) => ({ ...m, [v]: (m[v] ?? 0) + 1 }), {});
   return {
     summary: {
       gtfsLines: gtfsLines.size,
       municipalLines: Object.fromEntries(municipalLines.map((l) => [l.line, l.verdict])),
-      municipalStopsByVerdict: tally(stopVerdicts),
+      municipalStopsByVerdict: tally(Object.fromEntries(Object.entries(stopVerdicts).filter(([id]) => stops[id].known))),
+      stopsInLinesButNotInStopsJson: Object.values(stops).filter((v) => !v.known).length,
     },
     municipalLines,
     gtfsLines: [...gtfsLines].sort(([a], [b]) => a.localeCompare(b)).map(([line, g]) => ({ line, trips: g.trips, stops: g.stops.size })),
-    stopVerdicts,
+    stops,
   };
 }
 

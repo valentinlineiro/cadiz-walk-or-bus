@@ -22,3 +22,36 @@ test('shouldConfirmCoverageOnlyWhenEvidenceNamesAnExistingGtfsLine', () => {
   assert.equal(coverage(input({ A: ['M-1'] })).municipalLines[0].verdict, 'coverage_confirmed');
   assert.notEqual(coverage(input({ A: ['nope'] })).municipalLines[0].verdict, 'coverage_confirmed');
 });
+
+test('shouldNotCallASharedStopCoveredWhenOneOfItsLinesIsNot', () => {
+  const r = coverage({
+    ...input(),
+    municipal: [...municipal, { stop: '5', name: 'Lejana', lat: 36.9, lon: -5.9 }, { stop: '6', name: 'Lejana2', lat: 36.8, lon: -5.8 }],
+    linesFile: { lines: { A: { x: ['1', '2', '3', '4'] }, Z: { x: ['1', '5', '6'] } } },
+  });
+  assert.equal(r.stops['1'].lines.A, 'plausible_needs_evidence');
+  assert.notEqual(r.stops['1'].lines.Z, 'plausible_needs_evidence');
+  assert.equal(r.stops['1'].overall, 'indeterminate');
+  assert.equal(r.stops['3'].overall, 'plausible_needs_evidence');
+});
+
+test('shouldHandleEmptyLinesUnknownStopsAndMalformedEvidence', () => {
+  const r = coverage({
+    ...input({ A: 'M-1', B: { x: 1 } }),
+    linesFile: { lines: { A: { x: ['1', '2'] }, E: {}, F: { x: [] }, U: { x: ['404'] } } },
+  });
+  const by = Object.fromEntries(r.municipalLines.map((l) => [l.line, l]));
+  assert.equal(by.A.verdict, 'plausible_needs_evidence'); // string evidence is ignored, not trusted
+  assert.equal(by.E.stops, 0);
+  assert.equal(by.F.verdict, 'no_apparent_coverage');
+  assert.equal(r.summary.stopsInLinesButNotInStopsJson, 1);
+  assert.equal(r.summary.municipalStopsByVerdict.undefined, undefined);
+});
+
+test('shouldBeDeterministicAndLetEvidenceTouchOnlyNamedLines', () => {
+  const base = coverage(input());
+  assert.equal(JSON.stringify(base), JSON.stringify(coverage(input())));
+  const ev = coverage(input({ A: ['M-1'] }));
+  assert.equal(ev.municipalLines[0].verdict, 'coverage_confirmed');
+  assert.deepEqual(ev.municipalLines[1], base.municipalLines[1]);
+});
