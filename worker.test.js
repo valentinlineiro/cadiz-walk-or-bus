@@ -813,3 +813,22 @@ test('shouldKeyIpv6ByDeclared64WhenAddressIsCompressed', () => {
   assert.equal(rateKey('::1'), '0:0:0:0');
   assert.equal(rateKey('203.0.113.9'), '203.0.113.9');
 });
+
+test('shouldGiveEquivalentIpv6FormsOneKeyAndSplitAcrossSlash64', () => {
+  const k = rateKey('2a0c:5a80:1:2::1');
+  assert.equal(rateKey('2A0C:5A80:0001:0002:0000:0000:0000:0001'), k);
+  assert.equal(rateKey('2a0c:5a80:1:2:ffff:ffff:ffff:ffff'), k);
+  assert.notEqual(rateKey('2a0c:5a80:1:3::1'), k);
+  assert.equal(rateKey('::ffff:192.0.2.1'), '192.0.2.1');
+  assert.equal(rateKey('::ffff:c000:201'), '192.0.2.1');
+  assert.equal(rateKey('not:an:ip::::x'), 'not:an:ip::::x');
+});
+
+test('shouldNotConsumeRateLimitWhenMethodIsRejected', async () => {
+  let calls = 0;
+  const env = { RATE_LIMITER: { limit: async () => { calls += 1; return { success: true }; } } };
+  const res = await worker.fetch(new Request('https://x/api?stop=1', { method: 'POST' }), env);
+  assert.equal(res.status, 405);
+  assert.equal(res.headers.get('allow'), 'GET, HEAD');
+  assert.equal(calls, 0);
+});

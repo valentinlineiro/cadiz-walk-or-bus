@@ -331,14 +331,31 @@ export function __resetArrivalsCache() {
   inflightArrivals.clear();
 }
 
-// IPv6 clients own a whole /64, so key on its 4 hextets (expanding any `::`); IPv4 as-is.
+// IPv6 clients own a whole /64, so key on its 4 hextets; IPv4-mapped IPv6 collapses to its IPv4.
+// Anything that does not parse is returned verbatim (own bucket) rather than merged with others.
 export function rateKey(ip) {
-  if (!ip?.includes(':')) return ip ?? 'unknown';
-  const [head, tail = ''] = ip.split('::');
-  const h = head ? head.split(':') : [];
-  const t = tail ? tail.split(':') : [];
-  const groups = ip.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
-  return groups.slice(0, 4).map((g) => g.toLowerCase().replace(/^0+(?=.)/, '')).join(':');
+  if (!ip) return 'unknown';
+  if (!ip.includes(':')) return ip;
+  let s = ip.toLowerCase();
+  const v4 = s.match(/^(.*:)(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const o = v4.slice(2).map(Number);
+    if (o.some((n) => n > 255)) return ip;
+    s = `${v4[1]}${((o[0] << 8) | o[1]).toString(16)}:${((o[2] << 8) | o[3]).toString(16)}`;
+  }
+  const halves = s.split('::');
+  if (halves.length > 2) return ip;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves[1] ? halves[1].split(':') : [];
+  const fill = 8 - head.length - tail.length;
+  if (halves.length === 2 ? fill < 1 : head.length !== 8) return ip;
+  const g = [...head, ...Array(halves.length === 2 ? fill : 0).fill('0'), ...tail];
+  if (!g.every((x) => /^[0-9a-f]{1,4}$/.test(x))) return ip;
+  const n = g.map((x) => parseInt(x, 16));
+  if (n.slice(0, 5).every((x) => x === 0) && n[5] === 0xffff) {
+    return `${n[6] >> 8}.${n[6] & 255}.${n[7] >> 8}.${n[7] & 255}`;
+  }
+  return n.slice(0, 4).map((x) => x.toString(16)).join(':');
 }
 
 async function rateLimited(request, env) {
