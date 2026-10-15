@@ -61,7 +61,9 @@ export function setSheetState(nextState) {
   const destName = document.getElementById('dest-name');
   const decision = document.getElementById('decision');
 
+  if (nextState !== 'IDLE') document.getElementById('home-favorites')?.classList.add('hidden');
   if (nextState === 'IDLE') {
+    renderHomeFavorites();
     searchTrigger?.classList.remove('hidden');
     searchForm?.classList.add('hidden');
     btnChangeDest?.classList.add('hidden');
@@ -511,6 +513,35 @@ export function fillQuickVerdictBadge(row, dest) {
       }
     })
     .catch(() => { if (row._badgeEl) row._badgeEl.textContent = ''; });
+}
+
+// Habituales on the idle sheet: one tap from app open to a verdict, no search and no keyboard.
+// Same favorites, same badge filler and same selection handler as the dropdown list.
+export function renderHomeFavorites() {
+  const box = document.getElementById('home-favorites');
+  if (!box) return;
+  box.replaceChildren();
+  let favorites = [];
+  if (!globalThis.__SCENARIO__) {
+    try { favorites = getFavorites(); } catch { favorites = []; }
+  }
+  box.classList.toggle('hidden', favorites.length === 0);
+  for (const fav of favorites) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'home-fav';
+    const label = document.createElement('span');
+    label.className = 'home-fav-label';
+    label.textContent = fav.label;
+    const badge = document.createElement('span');
+    badge.className = 'quick-verdict';
+    badge.textContent = '⋯';
+    chip._badgeEl = badge;
+    chip.append(label, badge);
+    chip.addEventListener('click', () => selectDestination(fav));
+    box.appendChild(chip);
+    fillQuickVerdictBadge(chip, fav);
+  }
 }
 
 function appendDropdownSection(dropdown, title, items, icon, { removable, badge } = {}) {
