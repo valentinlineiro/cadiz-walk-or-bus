@@ -21,14 +21,15 @@ export class FindBestJourneysUseCase {
             destination,
         });
         const [stops, rawLines] = await Promise.all([
-            this.ports.transit.getStops().catch(() => []),
+            this.ports.transit.getStops().catch(() => null),
             this.ports.transit.getLines().catch(() => null),
         ]);
         const lines = rawLines
             ? (rawLines.lines ?? rawLines)
             : null;
         // Nearby stops pool prioritized and diversified by line
-        const pool = nearestStops(stops, origin.lat, origin.lon, 32);
+        const stopsLoaded = stops !== null;
+        const pool = nearestStops(stops ?? [], origin.lat, origin.lon, 32);
         const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
         const busCandidates = [];
         let stopsWithData = 0;
@@ -49,7 +50,7 @@ export class FindBestJourneysUseCase {
                     direction: arr.destination,
                     boardingStopId: stop.stop,
                     destCoords: destination,
-                    stops,
+                    stops: stops ?? [],
                     lines,
                 });
             };
@@ -61,11 +62,13 @@ export class FindBestJourneysUseCase {
             });
             busCandidates.push(...cands);
         }));
-        const transitData = nearbyStops.length === 0 || stopsWithData === nearbyStops.length
-            ? 'available'
-            : stopsWithData === 0
-                ? 'unavailable'
-                : 'partial';
+        const transitData = !stopsLoaded
+            ? 'unavailable'
+            : nearbyStops.length === 0 || stopsWithData === nearbyStops.length
+                ? 'available'
+                : stopsWithData === 0
+                    ? 'unavailable'
+                    : 'partial';
         // 2. CHEAP SELECTION GATE (Hard budget enforcement <= 3)
         const { primary: cheapPrimary, alternatives: cheapAlternatives } = selectCandidates([walkCandidate, ...busCandidates], policy);
         const selected = cheapPrimary ? [cheapPrimary, ...cheapAlternatives] : [walkCandidate];

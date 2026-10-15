@@ -57,7 +57,7 @@ export class FindBestJourneysUseCase {
     });
 
     const [stops, rawLines] = await Promise.all([
-      this.ports.transit.getStops().catch(() => [] as Stop[]),
+      this.ports.transit.getStops().catch(() => null as Stop[] | null),
       this.ports.transit.getLines().catch(() => null as LinesTopology | null),
     ]);
 
@@ -66,7 +66,8 @@ export class FindBestJourneysUseCase {
       : null;
 
     // Nearby stops pool prioritized and diversified by line
-    const pool = nearestStops(stops, origin.lat, origin.lon, 32);
+    const stopsLoaded = stops !== null;
+    const pool = nearestStops(stops ?? [], origin.lat, origin.lon, 32);
     const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
 
     const busCandidates: JourneyCandidate[] = [];
@@ -88,7 +89,7 @@ export class FindBestJourneysUseCase {
             direction: arr.destination,
             boardingStopId: stop.stop,
             destCoords: destination,
-            stops,
+            stops: stops ?? [],
             lines,
           });
         };
@@ -104,7 +105,9 @@ export class FindBestJourneysUseCase {
     );
 
     const transitData: TransitDataStatus =
-      nearbyStops.length === 0 || stopsWithData === nearbyStops.length
+      !stopsLoaded
+        ? 'unavailable'
+        : nearbyStops.length === 0 || stopsWithData === nearbyStops.length
         ? 'available'
         : stopsWithData === 0
           ? 'unavailable'
