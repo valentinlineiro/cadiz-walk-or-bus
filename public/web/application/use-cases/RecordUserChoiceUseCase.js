@@ -7,12 +7,8 @@ export class RecordUserChoiceUseCase {
     execute(input) {
         return this.record(input);
     }
-    start(input) {
-        const startedAt = input.timestamp ?? Date.now();
-        return this.record(input, startedAt);
-    }
-    record(input, startedAt) {
-        const timestamp = input.timestamp ?? startedAt ?? Date.now();
+    record(input) {
+        const timestamp = input.timestamp ?? Date.now();
         const rec = input.recommendation;
         const recBoarding = rec.metadata?.boardingStop?.stop != null
             ? String(rec.metadata.boardingStop.stop)
@@ -49,7 +45,6 @@ export class RecordUserChoiceUseCase {
         const record = {
             id: `${timestamp}-${Math.random().toString(36).slice(2, 7)}`,
             timestamp,
-            ...(startedAt !== undefined ? { startedAt } : {}),
             destination: {
                 label: input.destination.label,
                 lat: input.destination.lat,
