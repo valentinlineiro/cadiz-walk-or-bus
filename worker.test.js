@@ -825,10 +825,14 @@ test('shouldGiveEquivalentIpv6FormsOneKeyAndSplitAcrossSlash64', () => {
 });
 
 test('shouldNotConsumeRateLimitWhenMethodIsRejected', async () => {
-  let calls = 0;
-  const env = { RATE_LIMITER: { limit: async () => { calls += 1; return { success: true }; } } };
-  const res = await worker.fetch(new Request('https://x/api?stop=1', { method: 'POST' }), env);
-  assert.equal(res.status, 405);
-  assert.equal(res.headers.get('allow'), 'GET, HEAD');
-  assert.equal(calls, 0);
+  for (const method of ['POST', 'HEAD']) {
+    let calls = 0;
+    const env = { RATE_LIMITER: { limit: async () => { calls += 1; return { success: true }; } } };
+    for (const path of ['/api?stop=1', '/geocode?q=a', '/route/walk']) {
+      const res = await worker.fetch(new Request(`https://x${path}`, { method }), env);
+      assert.equal(res.status, 405, `${method} ${path}`);
+      assert.equal(res.headers.get('allow'), 'GET');
+    }
+    assert.equal(calls, 0, method);
+  }
 });

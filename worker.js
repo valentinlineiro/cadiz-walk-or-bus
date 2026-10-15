@@ -587,8 +587,8 @@ async function handleProxyHealth(env) {
 async function handleFetch(request, env) {
   const url = new URL(request.url);
   const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname.startsWith('/route/');
-  if (dynamic && request.method !== 'GET' && request.method !== 'HEAD') {
-    return new Response('method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } });
+  if (dynamic && request.method !== 'GET') {
+    return new Response('method not allowed', { status: 405, headers: { allow: 'GET' } });
   }
   if (url.pathname === '/proxy-health') return handleProxyHealth(env);
   if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
