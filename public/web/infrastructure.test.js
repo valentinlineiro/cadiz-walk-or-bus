@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { OsrmRoutingAdapter } from './infrastructure/routing/OsrmRoutingAdapter.js';
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
+import { GeocodingUnavailableError } from './application/ports/GeocodingPort.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
 import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
 import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
@@ -295,16 +296,15 @@ test('NominatimGeocodingAdapter: geocode delegates to search limit 1 and returns
   });
 });
 
-test('NominatimGeocodingAdapter: returns empty array or null on network error', async () => {
+test('NominatimGeocodingAdapter: shouldRejectSearchAndReturnNullGeocodeWhenNetworkIsDown', async () => {
   const failAdapter = new NominatimGeocodingAdapter(async () => { throw new Error('offline'); });
-  const searchResults = await failAdapter.search('Plaza');
-  assert.deepEqual(searchResults, []);
+  await assert.rejects(failAdapter.search('Plaza'), GeocodingUnavailableError);
 
   const geocodeResult = await failAdapter.geocode('Plaza');
   assert.equal(geocodeResult, null);
 });
 
-test('NominatimGeocodingAdapter: passes AbortSignal and returns empty array on timeout', async () => {
+test('NominatimGeocodingAdapter: shouldPassAbortSignalAndRejectSearchWhenRequestTimesOut', async () => {
   let passedSignal = null;
   const timeoutFetch = async (url, options) => {
     passedSignal = options?.signal;
@@ -312,10 +312,9 @@ test('NominatimGeocodingAdapter: passes AbortSignal and returns empty array on t
   };
 
   const adapter = new NominatimGeocodingAdapter(timeoutFetch);
-  const results = await adapter.search('Plaza de Mina');
+  await assert.rejects(adapter.search('Plaza de Mina'), GeocodingUnavailableError);
 
   assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
-  assert.deepEqual(results, []);
 });
 
 test('NominatimGeocodingAdapter: short-circuits empty and single-character queries without calling fetch', async () => {

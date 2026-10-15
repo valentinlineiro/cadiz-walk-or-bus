@@ -1,4 +1,5 @@
 import {
+  GeocodingUnavailableError,
   FindBestJourneysUseCase,
   GetEligibleArrivalsUseCase,
   GetQuickVerdictUseCase,
@@ -69,4 +70,4 @@ export const getEligibleArrivalsUseCase = new GetEligibleArrivalsUseCase({
 export const recordUserChoiceUseCase = new RecordUserChoiceUseCase({
   journeyLog: journeyLogAdapter,
 });
-export { journeyLogAdapter };
+export { journeyLogAdapter, GeocodingUnavailableError };

@@ -403,9 +403,9 @@ test('searchDestinations parses and formats up to limit suggestions', async () =
   assert.deepEqual(res[1], { label: 'Calle Hospital de Mujeres', sub: 'Cádiz', lat: 36.531, lon: -6.299 });
 });
 
-test('searchDestinations returns empty array on network error', async () => {
+test('shouldRejectSearchWhenProviderAnswersWithServerError', async () => {
   const f = async () => ({ ok: false, status: 500 });
-  assert.deepEqual(await searchDestinations(f, 'Plaza', 3), []);
+  await assert.rejects(searchDestinations(f, 'Plaza', 3), { name: 'GeocodingUnavailableError' });
 });
 
 test('walkRoute returns minutes and coordinates converted to [lat, lon]', async () => {

@@ -1,5 +1,8 @@
+import { GeocodingUnavailableError } from '../../application/ports/GeocodingPort.js';
 import { isPointInCadiz } from '../../domain/topology.js';
 export const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
+// The proxy rejects longer queries (400 "invalid q"); such a query cannot match anything.
+const MAX_QUERY_LENGTH = 100;
 const EXTERNAL_REGIONS = new Set([
     'madrid',
     'barcelona',
@@ -51,6 +54,8 @@ export class NominatimGeocodingAdapter {
     async search(query, limit = 5) {
         if (!query || query.trim().length < 2)
             return [];
+        if (query.trim().replace(/\s+/g, ' ').length > MAX_QUERY_LENGTH)
+            return [];
         const normQuery = normalizeSearchText(query);
         const hasStreetPrefix = STREET_PREFIX_REGEX.test(query.trim());
         // Reject queries that are bare external cities/territories without an explicit street/poi prefix
@@ -81,20 +86,23 @@ export class NominatimGeocodingAdapter {
             try {
                 r = await this.fetchImpl(url, { signal: AbortSignal.timeout(5000) });
             }
-            catch {
-                return [];
+            catch (cause) {
+                throw new GeocodingUnavailableError({ cause });
             }
-            if (!r.ok)
+            // The proxy maps an upstream "not found" to 404; every other non-2xx is a failure.
+            if (r.status === 404)
                 return [];
+            if (!r.ok)
+                throw new GeocodingUnavailableError({ cause: `status ${r.status}` });
             let hits;
             try {
                 hits = await r.json();
             }
-            catch {
-                return [];
+            catch (cause) {
+                throw new GeocodingUnavailableError({ cause });
             }
             if (!Array.isArray(hits))
-                return [];
+                throw new GeocodingUnavailableError({ cause: 'malformed response' });
             const results = hits
                 .filter((hit) => {
                 const lat = Number(hit.lat);
@@ -126,7 +134,14 @@ export class NominatimGeocodingAdapter {
     async geocode(query) {
         if (!query || !query.trim())
             return null;
-        const hits = await this.search(query, 1);
-        return hits.length > 0 ? { lat: hits[0].lat, lon: hits[0].lon, name: hits[0].label } : null;
+        try {
+            const hits = await this.search(query, 1);
+            return hits.length > 0 ? { lat: hits[0].lat, lon: hits[0].lon, name: hits[0].label } : null;
+        }
+        catch (error) {
+            if (error instanceof GeocodingUnavailableError)
+                return null;
+            throw error;
+        }
     }
 }

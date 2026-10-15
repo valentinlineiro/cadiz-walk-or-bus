@@ -10,6 +10,7 @@ import {
   formatAlternativeDiff,
 } from './domain/planner.js';
 import {
+  GeocodingUnavailableError,
   cachedTransitPort,
   findBestJourneysUseCase,
   getEligibleArrivalsUseCase,
@@ -861,7 +862,20 @@ async function onFormSubmit(query) {
   document.getElementById('decision').innerHTML = '';
   document.getElementById('status').innerHTML = '<span class="spinner"></span> Buscando…';
   setState('SEARCH');
-  const hits = await searchDestinationsUseCase.execute(q, 1);
+  let hits;
+  try {
+    hits = await searchDestinationsUseCase.execute(q, 1);
+  } catch (error) {
+    if (!(error instanceof GeocodingUnavailableError)) throw error;
+    // The provider could not be asked: not "not found". Keep the query so a retry is one tap.
+    destCoords = null;
+    destLabel = null;
+    const input = document.getElementById('q');
+    if (input) input.value = q;
+    setState('FAILED', 'Buscador no disponible');
+    showSearchError(q, 'No pudimos consultar el buscador. Inténtalo de nuevo en unos segundos.');
+    return;
+  }
   if (hits.length === 0) {
     destCoords = null;
     destLabel = null;
