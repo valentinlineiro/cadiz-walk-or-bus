@@ -14,12 +14,12 @@ for (let i = 0; i < 4; i++) stops.push({ stop: `S${i}`, name: `S${i}`, lat: orig
 stops.push({ stop: 'D0', name: 'D0', lat: destination.lat, lon: destination.lon });
 for (let i = 0; i < 4; i++) lines[`L${i}`] = { DEST: [`S${i}`, 'D0'] };
 
-const net = { stops: 0, lines: 0, failStops: false, failLines: false, apiStops: new Set() };
+const net = { stops: 0, lines: 0, failStops: false, failLines: false, emptyStops: false, apiStops: new Set() };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
 globalThis.fetch = async (url) => {
   const u = String(url);
-  if (u === '/stops') { net.stops += 1; return net.failStops ? json({}, 503) : json(stops); }
+  if (u === '/stops') { net.stops += 1; return net.failStops ? json({}, 503) : json(net.emptyStops ? [] : stops); }
   if (u === '/lines') { net.lines += 1; return net.failLines ? json({}, 503) : json({ lines }); }
   if (u.startsWith('/api')) {
     const id = new URL(u, 'http://x').searchParams.get('stop');
@@ -37,9 +37,9 @@ const { getQuickVerdictUseCase, setCachedStops, setCachedLines } = await import(
 const verdict = () => getQuickVerdictUseCase.execute({ origin, destination });
 const municipalStopsAsked = () => [...net.apiStops].some((id) => id.startsWith('S'));
 const outage = (which) => {
-  setCachedStops([]);
+  setCachedStops(null);
   setCachedLines(null);
-  Object.assign(net, { stops: 0, lines: 0, failStops: false, failLines: false, apiStops: new Set(), ...which });
+  Object.assign(net, { stops: 0, lines: 0, failStops: false, failLines: false, emptyStops: false, apiStops: new Set(), ...which });
 };
 
 test('shouldUseMunicipalStopsAgainWhenStopsCatalogueRecoversAfterTheRetryWindow', async () => {
@@ -118,6 +118,19 @@ test('shouldNotAskTheCatalogueAgainWhenMunicipalOneIsLive', async () => {
     await verdict();
 
     assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldNotAskTheCatalogueAgainWhenMunicipalOneLegitimatelyAnswersEmpty', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 6_000_000 });
+  try {
+    outage({ emptyStops: true });
+    await Promise.all([verdict(), verdict()]);
+    await verdict();
+
+    assert.equal(net.stops, 1, 'an empty live catalogue is loaded, not missing');
   } finally {
     mock.timers.reset();
   }

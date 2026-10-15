@@ -86,7 +86,7 @@ test('shouldRecoverWhenWalkingRoutesFailThenComeBack', async () => {
 });
 
 test('shouldAskAFailingCatalogueOnceWhenAllFavoriteChipsRender', async () => {
-  setCachedStops([]);
+  setCachedStops(null);
   setCachedLines(null);
   reset();
   net.failCatalog = true;

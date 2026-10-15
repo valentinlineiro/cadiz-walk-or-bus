@@ -828,7 +828,7 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
     getLines: async () => { lineCalls++; return { '99': { name: 'Line 99' } }; },
     getArrivals: async () => [],
   });
-  _setStops([]);
+  _setStops(null);
   _setLines(null);
 
   const s1 = await cachedTransitPort.getStops();
