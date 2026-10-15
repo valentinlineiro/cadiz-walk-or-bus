@@ -14,14 +14,14 @@ for (let i = 0; i < 10; i++) stops.push({ stop: `S${i}`, name: `S${i}`, lat: ori
 favorites.forEach((f, i) => stops.push({ stop: `D${i}`, name: `D${i}`, lat: f.lat, lon: f.lon }));
 for (let i = 0; i < 10; i++) lines[`L${i}`] = { DEST: [`S${i}`, `D${i % FAVORITES}`] };
 
-const net = { api: 0, apiStops: new Set(), foot: 0, drive: 0, stops: 0, lines: 0, failApi: false, failFoot: false };
+const net = { api: 0, apiStops: new Set(), foot: 0, drive: 0, stops: 0, lines: 0, failApi: false, failFoot: false, failCatalog: false };
 const reset = () => Object.assign(net, { api: 0, apiStops: new Set(), foot: 0, drive: 0, stops: 0, lines: 0 });
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status });
 
 globalThis.fetch = async (url) => {
   const u = String(url);
-  if (u === '/stops') { net.stops += 1; return json(stops); }
-  if (u === '/lines') { net.lines += 1; return json({ lines }); }
+  if (u === '/stops') { net.stops += 1; return net.failCatalog ? json({}, 503) : json(stops); }
+  if (u === '/lines') { net.lines += 1; return net.failCatalog ? json({}, 503) : json({ lines }); }
   if (u.startsWith('/api')) {
     net.api += 1;
     const id = new URL(u, 'http://x').searchParams.get('stop');
@@ -38,7 +38,7 @@ globalThis.fetch = async (url) => {
 };
 globalThis.window = { localStorage: { getItem: () => null, setItem() {} } };
 
-const { getQuickVerdictUseCase } = await import('./application/composition.js');
+const { getQuickVerdictUseCase, setCachedStops, setCachedLines } = await import('./application/composition.js');
 const renderChips = () => Promise.all(favorites.map((destination) => getQuickVerdictUseCase.execute({ origin, destination })));
 
 test('shouldAskEachStopAndTheCatalogOnceWhenAllFavoriteChipsRender', async () => {
@@ -83,4 +83,16 @@ test('shouldRecoverWhenWalkingRoutesFailThenComeBack', async () => {
 
   assert.ok(down.every((v) => v?.kind !== 'walk'), 'a straight-line guess is not a walking verdict');
   assert.ok(up.every((v) => v !== null));
+});
+
+test('shouldAskAFailingCatalogueOnceWhenAllFavoriteChipsRender', async () => {
+  setCachedStops([]);
+  setCachedLines(null);
+  reset();
+  net.failCatalog = true;
+  const verdicts = await renderChips();
+  net.failCatalog = false;
+
+  assert.equal(verdicts.length, FAVORITES, 'chips still settle on the scheduled fallback');
+  assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
 });
