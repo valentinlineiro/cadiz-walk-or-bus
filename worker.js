@@ -331,12 +331,22 @@ export function __resetArrivalsCache() {
   inflightArrivals.clear();
 }
 
+// IPv6 clients own a whole /64, so key on its 4 hextets (expanding any `::`); IPv4 as-is.
+export function rateKey(ip) {
+  if (!ip?.includes(':')) return ip ?? 'unknown';
+  const [head, tail = ''] = ip.split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...h, ...Array(8 - h.length - t.length).fill('0'), ...t] : h;
+  return groups.slice(0, 4).map((g) => g.toLowerCase().replace(/^0+(?=.)/, '')).join(':');
+}
+
 async function rateLimited(request, env) {
   const limiter = env?.RATE_LIMITER;
   if (!limiter) return false;
   // Anonymous public app: the client IP is the only stable key. Limit is generous because
   // mobile carriers share IPs (CGNAT).
-  const key = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  const key = rateKey(request.headers.get('cf-connecting-ip'));
   try {
     return !(await limiter.limit({ key })).success;
   } catch {
@@ -559,10 +569,13 @@ async function handleProxyHealth(env) {
 
 async function handleFetch(request, env) {
   const url = new URL(request.url);
+  const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname.startsWith('/route/');
+  if (dynamic && request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } });
+  }
   if (url.pathname === '/proxy-health') return handleProxyHealth(env);
   if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
     if (await rateLimited(request, env)) return rateLimitedResponse(url.pathname);
-    if (request.method !== 'GET') return new Response('method not allowed', { status: 405 });
     return url.pathname === '/geocode' ? handleGeocode(url, env) : handleRoute(url, env);
   }
   if (url.pathname === '/stops') return Response.json(stops);

@@ -805,3 +805,11 @@ test('metrics: events are logged as objects, never as pre-serialized JSON string
   }
   assert.equal(typeof ev('panel_request')[0].panel_duration_ms, 'number', 'durations stay numeric');
 });
+
+import { rateKey } from './worker.js';
+test('shouldKeyIpv6ByDeclared64WhenAddressIsCompressed', () => {
+  assert.equal(rateKey('2a0c:5a80::1'), '2a0c:5a80:0:0');
+  assert.equal(rateKey('2a0c:5a80:1:2:aaaa:bbbb:cccc:dddd'), '2a0c:5a80:1:2');
+  assert.equal(rateKey('::1'), '0:0:0:0');
+  assert.equal(rateKey('203.0.113.9'), '203.0.113.9');
+});
