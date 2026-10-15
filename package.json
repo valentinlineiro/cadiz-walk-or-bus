@@ -2,7 +2,6 @@
   "name": "cadiz-walk-or-bus",
   "version": "0.1.0",
   "description": "Wait for the bus or walk, right now, in Cadiz.",
-  "main": "index.js",
   "type": "module",
   "scripts": {
     "architecture:check": "node scripts/architecture-gate.mjs",
