@@ -15,6 +15,7 @@ function shellUrlsOf(swSource) {
 }
 
 // Everything the installed shell serves cache-first, plus sw.js itself (minus its own hash line).
+// The Worker handles "/" with inline MAP_HTML, so include worker.js as that route's source dependency.
 export function computeShellHash(root = defaultRoot) {
   const swSource = readFileSync(join(root, 'public/sw.js'), 'utf8');
   const hash = createHash('sha256');
@@ -23,6 +24,8 @@ export function computeShellHash(root = defaultRoot) {
     const file = join(root, 'public', url.slice(1));
     add(url, existsSync(file) ? readFileSync(file) : MISSING);
   }
+  const workerPath = join(root, 'worker.js');
+  add('/worker.js', existsSync(workerPath) ? readFileSync(workerPath) : MISSING);
   add('/sw.js', swSource.replace(HASH_LINE, ''));
   return hash.digest('hex').slice(0, 12);
 }
