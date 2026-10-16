@@ -13,7 +13,7 @@ const RESULT_HTML = `<form action="./search.aspx?t1=CORTADURA&amp;t2=&amp;t3=">
 <input name="ctl00$ContentPlaceHolderContenido$RepeaterBusStops$ctl01$btnTimes" value="" />
 <input name="__VIEWSTATE" value="VS2" /></form>`;
 
-test('searchStops posts the query and parses [number, name] rows', async () => {
+test('shouldPostTheQueryAndParseNumberAndNameRowsWhenSearchingStops', async () => {
   const calls = [];
   const fetchImpl = async (url, opts) => {
     calls.push([url, opts?.method || 'GET', String(opts?.body || '')]);
@@ -37,14 +37,14 @@ const FORM_HTML_WITH_4_ROWS = `<form action="./search.aspx?t1=CORTADURA&amp;t2=&
 </table>
 <input name="__VIEWSTATE" value="VS2" /></form>`;
 
-test('searchStops parses every stop row and attaches its index', async () => {
+test('shouldParseEveryStopRowAndAttachItsIndexWhenSearchingStops', async () => {
   const fetchImpl = async () => ({ ok: true, text: async () => FORM_HTML_WITH_4_ROWS });
   const rows = await searchStops(fetchImpl, 'CORTADURA');
   assert.equal(rows.length, 4);
   assert.deepEqual(rows.map((r) => r.index), [0, 1, 2, 3]);
 });
 
-test('resolveIds posts the row-indexed button and reads stop from the refresh link', async () => {
+test('shouldPostTheRowIndexedButtonAndReadTheStopFromTheRefreshLinkWhenResolvingIds', async () => {
   const row = {
     index: 1,
     detailAction: './search.aspx?t1=CORTADURA&t2=&t3=',
@@ -64,7 +64,7 @@ test('resolveIds posts the row-indexed button and reads stop from the refresh li
   assert.doesNotMatch(String(calls[0]), /__EVENTTARGET/);
 });
 
-test('crawl dedupes stops across queries and drops rows without coords', async () => {
+test('shouldDedupeStopsAndDropRowsWithoutCoordsWhenCrawlingAcrossQueries', async () => {
   const fetchImpl = async (url, opts) => {
     const body = String(opts?.body ?? '');
     if (opts?.method === 'POST' && body.includes('btnSearch')) {
@@ -80,7 +80,7 @@ test('crawl dedupes stops across queries and drops rows without coords', async (
   assert.deepEqual(rows[0], { name: 'CORTADURA', number: '1114', stop: '9905', lat: 36.5001, lon: -6.2721 });
 });
 
-test('geocode bounds queries to Cadiz and drops out-of-bbox hits', async () => {
+test('shouldBoundQueriesToCadizAndDropOutOfBboxHitsWhenGeocoding', async () => {
   let url;
   const inBox = async (u) => { url = u; return { ok: true, json: async () => [{ lat: '36.5001', lon: '-6.2721' }] }; };
   assert.deepEqual(await geocode(inBox, 'CORTADURA'), { lat: 36.5001, lon: -6.2721 });
