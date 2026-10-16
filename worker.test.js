@@ -31,7 +31,7 @@ test.afterEach(() => {
 });
 const ev = (name) => logs.filter((l) => l.event === name);
 
-test('GET /api returns parsed arrivals with mocked upstream', async () => {
+test('shouldReturnParsedArrivalsWhenTheUpstreamAnswers', async () => {
   const html = `<table><tbody><tr><td>1</td><td>CORTADURA</td><td>3min</td></tr></tbody></table>`;
   globalThis.fetch = async () => ({ ok: true, text: async () => html });
   const res = await worker.fetch(new Request('http://x/api?stop=1213&route=110001'));
@@ -39,7 +39,7 @@ test('GET /api returns parsed arrivals with mocked upstream', async () => {
   assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 3 }] });
 });
 
-test('GET / serves map UI', async () => {
+test('shouldServeTheMapPageWhenRequestingTheRoot', async () => {
   const res = await worker.fetch(new Request('http://x/'));
   assert.equal(res.status, 200);
   const body = await res.text();
@@ -47,34 +47,34 @@ test('GET / serves map UI', async () => {
   assert.match(body, /leaflet/);
 });
 
-test('GET /map serves map UI', async () => {
+test('shouldServeTheMapPageWhenRequestingMap', async () => {
   const res = await worker.fetch(new Request('http://x/map'));
   assert.equal(res.status, 200);
   const body = await res.text();
   assert.match(body, /¿Andar o bus\? — Cádiz/);
 });
 
-test('GET /api times out and returns 502 cleanly on slow upstream', async () => {
+test('shouldReturn502WhenTheUpstreamIsSlowAndTimesOut', async () => {
   globalThis.fetch = async () => new Promise((_, reject) => setTimeout(() => reject(new DOMException('Timeout', 'TimeoutError')), 20));
   const res = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(res.status, 502);
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
-test('GET /api proxies upstream failure as 502', async () => {
+test('shouldReturn502WhenTheUpstreamFails', async () => {
   globalThis.fetch = async () => ({ ok: false, status: 500 });
   const res = await worker.fetch(new Request('http://x/api?stop=1225&route=2'));
   assert.equal(res.status, 502);
 });
 
-test('GET /api maps upstream throw to 502', async () => {
+test('shouldReturn502WhenTheUpstreamThrows', async () => {
   globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
   const res = await worker.fetch(new Request('http://x/api?stop=1225&route=2'));
   assert.equal(res.status, 502);
   assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
 });
 
-test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async () => {
+test('shouldReturn502WhenTheUpstreamHtmlIsMalformedOrUnrecognizable', async () => {
   // Upstream returns an error page without tables
   globalThis.fetch = async () => ({ ok: true, text: async () => '<html><body>Internal Server Error</body></html>' });
   const noTableRes = await worker.fetch(new Request('http://x/api?stop=1213'));
@@ -112,7 +112,7 @@ test('GET /api returns 502 on malformed or unrecognizable upstream HTML', async 
   assert.deepEqual(await boundsOnlyRes.json(), { error: 'malformed upstream response' });
 });
 
-test('GET /api parses tables with row attributes like class or style properly', async () => {
+test('shouldParseTablesWhenRowsCarryAttributesLikeClassOrStyle', async () => {
   const htmlWithTrClass = '<table class="tablePanel"><tr class="odd"><td>1</td><td>CORTADURA</td><td>5min</td></tr></table>';
   globalThis.fetch = async () => ({ ok: true, text: async () => htmlWithTrClass });
   const res = await worker.fetch(new Request('http://x/api?stop=1213'));
@@ -120,7 +120,7 @@ test('GET /api parses tables with row attributes like class or style properly', 
   assert.deepEqual(await res.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 5 }] });
 });
 
-test('GET /api returns 200 and authoritative empty arrivals on valid empty panel table', async () => {
+test('shouldReturn200WithAnAuthoritativeEmptyListWhenThePanelTableIsValidAndEmpty', async () => {
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tbody></tbody></table>' });
   const emptyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(emptyRes.status, 200);
@@ -140,12 +140,12 @@ test('GET /api returns 200 and authoritative empty arrivals on valid empty panel
   assert.deepEqual(await oosRes.json(), { arrivals: [] });
 });
 
-test('GET /api without stop returns 400', async () => {
+test('shouldReturn400WhenStopIsMissing', async () => {
   const res = await worker.fetch(new Request('http://x/api'));
   assert.equal(res.status, 400);
 });
 
-test('GET /api validates the stop parameter against injection and malformed ids', async () => {
+test('shouldRejectTheStopWhenItIsMalformedOrAnInjectionAttempt', async () => {
   globalThis.fetch = async () => assert.fail('malformed requests must never reach the panel');
   for (const q of ['stop=1308%26admin=1', 'stop=1308;drop', 'stop=12345678901234567', 'stop=', '']) {
     const res = await worker.fetch(new Request(`http://x/api?${q}`));
@@ -154,7 +154,7 @@ test('GET /api validates the stop parameter against injection and malformed ids'
   }
 });
 
-test('GET /api rejects unknown stops with 404 before any cache, lock or panel access', async () => {
+test('shouldReturn404BeforeAnyCacheLockOrPanelAccessWhenTheStopIsUnknown', async () => {
   let panel = 0;
   let turso = 0;
   globalThis.fetch = async (url) => {
@@ -174,7 +174,7 @@ test('GET /api rejects unknown stops with 404 before any cache, lock or panel ac
   assert.equal(lines.join('\n').includes('987654'), false, 'rejected ids are not logged');
 });
 
-test('GET /api ignores the route parameter: not forwarded and not part of the cache key', async () => {
+test('shouldIgnoreTheRouteParameterWhenForwardingAndKeyingTheCache', async () => {
   const urls = [];
   globalThis.fetch = async (url) => {
     urls.push(String(url));
@@ -188,7 +188,7 @@ test('GET /api ignores the route parameter: not forwarded and not part of the ca
   assert.equal(urls[0].includes('route='), false);
 });
 
-test('every shipped stop is servable and the allowlist matches stops.json', async () => {
+test('shouldServeEveryShippedStopWhenTheAllowlistIsComparedWithStopsJson', async () => {
   const shipped = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./stops.json', import.meta.url), 'utf8'));
   let panel = 0;
   globalThis.fetch = async () => {
@@ -203,7 +203,7 @@ test('every shipped stop is servable and the allowlist matches stops.json', asyn
   assert.equal(panel, ids.length);
 });
 
-test('GET /stops returns the stop directory', async () => {
+test('shouldReturnTheStopDirectoryWhenRequestingStops', async () => {
   const res = await worker.fetch(new Request('http://x/stops'));
   assert.equal(res.status, 200);
   const stops = await res.json();
@@ -211,7 +211,7 @@ test('GET /stops returns the stop directory', async () => {
   assert.deepEqual(Object.keys(stops[0]).sort(), ['lat', 'lon', 'name', 'number', 'stop']);
 });
 
-test('GET /api works stop-only (no route)', async () => {
+test('shouldWorkWithAStopOnlyWhenNoRouteIsGiven', async () => {
   let fetched = '';
   globalThis.fetch = async (url) => { fetched = String(url); return { ok: true, text: async () => '<table></table>' }; };
   try {
@@ -221,7 +221,7 @@ test('GET /api works stop-only (no route)', async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('GET /lines returns the topology directory', async () => {
+test('shouldReturnTheTopologyDirectoryWhenRequestingLines', async () => {
   const res = await worker.fetch(new Request('http://x/lines'));
   assert.equal(res.status, 200);
   const data = await res.json();
@@ -271,7 +271,7 @@ function withTurso(upstream, { slotBusy = false, writeDelayMs = 0 } = {}) {
 
 const NOMINATIM_HIT = JSON.stringify([{ lat: '36.53', lon: '-6.29', display_name: 'Plaza de España, Cádiz' }]);
 
-test('GET /geocode proxies Nominatim with identifying UA and serves the repeat from cache', async () => {
+test('shouldProxyNominatimWithAnIdentifyingUserAgentAndServeTheRepeatFromCacheWhenGeocoding', async () => {
   const env = TURSO_ENV;
   let calls = 0;
   let seen;
@@ -290,21 +290,21 @@ test('GET /geocode proxies Nominatim with identifying UA and serves the repeat f
   assert.equal(calls, 1, 'second identical query must not reach upstream');
 });
 
-test('GET /geocode rejects short or oversized queries and non-GET methods', async () => {
+test('shouldRejectShortOrOversizedQueriesAndNonGetMethodsWhenGeocoding', async () => {
   globalThis.fetch = async () => assert.fail('must not reach upstream');
   assert.equal((await worker.fetch(new Request('http://x/geocode?q=a'))).status, 400);
   assert.equal((await worker.fetch(new Request(`http://x/geocode?q=${'a'.repeat(101)}`))).status, 400);
   assert.equal((await worker.fetch(new Request('http://x/geocode?q=cadiz', { method: 'POST' }))).status, 405);
 });
 
-test('GET /geocode returns 503 with retry-after when the global Nominatim slot stays taken', async () => {
+test('shouldReturn503WithRetryAfterWhenTheGlobalNominatimSlotStaysTaken', async () => {
   withTurso(async () => assert.fail('must not reach upstream without a slot'), { slotBusy: true });
   const res = await worker.fetch(new Request('http://x/geocode?q=ocupado'), TURSO_ENV);
   assert.equal(res.status, 503);
   assert.equal(res.headers.get('retry-after'), '2');
 });
 
-test('GET /route proxies foot and drive, validates coordinates, maps upstream errors', async () => {
+test('shouldProxyFootAndDriveValidateCoordinatesAndMapUpstreamErrorsWhenRouting', async () => {
   const env = TURSO_ENV;
   const urls = [];
   withTurso(async (url) => {
@@ -327,7 +327,7 @@ test('GET /route proxies foot and drive, validates coordinates, maps upstream er
   assert.equal((await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), env)).status, 502);
 });
 
-test('geocode fails closed (503 + retry-after) without Turso secrets, but routes still proxy', async () => {
+test('shouldFailClosedWith503WhenGeocodingRunsWithoutTursoSecretsButStillProxyRoutes', async () => {
   let calls = 0;
   globalThis.fetch = async () => {
     calls++;
@@ -341,7 +341,7 @@ test('geocode fails closed (503 + retry-after) without Turso secrets, but routes
   assert.equal(route.status, 200);
 });
 
-test('geocode fails closed when Turso is down on a cache miss', async () => {
+test('shouldFailClosedWhenTursoIsDownOnAGeocodeCacheMiss', async () => {
   let nominatim = 0;
   globalThis.fetch = async (url) => {
     if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
@@ -353,7 +353,7 @@ test('geocode fails closed when Turso is down on a cache miss', async () => {
   assert.equal(nominatim, 0);
 });
 
-test('concurrent geocode misses: calls to Nominatim are never closer than the global gap', async () => {
+test('shouldKeepTheGlobalGapBetweenNominatimCallsWhenGeocodeMissesAreConcurrent', async () => {
   const stamps = [];
   withTurso(async () => {
     stamps.push(Date.now());
@@ -372,7 +372,7 @@ test('concurrent geocode misses: calls to Nominatim are never closer than the gl
   }
 });
 
-test('valid JSON with the wrong shape is rejected and never cached', async () => {
+test('shouldRejectAndNeverCacheWhenValidJsonHasTheWrongShape', async () => {
   const cache = withTurso(async (url) => ({
     ok: true,
     status: 200,
@@ -385,7 +385,7 @@ test('valid JSON with the wrong shape is rejected and never cached', async () =>
   assert.equal(cache.size, 0);
 });
 
-test('upstream 429 becomes 503 with retry-after, not 404; upstream 400 stays "no result"', async () => {
+test('shouldTurnUpstream429Into503WithRetryAfterAndKeepUpstream400AsNoResultWhenGeocoding', async () => {
   withTurso(async () => ({ ok: false, status: 429, headers: new Headers({ 'retry-after': '30' }), text: async () => '' }));
   const limited = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
   assert.equal(limited.status, 503);
@@ -395,7 +395,7 @@ test('upstream 429 becomes 503 with retry-after, not 404; upstream 400 stays "no
   assert.equal(bad.status, 404);
 });
 
-test('/proxy-health reports 503 unconfigured and 200 when Turso answers', async () => {
+test('shouldReport503WhenUnconfiguredAnd200WhenTursoAnswersOnProxyHealth', async () => {
   assert.equal((await worker.fetch(new Request('http://x/proxy-health'))).status, 503);
   withTurso(async () => assert.fail('no upstream calls'));
   const ok = await worker.fetch(new Request('http://x/proxy-health'), TURSO_ENV);
@@ -403,7 +403,7 @@ test('/proxy-health reports 503 unconfigured and 200 when Turso answers', async 
   assert.deepEqual(await ok.json(), { turso: 'ok' });
 });
 
-test('accepts a libsql:// Turso URL by talking https to the same host', async () => {
+test('shouldAcceptALibsqlUrlWhenTalkingHttpsToTheSameHost', async () => {
   const urls = [];
   globalThis.fetch = async (url) => {
     urls.push(String(url));
@@ -414,7 +414,7 @@ test('accepts a libsql:// Turso URL by talking https to the same host', async ()
   assert.equal(urls[0], 'https://db-test.turso.io/v2/pipeline');
 });
 
-test('OSRM Ok with no routes or empty geometry is rejected and never cached', async () => {
+test('shouldRejectAndNeverCacheWhenOsrmAnswersOkWithNoRoutesOrEmptyGeometry', async () => {
   for (const body of ['{"code":"Ok","routes":[]}', '{"code":"Ok","routes":[{"distance":1,"duration":1,"geometry":{"coordinates":[]}}]}']) {
     const cache = withTurso(async () => ({ ok: true, status: 200, text: async () => body }));
     const res = await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
