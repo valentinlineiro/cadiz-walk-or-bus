@@ -551,7 +551,7 @@ test('shouldRankByCountWithRecencyTiebreakWhenListingTopDestinations', () => {
   assert.equal(top[1].count, 1);
 });
 
-test('LocalStorageJourneyLogAdapter: deduplication moves updated entry to the head of the log (strict LIFO)', () => {
+test('shouldMoveTheUpdatedEntryToTheHeadWhenDeduplicatingTheLog', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);
 
@@ -589,7 +589,7 @@ test('LocalStorageJourneyLogAdapter: deduplication moves updated entry to the he
   assert.equal(log[1].id, 'b1');
 });
 
-test('LocalStorageJourneyLogAdapter: getLog validates schema and drops invalid entries', () => {
+test('shouldDropInvalidEntriesWhenReadingTheLog', () => {
   const storage = new MockStorage();
   const validEntry = {
     id: 'entry-1',
@@ -633,7 +633,7 @@ test('LocalStorageJourneyLogAdapter: getLog validates schema and drops invalid e
   assert.equal(log[0].destination.label, 'Dest A');
 });
 
-test('LocalStorageJourneyLogAdapter: getLog slices entries to MAX_ENTRIES (200)', () => {
+test('shouldKeepOnlyTheLatestTwoHundredEntriesWhenReadingTheLog', () => {
   const storage = new MockStorage();
   const entries = Array.from({ length: 250 }, (_, i) => ({
     id: `id-${i}`,
@@ -648,7 +648,7 @@ test('LocalStorageJourneyLogAdapter: getLog slices entries to MAX_ENTRIES (200)'
   assert.equal(log.length, 200);
 });
 
-test('LocalStorageJourneyLogAdapter: getRecentDestinations and getTopDestinations include count, lastRecommendation, and sub', () => {
+test('shouldIncludeCountLastRecommendationAndSubWhenListingRecentOrTopDestinations', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);
 
@@ -672,7 +672,7 @@ test('LocalStorageJourneyLogAdapter: getRecentDestinations and getTopDestination
   assert.ok(top[0].lastRecommendation);
 });
 
-test('formatRecommendationSub: formats walk and bus recommendations correctly', () => {
+test('shouldFormatWalkAndBusRecommendationsWhenBuildingTheSubtitle', () => {
   assert.equal(formatRecommendationSub(null), null);
   assert.equal(formatRecommendationSub({ mode: 'walk', totalMinutes: 15 }), 'última vez: ANDAR · 15′');
   assert.equal(formatRecommendationSub({ kind: 'walk', totalMinutes: 20 }), 'última vez: ANDAR · 20′');
@@ -694,7 +694,7 @@ function createNativeLikeFetch(responseBody) {
   };
 }
 
-test('OsrmRoutingAdapter: binds fetchImpl to globalThis preventing Illegal invocation on native browser fetch', async () => {
+test('shouldBindFetchToGlobalThisWhenOsrmUsesTheNativeBrowserFetch', async () => {
   const nativeFetch = createNativeLikeFetch({
     routes: [
       {
@@ -719,7 +719,7 @@ test('OsrmRoutingAdapter: binds fetchImpl to globalThis preventing Illegal invoc
   assert.equal(route.minutes, 15);
 });
 
-test('MunicipalTransitAdapter: binds fetchImpl to globalThis preventing Illegal invocation on native browser fetch', async () => {
+test('shouldBindFetchToGlobalThisWhenMunicipalTransitUsesTheNativeBrowserFetch', async () => {
   const nativeFetch = createNativeLikeFetch([
     { stop: 1, name: 'Plaza España', lat: 36.535, lon: -6.292 },
   ]);
@@ -730,7 +730,7 @@ test('MunicipalTransitAdapter: binds fetchImpl to globalThis preventing Illegal 
   assert.equal(stops[0].name, 'Plaza España');
 });
 
-test('NominatimGeocodingAdapter: binds fetchImpl to globalThis preventing Illegal invocation on native browser fetch', async () => {
+test('shouldBindFetchToGlobalThisWhenNominatimUsesTheNativeBrowserFetch', async () => {
   const nativeFetch = createNativeLikeFetch([
     { display_name: 'Cádiz, Spain', name: 'Cádiz', lat: '36.527', lon: '-6.288' },
   ]);
@@ -741,7 +741,7 @@ test('NominatimGeocodingAdapter: binds fetchImpl to globalThis preventing Illega
   assert.equal(hits[0].label, 'Cádiz');
 });
 
-test('cachedTransitPort: conforms to TransitDataPort and handles in-memory stops and lines caching', async () => {
+test('shouldExposeTheTransitDataPortAndCacheStopsAndLinesWhenComposed', async () => {
   assert.equal(typeof cachedTransitPort.getStops, 'function');
   assert.equal(typeof cachedTransitPort.getLines, 'function');
   assert.equal(typeof cachedTransitPort.getArrivals, 'function');
@@ -795,7 +795,7 @@ test('cachedTransitPort: conforms to TransitDataPort and handles in-memory stops
   assert.equal(arrivals.length, 1);
 });
 
-test('appendEntry: respects max limit when persisting to storage (preserves legacy persistent state semantic)', () => {
+test('shouldRespectTheMaxLimitWhenAppendingEntriesToStorage', () => {
   const mockStorage = new MockStorage();
   const entry1 = {
     destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
@@ -820,7 +820,7 @@ test('appendEntry: respects max limit when persisting to storage (preserves lega
   assert.equal(raw[1].destination.label, 'Plaza España');
 });
 
-test('cachedTransitPort: populates and preserves in-memory cache across calls', async () => {
+test('shouldPopulateAndPreserveTheInMemoryCacheWhenCalledRepeatedly', async () => {
   let stopCalls = 0;
   let lineCalls = 0;
   _setTransitAdapter({
@@ -848,7 +848,7 @@ test('cachedTransitPort: populates and preserves in-memory cache across calls', 
   assert.equal(l2, l1);
 });
 
-test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled source', async () => {
+test('shouldExposeNapMetadataStopsLinesAndScheduledSourceWhenBuiltFromASnapshot', async () => {
   const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2026-09-18T09:15:00+02:00'),
   });
@@ -865,7 +865,7 @@ test('GtfsTransitAdapter: exposes NAP metadata, stops, lines, and scheduled sour
   }]);
 });
 
-test('GtfsTransitAdapter: bounds lookahead horizon to 60 minutes (MAX_LOOKAHEAD_SECONDS)', async () => {
+test('shouldBoundTheLookaheadToSixtyMinutesWhenListingScheduledArrivals', async () => {
   // At 07:55: departure at 10:00 is 125 min (> 3600s) -> excluded
   const farAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2026-09-18T07:55:00+02:00'),
@@ -884,7 +884,7 @@ test('GtfsTransitAdapter: bounds lookahead horizon to 60 minutes (MAX_LOOKAHEAD_
   }]);
 });
 
-test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight service-day times within lookahead', async () => {
+test('shouldApplyCalendarExceptionsAndKeepPostMidnightTimesWithinLookaheadWhenListingArrivals', async () => {
   // At 23:30 on 2026-09-17: next departure is at 25:10 (100 min away, > 3600s) -> excluded
   const beforeMidnightFar = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2026-09-17T23:30:00+02:00'),
@@ -898,7 +898,7 @@ test('GtfsTransitAdapter: applies calendar exceptions and keeps post-midnight se
   assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
 });
 
-test('ResilientTransitAdapter: falls back on realtime errors but treats empty array as authoritative (Issue #21)', async () => {
+test('shouldFallBackOnRealtimeErrorsButTreatAnEmptyArrayAsAuthoritativeWhenFetchingArrivals', async () => {
   let scheduledCalls = 0;
   const scheduled = {
     getStops: async () => [{ stop: 'A', lat: 36.52, lon: -6.28 }],
@@ -932,7 +932,7 @@ test('ResilientTransitAdapter: falls back on realtime errors but treats empty ar
   assert.deepEqual(await bothFailingAdapter.getArrivals('A'), []);
 });
 
-test('ResilientTransitAdapter: slow realtime resolving after timeout falls back cleanly without leaking side effects', async () => {
+test('shouldFallBackCleanlyWithoutLeakingSideEffectsWhenRealtimeResolvesAfterTheTimeout', async () => {
   let realtimeResolved = false;
   const slowRealtime = {
     getStops: async () => [],
@@ -969,7 +969,7 @@ test('ResilientTransitAdapter: slow realtime resolving after timeout falls back 
   assert.equal(arrivals[0].destination, 'Scheduled Bus');
 });
 
-test('GtfsTransitAdapter: enforces calendar active windows, inactive weekdays, and exception dates', async () => {
+test('shouldEnforceActiveWindowsInactiveWeekdaysAndExceptionDatesWhenListingArrivals', async () => {
   // 1. Before startDate (2020-09-25) -> no service active -> []
   const pastAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2020-09-25T07:30:00+02:00'),
@@ -1006,7 +1006,7 @@ test('GtfsTransitAdapter: enforces calendar active windows, inactive weekdays, a
   assert.deepEqual(await removedExceptionAdapter.getArrivals('A'), []);
 });
 
-test('GTFS production snapshot: validates feed validity window, calendar services, and active dates', () => {
+test('shouldHaveAValidFeedWindowCalendarServicesAndActiveDatesWhenReadingTheProductionSnapshot', () => {
   assert.ok(realGtfsSnapshot.feedVersion, 'snapshot must have feedVersion');
   assert.match(realGtfsSnapshot.feedVersion, /^nap-\d{4}-\d{2}-\d{2}$/);
   assert.ok(realGtfsSnapshot.services.length > 0, 'snapshot must contain services');
@@ -1031,7 +1031,7 @@ test('GTFS production snapshot: validates feed validity window, calendar service
   assert.ok(allAddedDates.has('20261225'), 'feed must include Navidad (2026-12-25)');
 });
 
-test('GTFS production snapshot: executes calendar and exception engine returning active scheduled arrivals for weekdays, weekends, and holidays', async () => {
+test('shouldReturnScheduledArrivalsOnWeekdaysWeekendsAndHolidaysWhenRunningTheProductionSnapshot', async () => {
   const stopId = realGtfsSnapshot.stops[0].stop; // '2_1' (Avda. Del Puerto)
 
   // 1. Regular Monday (2026-10-19 10:00 Madrid time): evaluates active Monday service calendar
@@ -1079,7 +1079,7 @@ test('GTFS production snapshot: executes calendar and exception engine returning
   assert.deepEqual(expiredArrivals, [], 'Date outside feed bounds must return empty arrivals');
 });
 
-test('ResilientTransitAdapter + MunicipalTransitAdapter integration: malformed upstream response triggers scheduled fallback', async () => {
+test('shouldFallBackToScheduledWhenTheMunicipalResponseIsMalformed', async () => {
   const fakeFetchMalformed = async () => ({
     ok: false,
     status: 502,
@@ -1102,7 +1102,7 @@ test('ResilientTransitAdapter + MunicipalTransitAdapter integration: malformed u
   assert.equal(arrivals[0].minutes, 12);
 });
 
-test('ResilientTransitAdapter + MunicipalTransitAdapter integration: authoritative 200 [] does NOT trigger scheduled fallback', async () => {
+test('shouldNotFallBackToScheduledWhenTheMunicipalAnswerIsAnAuthoritativeEmptyList', async () => {
   let scheduledCalled = false;
   const fakeFetchEmpty = async () => ({
     ok: true,
