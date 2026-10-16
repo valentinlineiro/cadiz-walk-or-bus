@@ -30,7 +30,7 @@ const scheduledStop = snapshot.stops.find((s) => s.stop === '2_1').stop;
 
 // --- adapter-level contract -------------------------------------------------------------
 
-test('live answer is `live`, and an authoritative empty list stays `live` with no fallback', async () => {
+test('shouldReportLiveAndKeepAnEmptyListAuthoritativeWhenPanelAnswers', async () => {
   const withBus = resilient({ fetchImpl: panelUp([{ line: '1', destination: 'X', minutes: 3 }]) });
   assert.equal((await withBus.getArrivalsResult('1515')).status, 'live');
 
@@ -38,7 +38,7 @@ test('live answer is `live`, and an authoritative empty list stays `live` with n
   assert.deepEqual(await empty.getArrivalsResult('1515'), { status: 'live', arrivals: [] });
 });
 
-test('panel failure + schedule that can answer -> `scheduled`, and the failure is kept as the cause', async () => {
+test('shouldReportScheduledWithCauseWhenPanelFailsAndScheduleCanAnswer', async () => {
   const adapter = resilient({ fetchImpl: panelDown });
   const result = await adapter.getArrivalsResult(scheduledStop);
   assert.equal(result.status, 'scheduled');
@@ -46,13 +46,13 @@ test('panel failure + schedule that can answer -> `scheduled`, and the failure i
   assert.ok(result.arrivals.every((a) => a.source === 'scheduled'));
 });
 
-test('panel failure + stop the schedule does not know -> `unavailable`, never an empty list', async () => {
+test('shouldReportUnavailableNotEmptyWhenPanelFailsAndScheduleDoesNotKnowTheStop', async () => {
   const adapter = resilient({ fetchImpl: panelDown });
   const result = await adapter.getArrivalsResult('1515');
   assert.deepEqual(result, { status: 'unavailable', cause: 'source_error' });
 });
 
-test('REGRESSION: during a panel outage no municipal stop is reported as "no buses"', async () => {
+test('shouldNeverReportNoBusesWhenPanelIsDown', async () => {
   const adapter = resilient({ fetchImpl: panelDown });
   const statuses = new Set();
   for (const stop of municipalStops) statuses.add((await adapter.getArrivalsResult(stop.stop)).status);
@@ -60,20 +60,20 @@ test('REGRESSION: during a panel outage no municipal stop is reported as "no bus
   assert.deepEqual([...statuses], ['unavailable']);
 });
 
-test('a feed with no service running today is `unavailable` even for a known stop', async () => {
+test('shouldReportUnavailableWhenFeedHasNoServiceToday', async () => {
   const gtfs = new GtfsTransitAdapter(snapshot, AFTER_FEED);
   assert.deepEqual(await gtfs.getArrivalsResult(scheduledStop), { status: 'unavailable', cause: 'no_schedule' });
   const adapter = resilient({ fetchImpl: panelDown, clock: AFTER_FEED });
   assert.equal((await adapter.getArrivalsResult(scheduledStop)).status, 'unavailable');
 });
 
-test('a hung panel is cut by the timeout and reported as a source error', async () => {
+test('shouldReportSourceErrorWhenPanelHangsPastTheTimeout', async () => {
   const hang = () => new Promise(() => {});
   const adapter = resilient({ fetchImpl: hang, timeoutMs: 30 });
   assert.equal((await adapter.getArrivalsResult('1515')).status, 'unavailable');
 });
 
-test('arrivalsResultOf: legacy ports keep working and a throw is `unavailable`, not []', async () => {
+test('shouldKeepLegacyPortsWorkingAndTreatAThrowAsUnavailableWhenNormalisingArrivals', async () => {
   assert.deepEqual(
     await arrivalsResultOf({ getArrivals: async () => [{ line: '1', minutes: 2 }] }, 'S'),
     { status: 'live', arrivals: [{ line: '1', minutes: 2 }] },
@@ -105,7 +105,7 @@ const transitWith = (perStop) => ({
 const live = (arrivals = []) => ({ status: 'live', arrivals });
 const unavailable = { status: 'unavailable', cause: 'source_error' };
 
-test('FindBestJourneys: every nearby stop unavailable -> transitData `unavailable`', async () => {
+test('shouldReportUnavailableTransitDataWhenEveryNearbyStopIsUnavailable', async () => {
   const useCase = new FindBestJourneysUseCase({ routing, transit: transitWith({ S1: unavailable, S2: unavailable }) });
   const decision = await useCase.execute({ origin, destination });
   assert.equal(decision.transitData, 'unavailable');
@@ -113,27 +113,27 @@ test('FindBestJourneys: every nearby stop unavailable -> transitData `unavailabl
   assert.equal(decision.hero.mode, 'walk');
 });
 
-test('FindBestJourneys: some stops unavailable -> `partial`; all answered -> `available`', async () => {
+test('shouldReportPartialThenAvailableWhenSomeThenAllStopsAnswer', async () => {
   const partial = new FindBestJourneysUseCase({ routing, transit: transitWith({ S1: live(), S2: unavailable }) });
   assert.equal((await partial.execute({ origin, destination })).transitData, 'partial');
   const full = new FindBestJourneysUseCase({ routing, transit: transitWith({ S1: live(), S2: live() }) });
   assert.equal((await full.execute({ origin, destination })).transitData, 'available');
 });
 
-test('FindBestJourneys: a CONFIRMED empty answer is a legitimate walk (available), not missing data', async () => {
+test('shouldTreatConfirmedEmptyAnswerAsAvailableWalkWhenNoBusIsDue', async () => {
   const useCase = new FindBestJourneysUseCase({ routing, transit: transitWith({ S1: live([]), S2: live([]) }) });
   const decision = await useCase.execute({ origin, destination });
   assert.equal(decision.transitData, 'available');
   assert.equal(decision.hero.mode, 'walk');
 });
 
-test('FindBestJourneys: scheduled data counts as data', async () => {
+test('shouldCountScheduledDataAsDataWhenPanelIsDown', async () => {
   const sched = { status: 'scheduled', arrivals: [], cause: 'source_error' };
   const useCase = new FindBestJourneysUseCase({ routing, transit: transitWith({ S1: sched, S2: sched }) });
   assert.equal((await useCase.execute({ origin, destination })).transitData, 'available');
 });
 
-test('GetQuickVerdict: no stop answered -> no verdict (null), a confirmed empty answer -> walk', async () => {
+test('shouldGiveNoVerdictWhenNoStopAnsweredAndWalkWhenEmptyIsConfirmed', async () => {
   const none = new GetQuickVerdictUseCase({ routing, transit: transitWith({ S1: unavailable, S2: unavailable }) });
   assert.equal(await none.execute({ origin, destination }), null);
   const confirmed = new GetQuickVerdictUseCase({ routing, transit: transitWith({ S1: live([]), S2: live([]) }) });
@@ -142,7 +142,7 @@ test('GetQuickVerdict: no stop answered -> no verdict (null), a confirmed empty 
 
 // --- UI wording -------------------------------------------------------------------------
 
-test('no-data card never labels itself as a walk or bus recommendation', () => {
+test('shouldNotLabelTheNoDataCardAsARecommendationWhenTransitDataIsMissing', () => {
   const html = noTransitDataCardHTML(11.4);
   assert.match(html, /SIN DATOS DE HORARIOS/);
   assert.match(html, /Andando: 11′/);
@@ -154,18 +154,18 @@ test('no-data card never labels itself as a walk or bus recommendation', () => {
 
 // --- review F1–F4 -----------------------------------------------------------------------
 
-test('FindBestJourneys: a failed stops load is `unavailable`, never `available`', async () => {
+test('shouldReportUnavailableNotAvailableWhenStopsLoadFails', async () => {
   const transit = { ...transitWith({}), getStops: async () => { throw new Error('stops down'); } };
   const decision = await new FindBestJourneysUseCase({ routing, transit }).execute({ origin, destination });
   assert.equal(decision.transitData, 'unavailable');
 });
 
-test('GetQuickVerdict: walk with a silent stop is no verdict (null)', async () => {
+test('shouldGiveNoVerdictWhenWalkWinsWithASilentStop', async () => {
   const useCase = new GetQuickVerdictUseCase({ routing, transit: transitWith({ S1: live([]), S2: unavailable }) });
   assert.equal(await useCase.execute({ origin, destination }), null);
 });
 
-test('GetQuickVerdict: a known winning bus survives a silent stop', async () => {
+test('shouldKeepTheWinningBusVerdictWhenAnotherStopIsSilent', async () => {
   const bus = live([{ line: 'L1', destination: 'X', minutes: 1 }]);
   const fast = { ...routing, routeWalking: async (from, to) => ({ status: 'available', minutes: from === origin && to === destination ? 30 : 1, coordinates: [] }) };
   // A bus verdict needs the line topology: without an alighting stop there is no ride or last mile to count.
@@ -175,7 +175,7 @@ test('GetQuickVerdict: a known winning bus survives a silent stop', async () => 
   assert.equal(verdict?.kind, 'bus');
 });
 
-test('map markers escape external names in their html', async () => {
+test('shouldEscapeExternalNamesWhenRenderingMapMarkers', async () => {
   const html = [];
   globalThis.L = {
     divIcon: (o) => { html.push(o.html); return o; },
