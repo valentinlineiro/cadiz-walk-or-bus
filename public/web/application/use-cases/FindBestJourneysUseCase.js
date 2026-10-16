@@ -215,12 +215,8 @@ export class FindBestJourneysUseCase {
                 : alt.metadata?.line !== finalHero.metadata?.line
                     ? 'line'
                     : 'access';
-            const differentiator = alt.mode === 'walk'
-                ? 'Ruta directa a pie'
-                : `Línea ${alt.metadata?.line ?? ''} · espera ${alt.breakdown.waitMinutes}′`;
             return {
                 journey: alt,
-                differentiator,
                 deltaMinutes,
                 divergenceType,
             };

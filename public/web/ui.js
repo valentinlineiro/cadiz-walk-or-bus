@@ -8,7 +8,7 @@ import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { serializeIdentity, parseIdentity, isSameIdentity } from './domain/identity.js';
 import { compareWalkAndBus } from './domain/comparison.js';
 import {
-  formatAlternativeDiff,
+  describeAlternativeDiff,
 } from './domain/planner.js';
 import {
   GeocodingUnavailableError,
@@ -192,8 +192,25 @@ export function partialTransitDataNoteHTML() {
   return '<div class="decision-note">Faltan datos de algunas paradas cercanas: podría haber un bus mejor que ir andando.</div>';
 }
 
+// Wording of an alternative's difference from the primary; the domain only says which one it is.
+export function alternativeDiffText(diff) {
+  if (!diff) return '';
+  switch (diff.kind) {
+    case 'direct-walk': return 'Ruta directa a pie';
+    case 'line': {
+      const line = diff.line.startsWith('L') ? diff.line : `Línea ${diff.line}`;
+      return `${line}${diff.waitMinutes != null ? ` · espera ${diff.waitMinutes}′` : ''}`;
+    }
+    case 'boarding-stop':
+      return `${diff.stopName ? `Desde ${diff.stopName}` : 'Desde otra parada'}${diff.walkMinutes != null ? ` (caminar ${diff.walkMinutes}′)` : ''}`;
+    case 'alighting-stop': return diff.stopName ? `Baja en ${diff.stopName}` : 'Baja en otra parada';
+    case 'wait': return `Espera ${diff.waitMinutes}′`;
+    default: return 'Opción alternativa';
+  }
+}
+
 export function buildAlternativeCardHTML(alt, primary) {
-  const diff = formatAlternativeDiff(alt, primary);
+  const diff = alternativeDiffText(describeAlternativeDiff(alt, primary));
   const altTotal = alt.totalMinutes ?? alt.exactJourney?.totalMinutes ?? alt.estimatedMinutes;
   const priTotal = primary?.totalMinutes ?? primary?.exactJourney?.totalMinutes ?? primary?.estimatedMinutes ?? 0;
   const deltaMins = altTotal - priTotal;

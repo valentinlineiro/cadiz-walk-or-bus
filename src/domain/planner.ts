@@ -220,14 +220,22 @@ export interface AlternativeDiffCandidate {
   };
 }
 
-export function formatAlternativeDiff(
+/** What distinguishes an alternative from the primary. Wording is the presentation layer's job. */
+export type AlternativeDiff =
+  | { kind: 'direct-walk' }
+  | { kind: 'line'; line: string; waitMinutes?: number }
+  | { kind: 'boarding-stop'; stopName?: string; walkMinutes?: number }
+  | { kind: 'alighting-stop'; stopName?: string }
+  | { kind: 'wait'; waitMinutes: number }
+  | { kind: 'other' };
+
+/** Priority: line > boarding stop > alighting stop > wait. Null when there is no candidate. */
+export function describeAlternativeDiff(
   candidate: AlternativeDiffCandidate | null | undefined,
   primary: AlternativeDiffCandidate | null | undefined,
-): string {
-  if (!candidate) return '';
-  if (candidate.mode === 'walk') {
-    return 'Ruta directa a pie';
-  }
+): AlternativeDiff | null {
+  if (!candidate) return null;
+  if (candidate.mode === 'walk') return { kind: 'direct-walk' };
 
   const cMeta = candidate.metadata ?? {};
   const pMeta = primary?.metadata ?? {};
@@ -235,32 +243,26 @@ export function formatAlternativeDiff(
   const waitMins = candidate.breakdown?.waitMinutes ?? candidate.estimate?.waitMinutes;
   const walkMins = candidate.breakdown?.walkToStopMinutes ?? candidate.estimate?.walkToStopMinutes;
 
-  // 1. Line difference
   if (cMeta.line && (!pMeta.line || String(cMeta.line) !== String(pMeta.line))) {
-    const lineStr = String(cMeta.line).startsWith('L') ? cMeta.line : `Línea ${cMeta.line}`;
-    const wait = waitMins != null ? ` · espera ${waitMins}′` : '';
-    return `${lineStr}${wait}`;
+    return { kind: 'line', line: String(cMeta.line), ...(waitMins != null ? { waitMinutes: waitMins } : {}) };
   }
 
-  // 2. Boarding stop difference
   const cBoard = String(cMeta.boardingStop?.stop ?? cMeta.boardingStop?.number ?? '');
   const pBoard = String(pMeta.boardingStop?.stop ?? pMeta.boardingStop?.number ?? '');
   if (cBoard && cBoard !== pBoard) {
-    const boardName = cMeta.boardingStop?.name ? `Desde ${cMeta.boardingStop.name}` : 'Desde otra parada';
-    const walk = walkMins != null ? ` (caminar ${walkMins}′)` : '';
-    return `${boardName}${walk}`;
+    return {
+      kind: 'boarding-stop',
+      ...(cMeta.boardingStop?.name ? { stopName: cMeta.boardingStop.name } : {}),
+      ...(walkMins != null ? { walkMinutes: walkMins } : {}),
+    };
   }
 
-  // 3. Alighting stop difference
   const cAlight = String(cMeta.alightStop?.stop ?? cMeta.alightStop?.number ?? '');
   const pAlight = String(pMeta.alightStop?.stop ?? pMeta.alightStop?.number ?? '');
   if (cAlight && cAlight !== pAlight) {
-    return cMeta.alightStop?.name ? `Baja en ${cMeta.alightStop.name}` : 'Baja en otra parada';
+    return { kind: 'alighting-stop', ...(cMeta.alightStop?.name ? { stopName: cMeta.alightStop.name } : {}) };
   }
 
-  // Default fallback
-  if (waitMins != null) {
-    return `Espera ${waitMins}′`;
-  }
-  return 'Opción alternativa';
+  if (waitMins != null) return { kind: 'wait', waitMinutes: waitMins };
+  return { kind: 'other' };
 }

@@ -149,7 +149,6 @@ export interface EvaluatedJourney {
 
 export interface DecisionAlternative {
   journey: EvaluatedJourney;
-  differentiator: string;
   deltaMinutes: number;
   divergenceType: DivergenceType;
 }
