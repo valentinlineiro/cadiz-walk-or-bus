@@ -6,6 +6,7 @@ import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorit
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
 import { serializeIdentity, parseIdentity, isSameIdentity } from './domain/identity.js';
+import { compareWalkAndBus } from './domain/comparison.js';
 import {
   formatAlternativeDiff,
 } from './domain/planner.js';
@@ -244,14 +245,14 @@ function comparisonExplanation(hero, candidates, walkMinutes) {
   const busTotal = bus?.totalMinutes ?? bus?.exactJourney?.totalMinutes ?? bus?.estimatedMinutes;
   if (walkTotal == null || typeof busTotal !== 'number') return '';
 
-  const difference = Math.round(walkTotal - busTotal);
-  if (Math.abs(difference) <= 1) return 'Las dos opciones tardan prácticamente lo mismo.';
-  if (difference > 0) {
+  const { verdict, minutes } = compareWalkAndBus({ walkMinutes: walkTotal, busMinutes: busTotal });
+  if (verdict === 'equivalent') return 'Las dos opciones tardan prácticamente lo mismo.';
+  if (verdict === 'bus-faster') {
     return hero.mode === 'walk'
-      ? `El bus es ${difference}′ más rápido que ir andando.`
-      : `Bus te ahorra ${difference}′ frente a ir andando.`;
+      ? `El bus es ${minutes}′ más rápido que ir andando.`
+      : `Bus te ahorra ${minutes}′ frente a ir andando.`;
   }
-  return `Andando llegas ${Math.abs(difference)}′ antes que esperando al bus.`;
+  return `Andando llegas ${minutes}′ antes que esperando al bus.`;
 }
 
 export function heroCardHTML(cand) {

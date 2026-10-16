@@ -1,4 +1,5 @@
 export * from './constants.js';
+export * from './comparison.js';
 export * from './diversity.js';
 export * from './identity.js';
 export * from './last-mile.js';

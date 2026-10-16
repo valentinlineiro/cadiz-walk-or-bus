@@ -12,3 +12,5 @@ export const DEFAULT_DIVERSITY_THRESHOLDS = {
     accessWalkMinutes: 3,
     alightDistanceMeters: 250,
 };
+// Walking and the bus are "equivalent" when their door-to-door times differ by at most this.
+export const EQUIVALENT_WITHIN_MINUTES = 1;
