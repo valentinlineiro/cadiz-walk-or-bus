@@ -11,7 +11,7 @@ import { createWalkCandidate, createBusCandidates, selectCandidates } from './do
 // BUG 3 REGRESSION: CADIZ SERVICE AREA POLYGON (vs old rectangular BBOX)
 // ============================================================================
 
-test('Bug 3: isPointInCadiz strictly rejects out-of-cadiz coordinates', () => {
+test('shouldRejectCoordinatesWhenTheyAreOutsideCadiz', () => {
   const outsideCases = [
     { name: 'San Fernando (Plaza del Rey)', lat: 36.465, lon: -6.198 },
     { name: 'San Fernando (Bahía Sur)', lat: 36.466, lon: -6.205 },
@@ -33,7 +33,7 @@ test('Bug 3: isPointInCadiz strictly rejects out-of-cadiz coordinates', () => {
   }
 });
 
-test('Bug 3: isPointInCadiz accepts all key Cádiz landmarks across the peninsula', () => {
+test('shouldAcceptKeyLandmarksWhenCheckingPointsAcrossThePeninsula', () => {
   const insideCases = [
     { name: 'Plaza San Juan de Dios', lat: 36.5298, lon: -6.2925 },
     { name: 'Castillo San Sebastián', lat: 36.5275, lon: -6.3180 },
@@ -58,7 +58,7 @@ test('Bug 3: isPointInCadiz accepts all key Cádiz landmarks across the peninsul
 // BUG 6 REGRESSION: GEOCODING FILTERING & EXTERNAL REGION REJECTION
 // ============================================================================
 
-test('Bug 6: NominatimGeocodingAdapter rejects external city names when query lacks street prefix', async () => {
+test('shouldRejectExternalCityNamesWhenTheQueryLacksAStreetPrefix', async () => {
   const fakeFetch = async () => ({
     ok: true,
     json: async () => [
@@ -75,7 +75,7 @@ test('Bug 6: NominatimGeocodingAdapter rejects external city names when query la
   assert.deepEqual(await adapter.search('San Fernando'), []);
 });
 
-test('Bug 6: NominatimGeocodingAdapter allows legitimate Cádiz queries matching street names', async () => {
+test('shouldAllowLegitimateCadizQueriesWhenTheyMatchStreetNames', async () => {
   const fakeFetch = async () => ({
     ok: true,
     json: async () => [
@@ -95,7 +95,7 @@ test('Bug 6: NominatimGeocodingAdapter allows legitimate Cádiz queries matching
 // BUG 2 REGRESSION: PEDESTRIAN ROUTING FAILURE HANDLING
 // ============================================================================
 
-test('Bug 2: FindBestJourneysUseCase gracefully produces BUS hero when walking route is unavailable', async () => {
+test('shouldProduceABusHeroWhenTheWalkingRouteIsUnavailable', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.530, lon: -6.290, label: 'Destino Bus' };
 
@@ -134,7 +134,7 @@ test('Bug 2: FindBestJourneysUseCase gracefully produces BUS hero when walking r
   assert.equal(decision.walkMinutes, null, 'Walk minutes must be null when walking is unavailable');
 });
 
-test('Bug 2: FindBestJourneysUseCase degrades walk when OSRM suffers service_failure (5xx / network error)', async () => {
+test('shouldDegradeWalkWhenOsrmSuffersAServiceFailure', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.524, lon: -6.280, label: 'Plaza Candelaria' };
 
@@ -169,7 +169,7 @@ test('Bug 2: FindBestJourneysUseCase degrades walk when OSRM suffers service_fai
 // BUG 4 REGRESSION: MODAL COMPARATOR PRESERVATION IN DIVERSITY PRUNING
 // ============================================================================
 
-test('Bug 4: filterDiverseAlternatives never prunes direct walk via similarityMaxDeltaMinutes', () => {
+test('shouldNeverPruneDirectWalkWhenFilteringBySimilarityDelta', () => {
   const busHero = {
     identity: { mode: 'bus', line: '1', boardingStopId: '101', alightStopId: '201' },
     mode: 'bus',
@@ -205,7 +205,7 @@ test('Bug 4: filterDiverseAlternatives never prunes direct walk via similarityMa
 // ISSUE #21: AUTHORITATIVE EMPTY REALTIME CONTRACT (POLICY A)
 // ============================================================================
 
-test('Issue #21: ResilientTransitAdapter treats empty realtime arrivals [] as authoritative and does not query scheduled GTFS', async () => {
+test('shouldNotQueryScheduledGtfsWhenRealtimeArrivalsAreAnAuthoritativeEmptyList', async () => {
   let scheduledQueried = false;
   const realtime = {
     getStops: async () => [{ stop: '101', lat: 36.52, lon: -6.28 }],

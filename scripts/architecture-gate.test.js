@@ -7,25 +7,25 @@ import {
   findMissingServiceWorkerShellImports,
 } from './architecture-gate.mjs';
 
-test('architecture gate reports no boundary violations in the repository', () => {
+test('shouldReportNoBoundaryViolationsWhenTheRepositoryIsChecked', () => {
   assert.deepEqual(collectArchitectureViolations(), []);
 });
 
-test('architecture gate finds exactly one production composition root', () => {
+test('shouldFindExactlyOneProductionCompositionRootWhenTheGateRuns', () => {
   assert.deepEqual(findCompositionRoots(), ['public/web/application/composition.js']);
 });
 
-test('architecture gate validates every service-worker shell URL', () => {
+test('shouldValidateEveryServiceWorkerShellUrlWhenTheGateRuns', () => {
   assert.deepEqual(findServiceWorkerShellProblems(), []);
 });
 
 import { existsSync, writeFileSync, unlinkSync } from 'node:fs';
 
-test('architecture gate ensures all recursive static imports from ui.js are listed in service-worker SHELL_URLS', () => {
+test('shouldListEveryRecursiveStaticImportOfUiInShellUrlsWhenTheGateRuns', () => {
   assert.deepEqual(findMissingServiceWorkerShellImports(), []);
 });
 
-test('architecture gate reports unresolved local imports and missing shell entries on broken module', () => {
+test('shouldReportUnresolvedImportsAndMissingShellEntriesWhenAModuleIsBroken', () => {
   const tmpRel = 'web/tmp-broken-import-test.js';
   const fullPath = 'public/' + tmpRel;
   try {

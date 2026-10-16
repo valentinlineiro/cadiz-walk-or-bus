@@ -26,7 +26,7 @@ test('shouldNeverClaimEquivalenceAndFlagAmbiguityWhenTwoCandidatesAreClose', () 
   assert.deepEqual(r.stopsServedByNoLine, ['2']);
 });
 
-test('shouldProduceIdenticalReportsForIdenticalInputs', () => {
+test('shouldProduceIdenticalReportsWhenInputsAreIdentical', () => {
   const input = { municipal: [{ stop: '1', name: 'A', lat: 36.5, lon: -6.3 }], linesFile: { lines: {} }, gtfs };
   assert.equal(JSON.stringify(audit(input)), JSON.stringify(audit(input)));
 });

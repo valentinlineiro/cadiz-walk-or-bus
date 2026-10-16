@@ -12,7 +12,7 @@ const input = (evidence) => ({
   evidence,
 });
 
-test('shouldNeverConfirmCoverageFromGeometryAlone', () => {
+test('shouldNeverConfirmCoverageWhenOnlyGeometryIsAvailable', () => {
   const r = coverage(input());
   assert.equal(r.municipalLines[0].verdict, 'plausible_needs_evidence');
   assert.equal(r.summary.municipalStopsByVerdict.coverage_confirmed, undefined);
@@ -35,7 +35,7 @@ test('shouldNotCallASharedStopCoveredWhenOneOfItsLinesIsNot', () => {
   assert.equal(r.stops['3'].overall, 'plausible_needs_evidence');
 });
 
-test('shouldHandleEmptyLinesUnknownStopsAndMalformedEvidence', () => {
+test('shouldHandleEmptyLinesWhenStopsAreUnknownOrEvidenceIsMalformed', () => {
   const r = coverage({
     ...input({ A: 'M-1', B: { x: 1 } }),
     linesFile: { lines: { A: { x: ['1', '2'] }, E: {}, F: { x: [] }, U: { x: ['404'] } } },
@@ -50,7 +50,7 @@ test('shouldHandleEmptyLinesUnknownStopsAndMalformedEvidence', () => {
   assert.equal(r.summary.municipalStopsByVerdict.undefined, undefined);
 });
 
-test('shouldBeDeterministicAndLetEvidenceTouchOnlyNamedLines', () => {
+test('shouldBeDeterministicAndTouchOnlyNamedLinesWhenEvidenceIsApplied', () => {
   const base = coverage(input());
   assert.equal(JSON.stringify(base), JSON.stringify(coverage(input())));
   const ev = coverage(input({ A: ['M-1'] }));

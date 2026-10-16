@@ -13,7 +13,7 @@ const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 // FRONTIER C: MUNICIPAL HTML PARSER ADVERSARIAL STRESS TEST
 // ============================================================================
 
-test('Frontier C: parseArrivals returns null for malformed, non-table, or non-string inputs', () => {
+test('shouldReturnNullWhenInputIsMalformedNonTableOrNotAString', () => {
   assert.equal(parseArrivals(''), null);
   assert.equal(parseArrivals(null), null);
   assert.equal(parseArrivals(undefined), null);
@@ -28,7 +28,7 @@ test('Frontier C: parseArrivals returns null for malformed, non-table, or non-st
   assert.deepEqual(parseArrivals('<table><tr><td>1</td><td>CORTADURA</td><td>En cochera</td></tr></table>'), []);
 });
 
-test('Frontier C: parseArrivals correctly parses rows with attributes like tr class', () => {
+test('shouldParseRowsWhenTheyCarryAttributesLikeTrClass', () => {
   const htmlWithAttrs = '<table class="tablePanel"><tr class="even-row" style="background:#fff"><td>1</td><td>Plaza España</td><td>3 min</td></tr></table>';
   const arrivals = parseArrivals(htmlWithAttrs);
   assert.ok(arrivals);
@@ -36,7 +36,7 @@ test('Frontier C: parseArrivals correctly parses rows with attributes like tr cl
   assert.deepEqual(arrivals[0], { line: '1', destination: 'Plaza España', minutes: 3 });
 });
 
-test('Frontier C: parseArrivals strictly supports Inminente variants as 0 minutes', () => {
+test('shouldReadInminenteVariantsAsZeroMinutesWhenParsingArrivals', () => {
   const inminenteHtml = `
     <table>
       <tr><td>1</td><td>Plaza España</td><td>Inminente</td></tr>
@@ -54,7 +54,7 @@ test('Frontier C: parseArrivals strictly supports Inminente variants as 0 minute
   assert.deepEqual(arrivals[3], { line: '5', destination: 'Zona Franca', minutes: 0 });
 });
 
-test('Frontier C: parseArrivals safely discards non-actionable or ambiguous entries without generating false data', () => {
+test('shouldDiscardNonActionableOrAmbiguousEntriesWhenParsingArrivals', () => {
   const nonActionableHtml = `
     <table>
       <tr><td>1</td><td>Plaza España</td><td>> 45 min</td></tr>
@@ -80,12 +80,12 @@ test('Frontier C: parseArrivals safely discards non-actionable or ambiguous entr
 // FRONTIER B: SERVICE WORKER AND CACHE INVALIDATION
 // ============================================================================
 
-test('Frontier B: Service Worker shell lists all required assets and architecture gate passes', () => {
+test('shouldListAllRequiredAssetsAndPassTheGateWhenTheServiceWorkerShellIsChecked', () => {
   const problems = findServiceWorkerShellProblems();
   assert.deepEqual(problems, [], 'All SHELL_URLS in sw.js must exist on disk and GTFS_FEED_VERSION must match');
 });
 
-test('Frontier B: Service Worker strictly uses Cache-First on static shell and never intercepts API', () => {
+test('shouldUseCacheFirstOnTheShellAndNeverInterceptApiWhenServiceWorkerHandlesFetches', () => {
   const swSource = readFileSync(join(root, 'public/sw.js'), 'utf8');
 
   // Verify that live API endpoints are NOT in SHELL_URLS
@@ -103,7 +103,7 @@ test('Frontier B: Service Worker strictly uses Cache-First on static shell and n
 // FRONTIER D: GPS ACCURACY AND POSITION REASONING
 // ============================================================================
 
-test('Frontier D: Evaluation of GPS coordinates with varying accuracy radii', () => {
+test('shouldFlagInsideCadizAndLowAccuracyWhenGpsReadingsVaryInPlaceAndRadius', () => {
   // Test matrix of requested GPS cases
   const cadizCenter = { lat: 36.5271, lon: -6.2885 }; // Inside Cádiz
   const sanFernando = { lat: 36.4650, lon: -6.1980 }; // Outside Cádiz (San Fernando)
