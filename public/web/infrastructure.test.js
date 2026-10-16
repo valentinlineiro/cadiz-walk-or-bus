@@ -317,7 +317,7 @@ test('shouldPassAbortSignalAndRejectSearchWhenRequestTimesOut', async () => {
   assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
 });
 
-test('shouldNotCallFetchWhenTheQueryIsEmptyOrASingleCharacter', async () => {
+test('shouldNotCallFetchForEmptyQueriesAndSingleCharacterSearches', async () => {
   let fetchCalled = false;
   const fakeFetch = async () => {
     fetchCalled = true;
