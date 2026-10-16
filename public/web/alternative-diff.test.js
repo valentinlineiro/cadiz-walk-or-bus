@@ -35,8 +35,11 @@ test('shouldFallBackToWaitThenOtherWhenNothingStructuralDiffers', () => {
   assert.deepEqual(describeAlternativeDiff(bus({}), primary), { kind: 'other' });
 });
 
-test('shouldDescribeWalkingAndMissingCandidates', () => {
+test('shouldDescribeDirectWalkWhenCandidateIsWalking', () => {
   assert.deepEqual(describeAlternativeDiff({ mode: 'walk' }, primary), { kind: 'direct-walk' });
+});
+
+test('shouldDescribeNothingWhenThereIsNoCandidate', () => {
   assert.equal(describeAlternativeDiff(null, primary), null);
 });
 

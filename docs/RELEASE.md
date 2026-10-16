@@ -204,3 +204,10 @@ Before releasing a version that serves `/geocode` and `/route/*`:
 4. Real-service smoke: one `/geocode?q=Plaza de España` (miss, then hit via `x-proxy-cache`), one `/route/foot/...`.
 
 Without Turso, Nominatim cache misses return `503 Retry-After` by design (fail closed); OSRM routes still proxy.
+
+## Test names
+
+Tests are named `shouldXWhenY`. The architecture gate (`scripts/test-names.mjs`) fails on any test
+whose name does not follow it, except those listed in `scripts/test-names.baseline.json` (tests that
+predate the rule). The baseline only shrinks: rename a test and remove its entry, which the gate
+also demands (`node scripts/test-names.mjs --write-baseline` regenerates it after renames).
