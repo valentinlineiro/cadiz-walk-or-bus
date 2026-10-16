@@ -73,11 +73,11 @@ function serviceRuns(service: GtfsService, dateKey: string, weekday: number): bo
   return service.weekdays[weekday] === true;
 }
 
-function previousDateKey(dateKey: string): string {
+function shiftDateKey(dateKey: string, days: number): string {
   const date = new Date(Date.UTC(
     Number(dateKey.slice(0, 4)),
     Number(dateKey.slice(4, 6)) - 1,
-    Number(dateKey.slice(6, 8)) - 1,
+    Number(dateKey.slice(6, 8)) + days,
   ));
   return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, '0')}${String(date.getUTCDate()).padStart(2, '0')}`;
 }
@@ -129,12 +129,13 @@ export class GtfsTransitAdapter implements TransitDataPort {
 
   async getArrivals(stopId: string | number): Promise<Arrival[]> {
     const { dateKey, seconds, weekday } = madridNow(this.clock.now());
-    const previousKey = previousDateKey(dateKey);
-    const previousWeekday = (weekday + 6) % 7;
     const nowOnTimeline = 86400 + seconds;
+    // Yesterday's service runs past midnight (times above 24:00); tomorrow's early trips fall
+    // inside the lookahead shortly before midnight.
     const serviceDays = [
-      { dateKey: previousKey, weekday: previousWeekday, timelineOffset: 0 },
+      { dateKey: shiftDateKey(dateKey, -1), weekday: (weekday + 6) % 7, timelineOffset: 0 },
       { dateKey, weekday, timelineOffset: 86400 },
+      { dateKey: shiftDateKey(dateKey, 1), weekday: (weekday + 1) % 7, timelineOffset: 2 * 86400 },
     ].filter(({ dateKey: serviceDate, weekday: serviceWeekday }) =>
       this.snapshot.services.some((service) => serviceRuns(service, serviceDate, serviceWeekday)),
     );
