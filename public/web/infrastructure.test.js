@@ -19,7 +19,7 @@ const appendEntry = (entry, storage, max = 200) => {
 };
 
 
-test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns formatted route', async () => {
+test('shouldReturnAFormattedRouteFromTheRoutedFootMirrorWhenWalking', async () => {
   const fakeFetch = async (url) => {
     assert.ok(url.includes('routing.openstreetmap.de/routed-foot/route/v1/foot/'));
     return {
@@ -55,7 +55,7 @@ test('OsrmRoutingAdapter: routeWalking fetches routed-foot mirror and returns fo
   ]);
 });
 
-test('OsrmRoutingAdapter: passes AbortSignal and returns service_failure on timeout', async () => {
+test('shouldPassAnAbortSignalAndReturnServiceFailureWhenTheRequestTimesOut', async () => {
   let passedSignal = null;
   const timeoutFetch = async (url, options) => {
     passedSignal = options?.signal;
@@ -72,7 +72,7 @@ test('OsrmRoutingAdapter: passes AbortSignal and returns service_failure on time
   assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
 });
 
-test('OsrmRoutingAdapter: routeWalking rejects degenerate route shorter than straight-line distance', async () => {
+test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLine', async () => {
   const fakeFetch = async () => ({
     ok: true,
     json: async () => ({
@@ -95,7 +95,7 @@ test('OsrmRoutingAdapter: routeWalking rejects degenerate route shorter than str
   assert.equal(route, null);
 });
 
-test('OsrmRoutingAdapter: routeBus routes hops independently and stitches coordinates without duplicate junctions', async () => {
+test('shouldStitchHopCoordinatesWithoutDuplicateJunctionsWhenRoutingABus', async () => {
   const hopsCalled = [];
   const fakeFetch = async (url) => {
     hopsCalled.push(url);
@@ -137,7 +137,7 @@ test('OsrmRoutingAdapter: routeBus routes hops independently and stitches coordi
   assert.deepEqual(route.coordinates[4], [36.525, -6.285]);
 });
 
-test('OsrmRoutingAdapter: routeBus falls back to straight line for a failed hop', async () => {
+test('shouldFallBackToAStraightLineWhenABusHopFails', async () => {
   const fakeFetch = async (url) => {
     if (url.includes('-6.28,36.52;-6.282,36.522') || url.includes('-6.280,36.520;-6.282,36.522')) {
       return { ok: false, status: 500 };
@@ -166,7 +166,7 @@ test('OsrmRoutingAdapter: routeBus falls back to straight line for a failed hop'
   assert.deepEqual(route.coordinates[2], [36.525, -6.285]);
 });
 
-test('MunicipalTransitAdapter: getStops returns parsed stops and throws on failure', async () => {
+test('shouldReturnParsedStopsAndThrowWhenTheStopsRequestFails', async () => {
   const fakeFetchSuccess = async (url) => {
     assert.equal(url, '/stops');
     return {
@@ -185,7 +185,7 @@ test('MunicipalTransitAdapter: getStops returns parsed stops and throws on failu
   await assert.rejects(async () => failAdapter.getStops(), /stops 500/);
 });
 
-test('MunicipalTransitAdapter: getLines returns topology and throws on error', async () => {
+test('shouldReturnTheTopologyAndThrowWhenTheLinesRequestFails', async () => {
   const fakeFetchSuccess = async (url) => {
     assert.equal(url, '/lines');
     return {
@@ -204,7 +204,7 @@ test('MunicipalTransitAdapter: getLines returns topology and throws on error', a
   await assert.rejects(async () => failAdapter.getLines(), /network down/);
 });
 
-test('MunicipalTransitAdapter: getArrivals marks realtime data and throws on error', async () => {
+test('shouldMarkArrivalsAsRealtimeAndThrowWhenTheArrivalsRequestFails', async () => {
   const fakeFetchSuccess = async (url) => {
     assert.equal(url, '/api?stop=1106');
     return {
@@ -224,7 +224,7 @@ test('MunicipalTransitAdapter: getArrivals marks realtime data and throws on err
   await assert.rejects(async () => failAdapter.getArrivals('1106'), /arrivals 502/);
 });
 
-test('MunicipalTransitAdapter: getArrivals throws when arrivals payload is missing or not an array', async () => {
+test('shouldThrowWhenTheArrivalsPayloadIsMissingOrNotAnArray', async () => {
   const fakeFetchMalformed = async () => ({
     ok: true,
     json: async () => ({ error: 'malformed upstream response' }),
@@ -240,7 +240,7 @@ test('MunicipalTransitAdapter: getArrivals throws when arrivals payload is missi
   await assert.rejects(async () => adapterNull.getArrivals('1106'), /malformed arrivals response/);
 });
 
-test('NominatimGeocodingAdapter: search formats query with viewbox and normalizes results', async () => {
+test('shouldFormatTheQueryWithTheViewboxAndNormalizeResultsWhenSearching', async () => {
   let calledUrl = '';
   const fakeFetch = async (url) => {
     calledUrl = url;
@@ -273,7 +273,7 @@ test('NominatimGeocodingAdapter: search formats query with viewbox and normalize
   });
 });
 
-test('NominatimGeocodingAdapter: geocode delegates to search limit 1 and returns single coordinate', async () => {
+test('shouldDelegateToSearchWithLimitOneWhenGeocoding', async () => {
   const fakeFetch = async () => ({
     ok: true,
     json: async () => [
@@ -296,7 +296,7 @@ test('NominatimGeocodingAdapter: geocode delegates to search limit 1 and returns
   });
 });
 
-test('NominatimGeocodingAdapter: shouldRejectSearchAndReturnNullGeocodeWhenNetworkIsDown', async () => {
+test('shouldRejectSearchAndReturnNullGeocodeWhenNetworkIsDown', async () => {
   const failAdapter = new NominatimGeocodingAdapter(async () => { throw new Error('offline'); });
   await assert.rejects(failAdapter.search('Plaza'), GeocodingUnavailableError);
 
@@ -304,7 +304,7 @@ test('NominatimGeocodingAdapter: shouldRejectSearchAndReturnNullGeocodeWhenNetwo
   assert.equal(geocodeResult, null);
 });
 
-test('NominatimGeocodingAdapter: shouldPassAbortSignalAndRejectSearchWhenRequestTimesOut', async () => {
+test('shouldPassAbortSignalAndRejectSearchWhenRequestTimesOut', async () => {
   let passedSignal = null;
   const timeoutFetch = async (url, options) => {
     passedSignal = options?.signal;
@@ -317,7 +317,7 @@ test('NominatimGeocodingAdapter: shouldPassAbortSignalAndRejectSearchWhenRequest
   assert.ok(passedSignal instanceof AbortSignal, 'fetch must receive an AbortSignal');
 });
 
-test('NominatimGeocodingAdapter: short-circuits empty and single-character queries without calling fetch', async () => {
+test('shouldNotCallFetchWhenTheQueryIsEmptyOrASingleCharacter', async () => {
   let fetchCalled = false;
   const fakeFetch = async () => {
     fetchCalled = true;
@@ -334,7 +334,7 @@ test('NominatimGeocodingAdapter: short-circuits empty and single-character queri
   assert.equal(fetchCalled, false);
 });
 
-test('NominatimGeocodingAdapter: caches search results in-memory and does not repeat fetch for same query', async () => {
+test('shouldNotFetchAgainWhenTheSameQueryIsSearchedTwice', async () => {
   let callCount = 0;
   const fakeFetch = async () => {
     callCount += 1;
@@ -367,7 +367,7 @@ test('NominatimGeocodingAdapter: caches search results in-memory and does not re
   assert.deepEqual(res3, res1);
 });
 
-test('NominatimGeocodingAdapter: respects custom baseUrl option for proxying or self-hosted endpoint', async () => {
+test('shouldUseTheCustomBaseUrlWhenOneIsConfigured', async () => {
   let calledUrl = '';
   const fakeFetch = async (url) => {
     calledUrl = url;
@@ -384,7 +384,7 @@ test('NominatimGeocodingAdapter: respects custom baseUrl option for proxying or 
   assert.ok(calledUrl.startsWith(customBaseUrl), 'must query the custom baseUrl proxy');
 });
 
-test('NominatimGeocodingAdapter: serializes concurrent network requests and enforces minIntervalMs spacing', async () => {
+test('shouldSerializeRequestsAndSpaceThemByMinIntervalWhenSearchesRunConcurrently', async () => {
   const requestTimes = [];
   const fakeFetch = async () => {
     requestTimes.push(Date.now());
@@ -423,7 +423,7 @@ class MockStorage {
   }
 }
 
-test('LocalStorageJourneyLogAdapter: append persists valid DecisionRecord and survives corrupt storage', () => {
+test('shouldPersistAValidRecordAndSurviveCorruptStorageWhenAppending', () => {
   const storage = new MockStorage();
   storage.setItem('cadiz_journey_log', 'invalid json {{{');
 
@@ -451,7 +451,7 @@ test('LocalStorageJourneyLogAdapter: append persists valid DecisionRecord and su
   assert.equal(log[0].destination.label, 'Plaza Mina');
 });
 
-test('LocalStorageJourneyLogAdapter: preserves startedAt when persisting a started journey', () => {
+test('shouldPreserveStartedAtWhenPersistingAStartedJourney', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);
   const record = {
@@ -468,7 +468,7 @@ test('LocalStorageJourneyLogAdapter: preserves startedAt when persisting a start
   assert.equal(adapter.getLog()[0].startedAt, 1700000005000);
 });
 
-test('LocalStorageJourneyLogAdapter: deduplicates evaluations within 5 minutes for same destination', () => {
+test('shouldDeduplicateEvaluationsWhenTheSameDestinationIsRecordedWithinFiveMinutes', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);
 
@@ -492,7 +492,7 @@ test('LocalStorageJourneyLogAdapter: deduplicates evaluations within 5 minutes f
   assert.equal(log[0].id, '2'); // updated to latest
 });
 
-test('LocalStorageJourneyLogAdapter: getRecentDestinations groups by coords and orders by recency desc', () => {
+test('shouldGroupByCoordsAndOrderByRecencyWhenListingRecentDestinations', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);
 
@@ -517,7 +517,7 @@ test('LocalStorageJourneyLogAdapter: getRecentDestinations groups by coords and 
   assert.equal(recent[1].label, 'Dest A');
 });
 
-test('LocalStorageJourneyLogAdapter: getTopDestinations groups by coords and ranks by count desc with recency tiebreaker', () => {
+test('shouldRankByCountWithRecencyTiebreakWhenListingTopDestinations', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage);
 
