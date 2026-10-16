@@ -1,6 +1,6 @@
 import { haversineMeters } from './topology.js';
+import { walkMinutes } from './walking.js';
 import {
-  WALK_METERS_PER_MINUTE,
   BUS_METERS_PER_MINUTE,
   DEFAULT_PLANNING_POLICY,
   type PlanningPolicy,
@@ -97,7 +97,7 @@ export function createBusCandidates({
       : alight.rideMeters != null
         ? Math.round(alight.rideMeters / BUS_METERS_PER_MINUTE)
         : 0;
-    const lastMileMins = alightDist != null ? Math.round(alightDist / WALK_METERS_PER_MINUTE) : 0;
+    const lastMileMins = alightDist != null ? walkMinutes(alightDist) : 0;
     const totalEstimated = walkToStop + arr.minutes + rideMins + lastMileMins;
 
     const stopId = String(stop.stop ?? (stop as any).number ?? '');
@@ -204,7 +204,7 @@ export function cheapWalkToStop(
     }
   }
   const distMeters = haversineMeters(me.lat, me.lon, stop.lat, stop.lon);
-  return Math.max(0, Math.round(distMeters / WALK_METERS_PER_MINUTE));
+  return walkMinutes(distMeters);
 }
 
 export interface AlternativeDiffCandidate {

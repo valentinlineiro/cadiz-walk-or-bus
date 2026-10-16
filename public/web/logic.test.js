@@ -358,9 +358,9 @@ test('walkMinutes rounds OSRM duration up', async () => {
   assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 19);
 });
 
-test('walkMinutes estimates from distance when OSRM duration is impossibly fast', async () => {
+test('walkMinutes estimates from distance at the domain pace (80 m/min, rounded up) when OSRM duration is impossibly fast', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 522, distance: 3373 }] }) });
-  assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 41);
+  assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 43);
 });
 
 test('walkMinutes is null when no route', async () => {

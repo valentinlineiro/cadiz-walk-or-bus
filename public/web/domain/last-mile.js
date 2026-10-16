@@ -1,4 +1,5 @@
 import { WALK_METERS_PER_MINUTE } from './constants.js';
+import { walkMinutes } from './walking.js';
 /**
  * Computes the last-mile walk duration from alighting stop to destination.
  *
@@ -14,7 +15,7 @@ export function computeLastMile(lastMileRoute, distanceMeters, walkPaceMetersPer
     const dist = typeof distanceMeters === 'number' && Number.isFinite(distanceMeters) ? Math.max(0, distanceMeters) : 0;
     const pace = walkPaceMetersPerMinute > 0 ? walkPaceMetersPerMinute : WALK_METERS_PER_MINUTE;
     return {
-        lastMileMinutes: Math.round(dist / pace),
+        lastMileMinutes: walkMinutes(dist, pace),
         lastMileDegraded: true,
     };
 }

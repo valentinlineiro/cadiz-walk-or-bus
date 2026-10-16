@@ -1,4 +1,5 @@
 import { haversineMeters } from '../../domain/topology.js';
+import { walkMinutes } from '../../domain/walking.js';
 export class OsrmRoutingAdapter {
     fetchImpl;
     footBaseUrl;
@@ -38,7 +39,7 @@ export class OsrmRoutingAdapter {
         }
         const speed = route.distance / route.duration;
         const minutes = (speed > 3.5 || speed < 0.5)
-            ? Math.ceil(route.distance / (5000 / 60))
+            ? walkMinutes(route.distance)
             : Math.ceil(route.duration / 60);
         const rawCoords = route.geometry?.coordinates ?? [];
         const coordinates = rawCoords.map(([lon, lat]) => [lat, lon]);

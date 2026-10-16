@@ -1,5 +1,6 @@
 import { haversineMeters } from './topology.js';
-import { WALK_METERS_PER_MINUTE, BUS_METERS_PER_MINUTE, DEFAULT_PLANNING_POLICY, } from './constants.js';
+import { walkMinutes } from './walking.js';
+import { BUS_METERS_PER_MINUTE, DEFAULT_PLANNING_POLICY, } from './constants.js';
 import { createWalkIdentity, createBusIdentity, serializeIdentity, } from './identity.js';
 import { isStructurallyDiverse, filterDiverseAlternatives } from './diversity.js';
 export { DEFAULT_PLANNING_POLICY, isStructurallyDiverse, filterDiverseAlternatives };
@@ -42,7 +43,7 @@ export function createBusCandidates({ arrivals, stop, walkToStopMinutes, resolve
             : alight.rideMeters != null
                 ? Math.round(alight.rideMeters / BUS_METERS_PER_MINUTE)
                 : 0;
-        const lastMileMins = alightDist != null ? Math.round(alightDist / WALK_METERS_PER_MINUTE) : 0;
+        const lastMileMins = alightDist != null ? walkMinutes(alightDist) : 0;
         const totalEstimated = walkToStop + arr.minutes + rideMins + lastMileMins;
         const stopId = String(stop.stop ?? stop.number ?? '');
         const alightId = String(resolvedStop.stop ?? resolvedStop.number ?? '');
@@ -124,7 +125,7 @@ export function cheapWalkToStop(me, stop, walkToStopCache) {
         }
     }
     const distMeters = haversineMeters(me.lat, me.lon, stop.lat, stop.lon);
-    return Math.max(0, Math.round(distMeters / WALK_METERS_PER_MINUTE));
+    return walkMinutes(distMeters);
 }
 export function formatAlternativeDiff(candidate, primary) {
     if (!candidate)
