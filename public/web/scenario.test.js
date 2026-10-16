@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 
-test('shouldValidateIsoStringsAndHandleFutureOrSyntheticDatesWhenCheckingCapturedAt', () => {
+test('shouldAcceptFutureIsoDatesAndRejectInvalidValuesWhenCheckingCapturedAt', () => {
   assert.equal(isValidCapturedAt('2026-09-16T08:32:00+02:00'), true);
   assert.equal(isValidCapturedAt('2030-01-01T00:00:00Z'), true);
   assert.equal(isValidCapturedAt('not-a-date'), false);
