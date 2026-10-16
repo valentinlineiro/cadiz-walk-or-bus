@@ -37,7 +37,7 @@ test('shouldKeepRoutedMinutesUntouchedWhenARouteIsAvailable', () => {
   assert.deepEqual(computeLastMile({ minutes: 7 }, 5000), { lastMileMinutes: 7, lastMileDegraded: false });
 });
 
-test('shouldEstimateWalkToStopWithTheSameFunction', () => {
+test('shouldEstimateWalkToStopWhenUsingTheSharedFunction', () => {
   const me = { lat: 36.5271, lon: -6.2885 };
   const stop = { stop: 'S', lat: 36.5271 + 0.0009, lon: -6.2885 }; // ~100 m north
   assert.equal(cheapWalkToStop(me, stop), 2);

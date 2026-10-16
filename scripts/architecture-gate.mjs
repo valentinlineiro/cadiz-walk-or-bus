@@ -3,6 +3,7 @@ import { dirname, join, normalize, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findShellHashProblems } from './shell-hash.mjs';
 import { findSecurityProblems } from './security-headers.mjs';
+import { findTestNameProblems } from './test-names.mjs';
 import { MAP_HTML, SECURITY_HEADERS } from '../map-page.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -216,6 +217,7 @@ export function collectArchitectureViolations() {
   violations.push(...findCompositionSeamProblems());
   violations.push(...findServiceWorkerShellProblems());
   violations.push(...findSecurityProblems(root, { mapHtml: MAP_HTML, headers: SECURITY_HEADERS }));
+  violations.push(...findTestNameProblems(root));
   return violations;
 }
 

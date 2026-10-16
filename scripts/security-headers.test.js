@@ -101,36 +101,36 @@ test('shouldReportDriftWhenWorkerPolicyDiffersFromHeadersFile', (t) => {
 });
 
 
-test('shouldRequireSelfForSameOriginScripts', (t) => {
+test('shouldRequireSelfWhenScriptsAreSameOrigin', (t) => {
   const csp = policy({ 'script-src': hashOf(INLINE) });
   assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /script-src must include 'self'/.test(p)));
 });
 
-test('shouldRequireConnectSrcAndFormAction', (t) => {
+test('shouldRequireConnectSrcAndFormActionWhenPolicyOmitsThem', (t) => {
   const csp = policy({ 'connect-src': null, 'form-action': null });
   const found = problems(project(t, { headers: headersFile(csp) }));
   assert.ok(found.some((p) => /connect-src explicitly/.test(p)));
   assert.ok(found.some((p) => /form-action explicitly/.test(p)));
 });
 
-test('shouldRequireDataImageSourceForLeafletPlaceholder', (t) => {
+test('shouldRequireDataImageSourceWhenLeafletUsesItsPlaceholder', (t) => {
   const csp = policy({ 'img-src': "'self' https://tile.openstreetmap.org" });
   assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /img-src must include data:/.test(p)));
 });
 
-test('shouldRequireStyleSrcExplicitly', (t) => {
+test('shouldRequireStyleSrcWhenPolicyOmitsIt', (t) => {
   const csp = policy({ 'style-src': null });
   assert.ok(problems(project(t, { headers: headersFile(csp) })).some((p) => /style-src explicitly/.test(p)));
 });
 
-test('shouldRequireBaseUriAndFrameAncestorsNone', (t) => {
+test('shouldRequireBaseUriAndFrameAncestorsNoneWhenPolicyOmitsThem', (t) => {
   const csp = policy({ 'base-uri': null, 'frame-ancestors': null });
   const found = problems(project(t, { headers: headersFile(csp) }));
   assert.ok(found.some((p) => /base-uri 'none'/.test(p)));
   assert.ok(found.some((p) => /frame-ancestors 'none'/.test(p)));
 });
 
-test('shouldReportMissingWorkerSecurityHeaders', (t) => {
+test('shouldReportMissingHeadersWhenWorkerResponseOmitsThem', (t) => {
   const worker = {
     mapHtml: page(),
     headers: {
