@@ -1,4 +1,5 @@
 import { WALK_METERS_PER_MINUTE } from './constants.js';
+import { walkMinutes } from './walking.js';
 
 export interface LastMileResult {
   lastMileMinutes: number;
@@ -22,9 +23,11 @@ export function computeLastMile(
     return { lastMileMinutes: lastMileRoute.minutes, lastMileDegraded: false };
   }
   const dist = typeof distanceMeters === 'number' && Number.isFinite(distanceMeters) ? Math.max(0, distanceMeters) : 0;
-  const pace = walkPaceMetersPerMinute > 0 ? walkPaceMetersPerMinute : WALK_METERS_PER_MINUTE;
+  const pace = Number.isFinite(walkPaceMetersPerMinute) && walkPaceMetersPerMinute > 0
+    ? walkPaceMetersPerMinute
+    : WALK_METERS_PER_MINUTE;
   return {
-    lastMileMinutes: Math.round(dist / pace),
+    lastMileMinutes: walkMinutes(dist, pace),
     lastMileDegraded: true,
   };
 }

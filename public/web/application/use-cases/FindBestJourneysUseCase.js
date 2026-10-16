@@ -1,6 +1,7 @@
 import { arrivalsResultOf } from '../ports/TransitDataPort.js';
-import { WALK_METERS_PER_MINUTE, DEFAULT_PLANNING_POLICY, } from '../../domain/constants.js';
+import { DEFAULT_PLANNING_POLICY, } from '../../domain/constants.js';
 import { computeLastMile } from '../../domain/last-mile.js';
+import { walkMinutes } from '../../domain/walking.js';
 import { filterDiverseAlternatives } from '../../domain/diversity.js';
 import { haversineMeters, findAlightStop, nearestStops, diversifyByLine, stopLineMap } from '../../domain/topology.js';
 import { createWalkCandidate, createBusCandidates, selectCandidates } from '../../domain/planner.js';
@@ -14,7 +15,7 @@ export class FindBestJourneysUseCase {
         const { origin, destination } = input;
         // 1. CHEAP CANDIDATES GENERATION (Zero network routing calls upfront)
         const directDist = haversineMeters(origin.lat, origin.lon, destination.lat, destination.lon);
-        const cheapWalkMinutes = Math.max(1, Math.round(directDist / WALK_METERS_PER_MINUTE));
+        const cheapWalkMinutes = Math.max(1, walkMinutes(directDist));
         const walkCandidate = createWalkCandidate({
             walkMinutes: cheapWalkMinutes,
             origin,
@@ -44,7 +45,7 @@ export class FindBestJourneysUseCase {
                 stopsWithData += 1;
             const arrivals = result.status === 'unavailable' ? [] : result.arrivals;
             const stopDist = haversineMeters(origin.lat, origin.lon, stop.lat, stop.lon);
-            const walkToStopMinutes = Math.max(0, Math.round(stopDist / WALK_METERS_PER_MINUTE));
+            const walkToStopMinutes = walkMinutes(stopDist);
             const resolveAlight = (arr) => {
                 if (!lines)
                     return null;

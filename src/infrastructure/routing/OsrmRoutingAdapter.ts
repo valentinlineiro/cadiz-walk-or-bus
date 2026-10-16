@@ -1,6 +1,7 @@
 import type { RoutingPort } from '../../application/ports/RoutingPort.js';
 import type { Coordinates, Route } from '../../domain/models.js';
 import { haversineMeters } from '../../domain/topology.js';
+import { walkMinutes } from '../../domain/walking.js';
 
 interface OsrmRoute {
   distance: number;
@@ -62,7 +63,7 @@ export class OsrmRoutingAdapter implements RoutingPort {
 
     const speed = route.distance / route.duration;
     const minutes = (speed > 3.5 || speed < 0.5)
-      ? Math.ceil(route.distance / (5000 / 60))
+      ? walkMinutes(route.distance)
       : Math.ceil(route.duration / 60);
 
     const rawCoords: [number, number][] = route.geometry?.coordinates ?? [];
