@@ -488,7 +488,7 @@ test('shouldFallBackToAStraightLineOnlyForTheHopThatFailsWhenRoutingABus', async
   ]);
 });
 
-test('shouldReturnNullWhenABusRouteHasFewerThanTwoStopsOrEveryHopFails', async () => {
+test('shouldReturnNullWhenABusRouteHasFewerThanTwoStops', async () => {
   assert.equal(await busRoute(async () => ({ ok: false }), [{ lat: 1, lon: 2 }]), null);
 });
 
