@@ -138,30 +138,35 @@ const validOsrm = (j) =>
         (r) => Number.isFinite(r?.distance) && Number.isFinite(r?.duration) && Array.isArray(r?.geometry?.coordinates) && r.geometry.coordinates.length >= 2,
       )));
 
+// Every JSON error carries a stable `code` (what clients compare) and a descriptive `error`
+// (for humans and logs, free to change). Plain-text 404/405 outside the API are not part of this.
+const errorBody = (code, error) => ({ code, error });
+const errorResponse = (code, error, status, headers) =>
+  Response.json(errorBody(code, error), headers ? { status, headers } : { status });
+
 async function upstreamJson(url, isValid) {
   let r;
   try {
     r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA }, signal: AbortSignal.timeout(5000) });
   } catch {
-    return Response.json({ error: 'upstream unreachable' }, { status: 502 });
+    return errorResponse('UPSTREAM_UNREACHABLE', 'upstream unreachable', 502);
   }
-  if (r.status >= 500) return Response.json({ error: `upstream ${r.status}` }, { status: 502 });
-  if (r.status === 400 || r.status === 404) return Response.json({ error: `upstream ${r.status}` }, { status: 404 });
+  if (r.status >= 500) return errorResponse('UPSTREAM_ERROR', `upstream ${r.status}`, 502);
+  if (r.status === 400 || r.status === 404) return errorResponse('UPSTREAM_NOT_FOUND', `upstream ${r.status}`, 404);
   if (!r.ok) {
     // 403/429/...: provider limits or blocks are recoverable, never "not found".
-    return Response.json(
-      { error: `upstream ${r.status}` },
-      { status: 503, headers: { 'retry-after': r.headers?.get?.('retry-after') ?? '5' } },
-    );
+    return errorResponse('UPSTREAM_REJECTED', `upstream ${r.status}`, 503, {
+      'retry-after': r.headers?.get?.('retry-after') ?? '5',
+    });
   }
   const text = await r.text();
   let parsed;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return Response.json({ error: 'malformed upstream response' }, { status: 502 });
+    return errorResponse('UPSTREAM_INVALID_RESPONSE', 'malformed upstream response', 502);
   }
-  if (!isValid(parsed)) return Response.json({ error: 'unexpected upstream response' }, { status: 502 });
+  if (!isValid(parsed)) return errorResponse('UPSTREAM_INVALID_RESPONSE', 'unexpected upstream response', 502);
   return text;
 }
 
@@ -222,11 +227,11 @@ async function claimNominatimSlot(db) {
 
 function handleGeocode(url, env) {
   const q = (url.searchParams.get('q') ?? '').trim().replace(/\s+/g, ' ');
-  if (q.length < 2 || q.length > 100) return Response.json({ error: 'invalid q' }, { status: 400 });
+  if (q.length < 2 || q.length > 100) return errorResponse('INVALID_QUERY', 'invalid q', 400);
   const limit = Math.min(5, Math.max(1, Math.trunc(Number(url.searchParams.get('limit'))) || 5));
   return proxyCached(env, `geo:${q.toLowerCase()}:${limit}`, async () => {
     if (!(await claimNominatimSlot(tursoDb(env)))) {
-      return Response.json({ error: 'busy' }, { status: 503, headers: { 'retry-after': '2' } });
+      return errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' });
     }
     return upstreamJson(
       `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(q)}`,
@@ -237,12 +242,12 @@ function handleGeocode(url, env) {
 
 function handleRoute(url, env) {
   const m = ROUTE_PATH.exec(url.pathname);
-  if (!m) return Response.json({ error: 'invalid route' }, { status: 400 });
+  if (!m) return errorResponse('INVALID_ROUTE', 'invalid route', 400);
   const [lon1, lat1, lon2, lat2] = m.slice(2).map(Number);
   const inBox = (lon, lat) =>
     lon >= ROUTE_BOX.lon[0] && lon <= ROUTE_BOX.lon[1] && lat >= ROUTE_BOX.lat[0] && lat <= ROUTE_BOX.lat[1];
   if (!inBox(lon1, lat1) || !inBox(lon2, lat2)) {
-    return Response.json({ error: 'outside service area' }, { status: 400 });
+    return errorResponse('OUTSIDE_SERVICE_AREA', 'outside service area', 400);
   }
   const coords = `${lon1.toFixed(5)},${lat1.toFixed(5)};${lon2.toFixed(5)},${lat2.toFixed(5)}`;
   return proxyCached(env, `route:${m[1]}:${coords}`, () =>
@@ -312,7 +317,7 @@ async function rateLimited(request, env) {
 }
 const rateLimitedResponse = (pathname) => {
   logEvent('rate_limited', { kind: routeKind(pathname) }, 'warn');
-  return Response.json({ error: 'rate limited' }, { status: 429, headers: { 'retry-after': '10' } });
+  return errorResponse('RATE_LIMITED', 'rate limited', 429, { 'retry-after': '10' });
 };
 
 function arrivalsResponse(arrivals, fetchedAt, source) {
@@ -339,11 +344,11 @@ async function fetchPanelArrivals(stop) {
     upstream = await globalThis.fetch(panel, { signal: AbortSignal.timeout(4000) });
   } catch (e) {
     done({ error_type: e?.name === 'TimeoutError' ? 'timeout' : 'transport' });
-    return { fail: { status: 502, body: { error: 'upstream unreachable' } } };
+    return { fail: { status: 502, body: errorBody('UPSTREAM_UNREACHABLE', 'upstream unreachable') } };
   }
   if (!upstream.ok) {
     done({ error_type: 'http', status: upstream.status });
-    return { fail: { status: 502, body: { error: `upstream ${upstream.status}` } } };
+    return { fail: { status: 502, body: errorBody('UPSTREAM_ERROR', `upstream ${upstream.status}`) } };
   }
   let arrivals;
   try {
@@ -351,11 +356,11 @@ async function fetchPanelArrivals(stop) {
   } catch (e) {
     // Body stream failed after a good status line (or the parser threw): classify, never 1101.
     done({ error_type: e instanceof SyntaxError || e?.name === 'ParseError' ? 'parse' : 'body_read', status: upstream.status });
-    return { fail: { status: 502, body: { error: 'upstream unreachable' } } };
+    return { fail: { status: 502, body: errorBody('UPSTREAM_UNREACHABLE', 'upstream unreachable') } };
   }
   if (arrivals === null) {
     done({ error_type: 'parse', status: upstream.status });
-    return { fail: { status: 502, body: { error: 'malformed upstream response' } } };
+    return { fail: { status: 502, body: errorBody('UPSTREAM_INVALID_RESPONSE', 'malformed upstream response') } };
   }
   done({ status: upstream.status, arrivals: arrivals.length });
   return { arrivals };
@@ -389,14 +394,14 @@ function rememberArrivals(key, entry) {
 async function handleArrivals(url, env) {
   const stop = url.searchParams.get('stop');
   if (!stop || !/^[a-zA-Z0-9_-]{1,16}$/.test(stop)) {
-    return Response.json({ error: 'missing or invalid stop' }, { status: 400 });
+    return errorResponse('INVALID_STOP', 'missing or invalid stop', 400);
   }
   // Only the municipal stops we ship are served. Anything else is rejected BEFORE caches, locks
   // or the panel, so arbitrary ids cannot be used to make the Worker hammer the municipal server.
   // The list is stops.json: refresh it (scrape-stops.js) when the operator adds stops.
   if (!KNOWN_STOPS.has(stop)) {
     logEvent('arrivals_rejected', { reason: 'unknown_stop' });
-    return Response.json({ error: 'unknown stop' }, { status: 404 });
+    return errorResponse('UNKNOWN_STOP', 'unknown stop', 404);
   }
   // `route` is not part of the client contract: it is ignored (never forwarded, never part of the
   // cache key), so it cannot be used to bypass the per-stop cache.
@@ -471,7 +476,7 @@ async function loadArrivals(key, stop, env) {
           return { arrivals: polled.arrivals, t: polled.t, source: 'hit' };
         }
       }
-      return { fail: { status: 503, body: { error: 'busy' }, headers: { 'retry-after': '2' } } };
+      return { fail: { status: 503, body: errorBody('BUSY', 'busy'), headers: { 'retry-after': '2' } } };
     }
     if (claimed === null) {
       degraded = true;
