@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { validateLines, extractDestinationName, buildLinesArtifact, DEFAULT_LINES } from './scrape-lines.js';
 
-test('extractDestinationName parses standard and parenthesized destination names', () => {
+test('shouldParseStandardAndParenthesizedNamesWhenExtractingDestinations', () => {
   assert.equal(extractDestinationName('PLAZA ESPAÑA A CORTADURA'), 'CORTADURA');
   assert.equal(extractDestinationName('CORTADURA A PLAZA ESPAÑA'), 'PLAZA ESPAÑA');
   assert.equal(extractDestinationName('PLAZA ESPAÑA A CORTADURA (PROL. COLEGIO)'), 'CORTADURA');
@@ -11,7 +11,7 @@ test('extractDestinationName parses standard and parenthesized destination names
   assert.equal(extractDestinationName('NO_SEPARATOR'), 'NO_SEPARATOR');
 });
 
-test('validateLines accepts complete and valid topology matching stops', () => {
+test('shouldAcceptTheTopologyWhenLinesAreCompleteAndMatchStops', () => {
   const mockStops = [
     { stop: '101' }, { stop: '102' }, { stop: '103' },
     { stop: '201' }, { stop: '202' }
@@ -26,7 +26,7 @@ test('validateLines accepts complete and valid topology matching stops', () => {
   assert.doesNotThrow(() => validateLines(validData, mockStops));
 });
 
-test('validateLines throws hard on missing lines or missing directions', () => {
+test('shouldThrowWhenLinesOrDirectionsAreMissing', () => {
   const incompleteLines = { '1': { 'A': [1, 2], 'B': [2, 1] } };
   assert.throws(() => validateLines(incompleteLines, []), /Missing required line/);
 
@@ -40,7 +40,7 @@ test('validateLines throws hard on missing lines or missing directions', () => {
   assert.throws(() => validateLines(oneDir, []), /fewer than 2 directions/);
 });
 
-test('validateLines throws hard on short sequences or unknown stop IDs', () => {
+test('shouldThrowWhenSequencesAreShortOrStopIdsAreUnknown', () => {
   const mockStops = [{ stop: '10' }, { stop: '20' }];
   const badStops = {
     '1': { 'A': [10], 'B': [20, 10] },
@@ -61,7 +61,7 @@ test('validateLines throws hard on short sequences or unknown stop IDs', () => {
   assert.throws(() => validateLines(unknownStop, mockStops), /not found in stops\.json/);
 });
 
-test('lines.json artifact integrity test', () => {
+test('shouldMatchTheExpectedLinesAndValidateWhenLinesJsonIsLoaded', () => {
   assert.ok(fs.existsSync('lines.json'), 'lines.json must exist');
   const artifact = JSON.parse(fs.readFileSync('lines.json', 'utf8'));
   const stops = JSON.parse(fs.readFileSync('stops.json', 'utf8'));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { matchDirection, findAlightStop, haversineMeters, diversifyByLine, stopLineMap } from './domain/topology.js';
 
-test('matchDirection matches exact, case-insensitive, substring, and keyword', () => {
+test('shouldMatchExactCaseInsensitiveSubstringAndKeywordWhenMatchingDirection', () => {
   const dirs = {
     'CORTADURA': [1101, 1102],
     'PLAZA ESPAÑA': [1114, 1101],
@@ -21,7 +21,7 @@ test('matchDirection matches exact, case-insensitive, substring, and keyword', (
   assert.equal(matchDirection(dirs, 'NON_EXISTENT'), null);
 });
 
-test('matchDirection discards ambiguously matching directions conservatively', () => {
+test('shouldDiscardAmbiguousMatchesWhenMatchingDirection', () => {
   const ambiguousDirs = {
     'PLAZA ESPAÑA': [1, 2],
     'PLAZA SEVILLA': [3, 4],
@@ -31,7 +31,7 @@ test('matchDirection discards ambiguously matching directions conservatively', (
   assert.equal(matchDirection(ambiguousDirs, 'L1 PLAZA'), null);
 });
 
-test('findAlightStop enforces index(alightStop) > index(boardingStop) strictly', () => {
+test('shouldRequireAlightIndexAfterBoardingIndexWhenFindingAlightStop', () => {
   // Line with stops S1 (0,0), S2 (1,0), S3 (2,0)
   // Destination is at (-0.1, 0), which is closest to S1
   // If user boards at S2, S1 cannot be selected because index(S1) < index(S2)
@@ -59,7 +59,7 @@ test('findAlightStop enforces index(alightStop) > index(boardingStop) strictly',
   assert.equal(res, null);
 });
 
-test('findAlightStop returns null if line moves away from destination (rule: dist < boardingDist)', () => {
+test('shouldReturnNullWhenTheLineMovesAwayFromTheDestination', () => {
   const stops = [
     { stop: 'A', lat: 36.50, lon: -6.20 },
     { stop: 'B', lat: 36.51, lon: -6.20 },
@@ -80,7 +80,7 @@ test('findAlightStop returns null if line moves away from destination (rule: dis
   assert.equal(res, null);
 });
 
-test('findAlightStop respects the direction and does not cross into opposite direction sequence', () => {
+test('shouldStayInTheRequestedDirectionWhenFindingAlightStop', () => {
   const stops = [
     { stop: '1', lat: 36.53, lon: -6.29 },
     { stop: '2', lat: 36.52, lon: -6.28 },
@@ -119,7 +119,7 @@ test('findAlightStop respects the direction and does not cross into opposite dir
   assert.equal(resNorth, null);
 });
 
-test('findAlightStop returns null if boarding at the last stop of the sequence', () => {
+test('shouldReturnNullWhenBoardingAtTheLastStopOfTheSequence', () => {
   const stops = [
     { stop: '1', lat: 36.50, lon: -6.20 },
     { stop: '2', lat: 36.51, lon: -6.20 },
@@ -137,7 +137,7 @@ test('findAlightStop returns null if boarding at the last stop of the sequence',
   assert.equal(res, null);
 });
 
-test('findAlightStop returns null if boarding stop is not in sequence', () => {
+test('shouldReturnNullWhenTheBoardingStopIsNotInTheSequence', () => {
   const stops = [
     { stop: '1', lat: 36.50, lon: -6.20 },
     { stop: '2', lat: 36.51, lon: -6.20 },
@@ -155,7 +155,7 @@ test('findAlightStop returns null if boarding stop is not in sequence', () => {
   assert.equal(res, null);
 });
 
-test('findAlightStop breaks distance ties deterministically in sequence order', () => {
+test('shouldBreakDistanceTiesInSequenceOrderWhenFindingAlightStop', () => {
   // Candidate C1 and C2 are equidistant from destination
   const stops = [
     { stop: 'B', lat: 36.50, lon: -6.20 },
@@ -178,7 +178,7 @@ test('findAlightStop breaks distance ties deterministically in sequence order', 
   assert.equal(res.stop.stop, 'C1');
 });
 
-test('findAlightStop with real Cadiz lines.json and stops.json topology', () => {
+test('shouldChooseTheHospitalStopWhenUsingTheRealCadizTopology', () => {
   const stops = JSON.parse(fs.readFileSync('stops.json', 'utf8'));
   const linesData = JSON.parse(fs.readFileSync('lines.json', 'utf8')).lines;
 
@@ -201,21 +201,21 @@ test('findAlightStop with real Cadiz lines.json and stops.json topology', () => 
   assert.ok(res.distanceMeters < 100, `Expected distance < 100m, got ${res.distanceMeters}m`);
 });
 
-test('diversifyByLine skips a closer stop that only repeats an already-covered line', () => {
+test('shouldSkipACloserStopWhenItOnlyRepeatsACoveredLine', () => {
   const lines = { A: { X: ['s1', 's2'] }, B: { X: ['s3'] } };
   const sorted = [{ stop: 's1' }, { stop: 's2' }, { stop: 's3' }];
   const picked = diversifyByLine(sorted, lines, 2);
   assert.deepEqual(picked.map((s) => s.stop), ['s1', 's3']);
 });
 
-test('diversifyByLine falls back to nearest stops once every line is covered or unknown', () => {
+test('shouldFallBackToNearestStopsWhenEveryLineIsCoveredOrUnknown', () => {
   const lines = { A: { X: ['s1'] } };
   const sorted = [{ stop: 's1' }, { stop: 's1b' }, { stop: 's2' }];
   const picked = diversifyByLine(sorted, lines, 3);
   assert.deepEqual(picked.map((s) => s.stop), ['s1', 's1b', 's2']);
 });
 
-test('stopLineMap and diversifyByLine degrade to nearest-n when lines is null', () => {
+test('shouldDegradeToNearestStopsWhenLinesAreNull', () => {
   assert.deepEqual([...stopLineMap(null).keys()], []);
   const sorted = [{ stop: 's1' }, { stop: 's2' }];
   assert.deepEqual(diversifyByLine(sorted, null, 2).map((s) => s.stop), ['s1', 's2']);
