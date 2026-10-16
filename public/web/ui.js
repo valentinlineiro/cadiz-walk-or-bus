@@ -2,6 +2,7 @@ import { isPointInCadiz } from './domain/topology.js';
 import { escapeHTML, initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
+import { clearHistory, purgeExpiredHistory } from './history.js';
 import { getFavorites, addFavorite, removeFavorite, isFavorite } from './favorites.js';
 import { isValidCapturedAt, normalizeScenario } from './scenario.js';
 import { transitionSheet, SHEET_STATES } from './sheet-state.js';
@@ -610,7 +611,7 @@ export function renderHomeFavorites(kind = originKind) {
   }
 }
 
-export function appendDropdownSection(dropdown, title, items, icon, { removable, badge, originKind: kind = originKind } = {}) {
+export function appendDropdownSection(dropdown, title, items, icon, { removable, badge, clearable, originKind: kind = originKind } = {}) {
   if (items.length === 0) return;
   if (title) {
     const header = document.createElement('div');
@@ -639,6 +640,13 @@ export function appendDropdownSection(dropdown, title, items, icon, { removable,
     dropdown.appendChild(row);
     if (badge) fillQuickVerdictBadge(row, item);
   }
+  if (clearable) {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'clear-history';
+    clear.textContent = 'Borrar historial';
+    dropdown.appendChild(clear);
+  }
 }
 
 // Manually pinned destinations first, then auto-tracked search history —
@@ -663,7 +671,7 @@ function renderQuickPicks() {
   }
   dropdown.replaceChildren();
   appendDropdownSection(dropdown, 'Habituales', favorites, ICON.starFill, { removable: true, badge: true });
-  appendDropdownSection(dropdown, 'Mis destinos', destinations, ICON.history);
+  appendDropdownSection(dropdown, 'Mis destinos', destinations, ICON.history, { clearable: true });
   dropdown.classList.remove('hidden');
 }
 
@@ -698,7 +706,7 @@ function renderMatchingLocalPicks(q) {
     dropdown.appendChild(row);
   } else {
     appendDropdownSection(dropdown, 'Habituales', favorites, ICON.starFill, { removable: true, badge: true });
-    appendDropdownSection(dropdown, 'Mis destinos', destinations, ICON.history);
+    appendDropdownSection(dropdown, 'Mis destinos', destinations, ICON.history, { clearable: true });
   }
   dropdown.classList.remove('hidden');
 }
@@ -1025,6 +1033,7 @@ export async function loadScenario(name) {
 }
 
 export function initUI() {
+  try { purgeExpiredHistory({ journeyLog: journeyLogAdapter }); } catch {}
   initMap(
     async (stop) => {
       if (currentPlanningSession && destCoords) {
@@ -1136,6 +1145,11 @@ export function initUI() {
   if (dropdown) {
     // One path for mouse, touch, keyboard (Enter/Space) and assistive tech: the buttons' native click.
     dropdown.addEventListener('click', (e) => {
+      if (e.target.closest('.clear-history')) {
+        clearHistory({ journeyLog: journeyLogAdapter });
+        renderQuickPicks();
+        return;
+      }
       const removeBtn = e.target.closest('.remove-fav');
       const itemEl = e.target.closest('.dropdown-item');
       if (!itemEl?._data) return;

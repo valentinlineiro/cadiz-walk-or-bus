@@ -10,11 +10,14 @@ This is a technical inventory, not legal advice or a compliance claim.
 | Key | Content | Limit | Expiry | Code |
 |---|---|---|---|---|
 | `cadiz_favorite_destinations` | label + coordinates, saved by the user | 8 | until removed | `public/web/favorites.js` |
-| `cadiz_recent_destinations` | label + coordinates, saved automatically on selecting a destination | 5 | none | `public/web/recent.js` |
-| `cadiz_journey_log` | destination (label, coordinates), timestamp, recommended mode/minutes/line/stops, choice | 200 | none | `LocalStorageJourneyLogAdapter` |
+| `cadiz_recent_destinations` | label + coordinates + `savedAt`, saved automatically on selecting a destination | 5 | 30 days (`HISTORY_RETENTION_DAYS`) | `public/web/recent.js` |
+| `cadiz_journey_log` | destination (label, coordinates), timestamp, recommended mode/minutes/line/stops, choice | 200 | 30 days from the entry's timestamp | `LocalStorageJourneyLogAdapter` |
 
 The GPS position is requested once (`getCurrentPosition`) and kept in memory only; the journey log
-records no origin. There is no UI to clear recents or the log (favourites can be removed one by one).
+records no origin. «Borrar historial» (foot of «Mis destinos») clears recents and the log; favourites are
+not part of the history and are never cleared or expired. Expired entries are ignored on read, dropped on
+write and purged at start-up; recents saved before retention existed have no `savedAt` and are dated at
+the first purge, so they live at most 30 days from the first visit after the update.
 Cache Storage holds only the application shell (`SHELL_URLS`).
 
 ## Leaves the device
@@ -52,6 +55,6 @@ up to 24 h. Planned change (F-10 PR 3): do not cache routes whose origin is the 
 
 ## Planned (F-10), not yet implemented
 
-1. This inventory and the notice (this change).
-2. A control to clear recents and the journey log, and a 30-day automatic retention for both.
-3. No `proxy_cache` writes for routes whose origin is the GPS position.
+1. ~~This inventory and the notice.~~ Done.
+2. ~~A control to clear recents and the journey log, and a 30-day automatic retention for both.~~ Done.
+3. No `proxy_cache` writes for routes whose origin is the GPS position (not yet implemented).

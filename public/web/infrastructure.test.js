@@ -12,8 +12,12 @@ import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedSt
 import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
 import realGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
+// The fixtures are dated around 2023-11-14; the clock keeps them inside the 30-day retention window.
+const FIXTURE_CLOCK = () => 1700000000000 + 24 * 60 * 60 * 1000;
+// Some fixtures use tiny timestamps (1000, 2000, …): a day after the epoch.
+const EPOCH_FIXTURE_CLOCK = () => 24 * 60 * 60 * 1000;
 const appendEntry = (entry, storage, max = 200) => {
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   adapter.append(entry, max);
   return adapter.getLog().slice(0, max);
 };
@@ -427,7 +431,7 @@ test('shouldPersistAValidRecordAndSurviveCorruptStorageWhenAppending', () => {
   const storage = new MockStorage();
   storage.setItem('cadiz_journey_log', 'invalid json {{{');
 
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   const record = {
     id: '1001-abc',
     timestamp: 1700000000000,
@@ -453,7 +457,7 @@ test('shouldPersistAValidRecordAndSurviveCorruptStorageWhenAppending', () => {
 
 test('shouldPreserveStartedAtWhenPersistingAStartedJourney', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   const record = {
     id: '1002-started',
     timestamp: 1700000000000,
@@ -470,7 +474,7 @@ test('shouldPreserveStartedAtWhenPersistingAStartedJourney', () => {
 
 test('shouldDeduplicateEvaluationsWhenTheSameDestinationIsRecordedWithinFiveMinutes', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
 
   const baseRecord = {
     destination: { label: 'Hospital', lat: 36.505, lon: -6.275 },
@@ -494,7 +498,7 @@ test('shouldDeduplicateEvaluationsWhenTheSameDestinationIsRecordedWithinFiveMinu
 
 test('shouldGroupByCoordsAndOrderByRecencyWhenListingRecentDestinations', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   adapter.append({
     id: '1',
@@ -519,7 +523,7 @@ test('shouldGroupByCoordsAndOrderByRecencyWhenListingRecentDestinations', () => 
 
 test('shouldRankByCountWithRecencyTiebreakWhenListingTopDestinations', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   adapter.append({
     id: '1',
@@ -553,7 +557,7 @@ test('shouldRankByCountWithRecencyTiebreakWhenListingTopDestinations', () => {
 
 test('shouldMoveTheUpdatedEntryToTheHeadWhenDeduplicatingTheLog', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   const destA = { label: 'Dest A', lat: 36.50, lon: -6.28 };
   const destB = { label: 'Dest B', lat: 36.52, lon: -6.29 };
@@ -626,7 +630,7 @@ test('shouldDropInvalidEntriesWhenReadingTheLog', () => {
     JSON.stringify([validEntry, invalidNoId, invalidTimestamp, invalidCoords, invalidRecommendation]),
   );
 
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
   const log = adapter.getLog();
   assert.equal(log.length, 1);
   assert.equal(log[0].id, 'entry-1');
@@ -642,7 +646,7 @@ test('shouldKeepOnlyTheLatestTwoHundredEntriesWhenReadingTheLog', () => {
     recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
   }));
   storage.setItem('cadiz_journey_log', JSON.stringify(entries));
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
   const log = adapter.getLog();
 
   assert.equal(log.length, 200);
@@ -650,7 +654,7 @@ test('shouldKeepOnlyTheLatestTwoHundredEntriesWhenReadingTheLog', () => {
 
 test('shouldIncludeCountLastRecommendationAndSubWhenListingRecentOrTopDestinations', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   adapter.append({
     timestamp: 1000,
