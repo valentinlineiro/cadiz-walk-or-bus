@@ -66,6 +66,9 @@ not deliberately disrupt the public production service.
 - [ ] Realtime proxy distinguishes between valid empty boards (HTTP 200 `[]`) and malformed upstream HTML (HTTP 502).
 - [ ] The GTFS snapshot (`public/fixtures/gtfs-cadiz.snapshot.json`) is present and valid:
   - `feedVersion` is current (e.g. `nap-YYYY-MM-DD`).
+  - `npm run release:check` **fails when fewer than 30 days of validity remain** (last service
+    date of the snapshot, `scripts/gtfs-expiry.mjs`) or when it has expired: renew the snapshot
+    with `npm run ingest:gtfs` before that date. The unit tests (`npm test`) are not affected.
   - Active calendar service bounds verified: service windows cover current dates through `2026-12-31`.
   - Service coverage verified across weekdays (L-V), weekends (S-D), and local Cádiz exception dates (Carnaval, Semana Santa, festivos locales y nacionales).
   - Snapshot `feedVersion` matches `GTFS_FEED_VERSION` in `public/sw.js` ensuring cache invalidation.
