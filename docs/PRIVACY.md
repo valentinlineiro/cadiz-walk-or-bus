@@ -37,14 +37,17 @@ No cookies, no analytics (no `document.cookie` / `Set-Cookie` in the code; check
 | Where | What | Retention | Code |
 |---|---|---|---|
 | Turso `proxy_cache`, geocode | key `geo:{normalised query}:{limit}`, body = Nominatim answer | 24 h (`PROXY_TTL_S`) | `worker.js` `handleGeocode` |
-| Turso `proxy_cache`, routes | key `route:{foot\|drive}:{lon,lat;lon,lat}` at 5 decimals (~1 m) for **origin and destination**; body = OSRM answer | 24 h | `worker.js` `handleRoute` |
+| Turso `proxy_cache`, routes | only when the origin is a **known stop** (`STOP_ORIGINS`, from `stops.json`): key `route:{foot\|drive}:{lon,lat;lon,lat}` at 5 decimals (~1 m), so the **destination** coordinates are part of the key; body = OSRM answer. Any other origin (in practice the user's GPS position) is answered without touching `proxy_cache` and with `Cache-Control: private` | 24 h | `worker.js` `handleRoute`, `proxyUncached` |
 | Turso `proxy_cache`, arrivals | key `arr:{stop}` | 15 s (`ARRIVALS_TTL_S`) | `worker.js` |
 | Expired rows | read-ignored at once; physically deleted by a sweep that runs on ~2 % of arrivals writes | — | `worker.js` |
 | Workers Logs | operational events only; no IP, headers, bodies, coordinates or search text (asserted in `worker.test.js`) | 7 days on Paid, 3 on Free (`docs/OBSERVABILITY.md`) | `worker.js` |
 | Rate limiting | key derived from the client IP, handed to Cloudflare's rate-limit binding | not audited | `rateKey` |
 
-Consequence worth stating: with a GPS origin, the user's position is part of a Turso cache key for
-up to 24 h. Planned change (F-10 PR 3): do not cache routes whose origin is the GPS position.
+Consequences worth stating: the user's GPS position is no longer stored in the shared cache. The Worker cannot
+tell a GPS fix from a stop by itself, so a fix that lands exactly on a stop (to 5 decimals, ~1 m) is treated as that
+stop; routes that start at a stop still store the **destination** coordinates (a place someone asked about, not who).
+A topology that falls back to GTFS stops (ids not in `stops.json`) is never cached either. The position still
+reaches OSRM, which has to compute the route, and appears in the request URL seen by Cloudflare.
 
 ## Not verified (outside what the code can show)
 
@@ -57,4 +60,4 @@ up to 24 h. Planned change (F-10 PR 3): do not cache routes whose origin is the 
 
 1. ~~This inventory and the notice.~~ Done.
 2. ~~A control to clear recents and the journey log, and a 30-day automatic retention for both.~~ Done.
-3. No `proxy_cache` writes for routes whose origin is the GPS position (not yet implemented).
+3. ~~No `proxy_cache` writes for routes whose origin is the GPS position.~~ Done.

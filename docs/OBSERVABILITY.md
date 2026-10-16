@@ -12,7 +12,7 @@ Retention is 7 days on Workers Paid (3 on Free), so a 7-day baseline needs Paid.
 |---|---|---|
 | `panel_request` | `ok`, `error_type` (`timeout`/`transport`/`http`/`body_read`/`parse`), `status`, `panel_duration_ms`, `stop_id`, `arrivals` | One **real** call to the municipal panel |
 | `arrivals_request` | `status`, `cache_status` (`miss`/`hit`/`mem`/`degraded`/`none`), `duration_ms`, `stop_id` | One `/api` answer |
-| `proxy_request` | `kind` (`geocode`/`foot`/`drive`), `status`, `cache_status`, `duration_ms` | One geocode/route answer |
+| `proxy_request` | `kind` (`geocode`/`foot`/`drive`), `status`, `cache_status`, `duration_ms` | One geocode/route answer; `cache_status` is `none` for a route whose origin is not a known stop (answered without the shared cache) |
 | `arrivals_rejected` | `reason` (`unknown_stop`) | A well-formed stop id that is not in `stops.json` (404, no cache/lock/panel access). The rejected id is never logged |
 | `rate_limited` | `kind` (`api`/`geocode`/`route`) | A 429 |
 | `arrivals_degraded` | `op` (`lock`), `reason`, `stop_id` | Turso unavailable at lock time; no shared cache/lock |

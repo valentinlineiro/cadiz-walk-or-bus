@@ -71,6 +71,10 @@ export function parseArrivals(html) {
 // Turso incidents: `turso_error` {op: read|publish|release} per failed operation (the request
 // still succeeds); a failed lock claim is reported as `arrivals_degraded` {op: lock} instead.
 const KNOWN_STOPS = new Set(stops.map((s) => String(s.stop)));
+// Routes are cached in the shared store only when they start at a known stop (same 5-decimal
+// precision as the cache key). Any other origin is, in practice, a user's GPS position: it must not
+// reach the shared cache. A fix that lands exactly on a stop is indistinguishable from the stop.
+const STOP_ORIGINS = new Set(stops.map((s) => `${Number(s.lon).toFixed(5)},${Number(s.lat).toFixed(5)}`));
 // Objects (not JSON strings): Workers Logs indexes object keys as queryable fields.
 const logEvent = (event, fields, level = 'log') => console[level]({ event, ...fields });
 const knownStop = (id) => (KNOWN_STOPS.has(id) ? id : 'other');
@@ -187,6 +191,21 @@ async function proxyCached(env, key, produce) {
   return res;
 }
 
+// Same answer as proxyCached without touching the shared store; `private` keeps shared caches from
+// holding a URL that contains the user's position (the browser's own cache is fine).
+async function proxyUncached(kind, produce) {
+  const started = Date.now();
+  const out = await produce();
+  const res = out instanceof Response
+    ? out
+    : new Response(out, { headers: { 'content-type': 'application/json', 'cache-control': 'private, max-age=3600' } });
+  logEvent(
+    'proxy_request',
+    { kind, status: res.status, cache_status: 'none', duration_ms: Date.now() - started },
+    res.status >= 500 ? 'warn' : 'log',
+  );
+  return res;
+}
 async function proxyCachedInner(env, key, produce) {
   const db = tursoDb(env);
   const now = Math.floor(Date.now() / 1000);
@@ -250,9 +269,9 @@ function handleRoute(url, env) {
     return errorResponse('OUTSIDE_SERVICE_AREA', 'outside service area', 400);
   }
   const coords = `${lon1.toFixed(5)},${lat1.toFixed(5)};${lon2.toFixed(5)},${lat2.toFixed(5)}`;
-  return proxyCached(env, `route:${m[1]}:${coords}`, () =>
-    upstreamJson(`${ROUTE_UPSTREAM[m[1]]}${coords}?overview=full&geometries=geojson`, validOsrm),
-  );
+  const produce = () => upstreamJson(`${ROUTE_UPSTREAM[m[1]]}${coords}?overview=full&geometries=geojson`, validOsrm);
+  if (!STOP_ORIGINS.has(`${lon1.toFixed(5)},${lat1.toFixed(5)}`)) return proxyUncached(m[1], produce);
+  return proxyCached(env, `route:${m[1]}:${coords}`, produce);
 }
 
 // --- Live arrivals: panel is a legacy server, so it is hit at most ~once per stop per TTL. ---

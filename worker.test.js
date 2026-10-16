@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { __resetArrivalsCache } from './worker.js';
+import stopsJson from './stops.json' with { type: 'json' };
 
 const originalFetch = globalThis.fetch;
 const originalConsole = { log: console.log, warn: console.warn };
@@ -727,7 +728,8 @@ test('shouldReportKindStatusAndCacheStatusWhenRecordingGeocodeAndRouteRequests',
   }));
   await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
   await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
-  await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  // A route from a known stop is cacheable; one from any other origin is reported as `none` (see F-10).
+  await worker.fetch(new Request(`http://x/route/foot/${at(stopA)};-6.29,36.51`), TURSO_ENV);
   const got = ev('proxy_request').map((e) => `${e.kind}:${e.status}:${e.cache_status}`);
   assert.deepEqual(got, ['geocode:200:miss', 'geocode:200:hit', 'foot:200:miss']);
   const raw = lines.join('\n');
@@ -963,4 +965,99 @@ test('shouldKeepTheSameCodeWhenOnlyTheDescriptiveTextVaries', async () => {
   }
   assert.deepEqual(new Set(seen.map(([code]) => code)), new Set(['UPSTREAM_ERROR']));
   assert.equal(new Set(seen.map(([, error]) => error)).size, 3, 'the text differs per status; the code does not');
+});
+
+// --- F-10: routes that start at the user's GPS position are never stored in the shared cache ---
+
+const stopA = stopsJson.find((s) => s.stop === '1215') ?? stopsJson[0];
+const stopB = stopsJson.find((s) => s.stop === '1308') ?? stopsJson[1];
+const at = (s) => `${s.lon},${s.lat}`;
+const GPS_FIX = '-6.29512,36.53318'; // a position that is not a stop
+const OSRM_OK = JSON.stringify({ code: 'Ok', routes: [{ distance: 500, duration: 360, geometry: { coordinates: [[-6.29, 36.53], [-6.28, 36.54]] } }] });
+
+function recordSql(upstream) {
+  const cache = withTurso(upstream);
+  const turso = globalThis.fetch;
+  const statements = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) statements.push(JSON.parse(init.body).requests[0].stmt.sql);
+    return turso(url, init);
+  };
+  return { cache, statements };
+}
+const route = (kind, from, to) => worker.fetch(new Request(`http://x/route/${kind}/${from};${to}`), TURSO_ENV);
+const countingOsrm = (counter) => async () => { counter.n += 1; return { ok: true, status: 200, text: async () => OSRM_OK }; };
+
+test('shouldNotReadOrWriteTheSharedCacheWhenTheRouteStartsAtAGpsPosition', async () => {
+  const counter = { n: 0 };
+  const { cache, statements } = recordSql(countingOsrm(counter));
+
+  const first = await route('foot', GPS_FIX, at(stopB));
+  const second = await route('foot', GPS_FIX, at(stopB));
+
+  assert.deepEqual([first.status, second.status], [200, 200]);
+  assert.equal(counter.n, 2, 'each request goes to the router: nothing was cached');
+  assert.deepEqual(statements.filter((sql) => sql.includes('proxy_cache')), [], 'no read, write or sweep of proxy_cache');
+  assert.equal(cache.size, 0);
+  assert.equal(first.headers.get('x-proxy-cache'), null);
+  assert.match(first.headers.get('cache-control'), /private/, 'shared caches must not keep a URL that contains the position');
+  assert.doesNotMatch(first.headers.get('cache-control'), /public/);
+});
+
+test('shouldStillUseTheSharedCacheWhenTheRouteStartsAtAKnownStop', async () => {
+  const counter = { n: 0 };
+  const { cache } = recordSql(countingOsrm(counter));
+
+  const first = await route('foot', at(stopA), at(stopB));
+  const second = await route('foot', at(stopA), at(stopB));
+
+  assert.equal(counter.n, 1, 'the second request is answered from the cache');
+  assert.deepEqual([first.headers.get('x-proxy-cache'), second.headers.get('x-proxy-cache')], ['miss', 'hit']);
+  assert.equal(cache.size, 1);
+  assert.match(first.headers.get('cache-control'), /public/);
+});
+
+test('shouldCacheBusHopsBetweenStopsAndSkipThemWhenTheOriginIsNotAStop', async () => {
+  const counter = { n: 0 };
+  const { cache } = recordSql(countingOsrm(counter));
+
+  await route('drive', at(stopA), at(stopB));
+  await route('drive', at(stopA), at(stopB));
+  assert.equal(counter.n, 1);
+  assert.equal(cache.size, 1);
+
+  await route('drive', GPS_FIX, at(stopB));
+  await route('drive', GPS_FIX, at(stopB));
+  assert.equal(counter.n, 3, 'two more router calls, nothing stored');
+  assert.equal(cache.size, 1);
+});
+
+test('shouldKeepTheUpstreamErrorContractWhenTheRouterFailsFromANonStopOrigin', async () => {
+  const { cache, statements } = recordSql(async () => ({ ok: false, status: 500, text: async () => '' }));
+
+  const res = await route('foot', GPS_FIX, at(stopB));
+
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).code, 'UPSTREAM_ERROR');
+  assert.deepEqual(statements.filter((sql) => sql.includes('proxy_cache')), []);
+  assert.equal(cache.size, 0);
+});
+
+test('shouldRejectCoordinatesOutsideTheServiceAreaBeforeAnyRouterCallWhenTheOriginIsNotAStop', async () => {
+  const { statements } = recordSql(async () => assert.fail('must not reach the router'));
+
+  const res = await route('foot', '2.35000,48.85000', at(stopB));
+
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, 'OUTSIDE_SERVICE_AREA');
+  assert.deepEqual(statements, []);
+});
+
+test('shouldReportNoCacheStatusWhenARouteFromANonStopOriginIsAnswered', async () => {
+  recordSql(countingOsrm({ n: 0 }));
+
+  await route('foot', GPS_FIX, at(stopB));
+
+  const event = ev('proxy_request').at(-1);
+  assert.deepEqual([event.kind, event.status, event.cache_status], ['foot', 200, 'none']);
 });
