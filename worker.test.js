@@ -434,7 +434,7 @@ const panelOk = (counter) => async () => {
   return { ok: true, status: 200, text: async () => PANEL_HTML };
 };
 
-test('GET /api serves repeats from the isolate cache without touching the panel', async () => {
+test('shouldServeRepeatsFromTheIsolateCacheWithoutTouchingThePanelWhenAskingForTheSameStop', async () => {
   const c = { n: 0 };
   globalThis.fetch = panelOk(c);
   const a = await worker.fetch(new Request('http://x/api?stop=1111'));
@@ -445,7 +445,7 @@ test('GET /api serves repeats from the isolate cache without touching the panel'
   assert.deepEqual(await b.json(), { arrivals: [{ line: '1', destination: 'CORTADURA', minutes: 3 }] });
 });
 
-test('GET /api shares the cache across instances through Turso', async () => {
+test('shouldShareTheCacheAcrossInstancesWhenTursoIsAvailable', async () => {
   const c = { n: 0 };
   withTurso(panelOk(c));
   const first = await worker.fetch(new Request('http://x/api?stop=1116'), TURSO_ENV);
@@ -456,7 +456,7 @@ test('GET /api shares the cache across instances through Turso', async () => {
   assert.equal(c.n, 1);
 });
 
-test('GET /api single-flight: concurrent misses cause one panel fetch', async () => {
+test('shouldFetchThePanelOnceWhenConcurrentRequestsMissTheCache', async () => {
   const c = { n: 0 };
   withTurso(panelOk(c));
   const res = await Promise.all(
@@ -466,7 +466,7 @@ test('GET /api single-flight: concurrent misses cause one panel fetch', async ()
   assert.equal(c.n, 1);
 });
 
-test('GET /api returns 503 + retry-after when another instance holds the lock and no result appears', async () => {
+test('shouldReturn503WithRetryAfterWhenAnotherInstanceHoldsTheLockAndNoResultAppears', async () => {
   const c = { n: 0 };
   withTurso(panelOk(c), { slotBusy: true });
   const res = await worker.fetch(new Request('http://x/api?stop=1708'), TURSO_ENV);
@@ -475,7 +475,7 @@ test('GET /api returns 503 + retry-after when another instance holds the lock an
   assert.equal(c.n, 0);
 });
 
-test('GET /api releases the lock after an upstream failure so the next request retries', async () => {
+test('shouldReleaseTheLockWhenTheUpstreamFailsSoTheNextRequestRetries', async () => {
   let fail = true;
   let calls = 0;
   withTurso(async () => {
@@ -489,7 +489,7 @@ test('GET /api releases the lock after an upstream failure so the next request r
   assert.equal(calls, 2);
 });
 
-test('GET /api falls back to the panel directly when Turso is down (fail open)', async () => {
+test('shouldFallBackToThePanelDirectlyWhenTursoIsDown', async () => {
   let panel = 0;
   globalThis.fetch = async (url) => {
     if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
@@ -502,7 +502,7 @@ test('GET /api falls back to the panel directly when Turso is down (fail open)',
   assert.equal(panel, 1);
 });
 
-test('rate limiter answers 429 + retry-after on /api, /geocode and /route, keyed by client IP', async () => {
+test('shouldAnswer429WithRetryAfterWhenAClientIpExceedsTheLimitOnApiGeocodeOrRoute', async () => {
   globalThis.fetch = async () => assert.fail('must not reach any upstream when limited');
   const keys = [];
   const env = { RATE_LIMITER: { limit: async ({ key }) => (keys.push(key), { success: false }) } };
@@ -517,7 +517,7 @@ test('rate limiter answers 429 + retry-after on /api, /geocode and /route, keyed
   assert.equal((await worker.fetch(new Request('http://x/stops'), env)).status, 200);
 });
 
-test('rate limiter lets requests through when under the limit or when the binding errors', async () => {
+test('shouldLetRequestsThroughWhenUnderTheLimitOrTheBindingErrors', async () => {
   globalThis.fetch = panelOk({ n: 0 });
   const ok = { RATE_LIMITER: { limit: async () => ({ success: true }) } };
   assert.equal((await worker.fetch(new Request('http://x/api?stop=1215'), ok)).status, 200);
@@ -537,7 +537,7 @@ const gate = () => {
   return { p, open };
 };
 
-test('GET /api: a late finisher does not delete a lock re-acquired by someone else', async () => {
+test('shouldNotDeleteAReacquiredLockWhenALateFinisherReleases', async () => {
   const gA = gate();
   const gB = gate();
   let n = 0;
@@ -565,7 +565,7 @@ test('GET /api: a late finisher does not delete a lock re-acquired by someone el
   assert.equal(cache.slots.has(lock), false, 'B releases its own lock');
 });
 
-test('GET /api: waiters outlast a slow panel answer instead of returning 503 busy', async () => {
+test('shouldKeepWaitersWaitingWhenThePanelAnswersSlowlyInsteadOfReturning503', async () => {
   let n = 0;
   const cache = withTurso(async () => {
     n++;
@@ -582,7 +582,7 @@ test('GET /api: waiters outlast a slow panel answer instead of returning 503 bus
   assert.equal(n, 1);
 });
 
-test('GET /api coalesces concurrent requests in one isolate even without Turso (degraded mode)', async () => {
+test('shouldCoalesceConcurrentRequestsInOneIsolateWhenTursoIsNotConfigured', async () => {
   const c = { n: 0 };
   globalThis.fetch = panelOk(c);
   const res = await Promise.all(Array.from({ length: 8 }, () => worker.fetch(new Request('http://x/api?stop=1901'))));
@@ -591,7 +591,7 @@ test('GET /api coalesces concurrent requests in one isolate even without Turso (
   assert.equal(await res[7].text(), await res[0].text());
 });
 
-test('GET /api degraded mode (Turso down) coalesces and reports degraded', async () => {
+test('shouldCoalesceAndReportDegradedWhenTursoIsDown', async () => {
   let panel = 0;
   globalThis.fetch = async (url) => {
     if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
@@ -605,7 +605,7 @@ test('GET /api degraded mode (Turso down) coalesces and reports degraded', async
   assert.equal(panel, 1);
 });
 
-test('GET /api: panel near its timeout plus a slow cache publish still resolves 200 for owner and waiters', async () => {
+test('shouldResolve200ForOwnerAndWaitersWhenThePanelIsNearItsTimeoutAndTheCachePublishIsSlow', async () => {
   let n = 0;
   const cache = withTurso(
     async () => {
@@ -626,7 +626,7 @@ test('GET /api: panel near its timeout plus a slow cache publish still resolves 
   assert.equal(n, 1, 'only the owner reached the panel');
 });
 
-test('GET /api never clones or shares a Response between requests (Workers I/O isolation)', async () => {
+test('shouldNeverShareAResponseBetweenRequestsWhenServingFromCache', async () => {
   const realClone = Response.prototype.clone;
   Response.prototype.clone = () => assert.fail('a Response created by one request must not be reused by another');
   try {
@@ -643,7 +643,7 @@ test('GET /api never clones or shares a Response between requests (Workers I/O i
 
 // --- observability ---------------------------------------------------------
 
-test('metrics: panel_request counts real panel calls, not cache hits or coalesced requests', async () => {
+test('shouldCountOnlyRealPanelCallsWhenRecordingPanelRequests', async () => {
   const c = { n: 0 };
   globalThis.fetch = panelOk(c);
   await Promise.all(Array.from({ length: 4 }, () => worker.fetch(new Request('http://x/api?stop=1515'))));
@@ -661,7 +661,7 @@ test('metrics: panel_request counts real panel calls, not cache hits or coalesce
 
 const known4 = ['1710','1506','1523','1125'];
 
-test('metrics: panel failures are classified as timeout, transport, http or parse', async () => {
+test('shouldClassifyPanelFailuresAsTimeoutTransportHttpOrParseWhenRecordingMetrics', async () => {
   const cases = [
     [async () => { throw new DOMException('t', 'TimeoutError'); }, { error_type: 'timeout' }],
     [async () => { throw new TypeError('fetch failed'); }, { error_type: 'transport' }],
@@ -682,7 +682,7 @@ test('metrics: panel failures are classified as timeout, transport, http or pars
   }
 });
 
-test('metrics: stop ids are logged for known stops and unknown ones never reach the logs', async () => {
+test('shouldLogStopIdsOnlyWhenTheStopIsKnown', async () => {
   globalThis.fetch = panelOk({ n: 0 });
   await worker.fetch(new Request('http://x/api?stop=1515'));
   await worker.fetch(new Request('http://x/api?stop=zzz-not-a-stop'));
@@ -690,7 +690,7 @@ test('metrics: stop ids are logged for known stops and unknown ones never reach 
   assert.equal(lines.join('\n').includes('zzz-not-a-stop'), false);
 });
 
-test('metrics: Turso down is observable as arrivals_degraded and cache_status degraded', async () => {
+test('shouldReportArrivalsDegradedAndCacheStatusDegradedWhenTursoIsDown', async () => {
   globalThis.fetch = async (url) => {
     if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
     return { ok: true, status: 200, text: async () => PANEL_HTML };
@@ -701,7 +701,7 @@ test('metrics: Turso down is observable as arrivals_degraded and cache_status de
   assert.equal(ev('arrivals_request')[0].cache_status, 'degraded');
 });
 
-test('metrics: 503 busy and 429 are observable without leaking IPs or coordinates', async () => {
+test('shouldObserve503BusyAnd429WithoutLeakingIpsOrCoordinatesWhenRecordingMetrics', async () => {
   withTurso(async () => assert.fail('no upstream'), { slotBusy: true });
   const busy = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
   assert.equal(busy.status, 503);
@@ -719,7 +719,7 @@ test('metrics: 503 busy and 429 are observable without leaking IPs or coordinate
   }
 });
 
-test('metrics: proxy_request reports kind, status and cache_status for geocode and routes', async () => {
+test('shouldReportKindStatusAndCacheStatusWhenRecordingGeocodeAndRouteRequests', async () => {
   withTurso(async (url) => ({
     ok: true,
     status: 200,
@@ -747,7 +747,7 @@ function withTursoFailing(upstream, failOn) {
   return cache;
 }
 
-test('metrics: a failed Turso read is a turso_error (not an empty cache) and the request still succeeds', async () => {
+test('shouldRecordATursoErrorAndStillSucceedWhenAReadFails', async () => {
   withTursoFailing(panelOk({ n: 0 }), (sql) => sql.startsWith('SELECT'));
   const res = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
   assert.equal(res.status, 200);
@@ -755,7 +755,7 @@ test('metrics: a failed Turso read is a turso_error (not an empty cache) and the
   assert.equal(ev('arrivals_degraded').length, 0);
 });
 
-test('metrics: a failed publish to proxy_cache is a turso_error even though the answer is a miss', async () => {
+test('shouldRecordATursoErrorWhenPublishingToTheProxyCacheFails', async () => {
   withTursoFailing(panelOk({ n: 0 }), (sql) => sql.includes('INSERT OR REPLACE INTO proxy_cache'));
   const res = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
   assert.equal(res.status, 200);
@@ -763,14 +763,14 @@ test('metrics: a failed publish to proxy_cache is a turso_error even though the 
   assert.deepEqual(ev('turso_error').map((e) => e.op), ['publish']);
 });
 
-test('metrics: a failed lock release is a turso_error', async () => {
+test('shouldRecordATursoErrorWhenALockReleaseFails', async () => {
   withTursoFailing(panelOk({ n: 0 }), (sql) => sql.startsWith('DELETE FROM proxy_slot'));
   const res = await worker.fetch(new Request('http://x/api?stop=1515'), TURSO_ENV);
   assert.equal(res.status, 200);
   assert.deepEqual(ev('turso_error').map((e) => e.op), ['release']);
 });
 
-test('metrics: Turso fully down produces one read error and one degraded event, not a flood', async () => {
+test('shouldProduceOneReadErrorAndOneDegradedEventWhenTursoIsFullyDown', async () => {
   globalThis.fetch = async (url) => {
     if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
     return { ok: true, status: 200, text: async () => PANEL_HTML };
@@ -780,7 +780,7 @@ test('metrics: Turso fully down produces one read error and one degraded event, 
   assert.deepEqual(ev('arrivals_degraded').map((e) => e.op), ['lock']);
 });
 
-test('metrics: a panel body that fails to read is classified body_read and answered 502, not thrown', async () => {
+test('shouldClassifyBodyReadAndAnswer502WhenThePanelBodyFailsToRead', async () => {
   globalThis.fetch = async () => ({
     ok: true,
     status: 200,
@@ -795,7 +795,7 @@ test('metrics: a panel body that fails to read is classified body_read and answe
   assert.equal(ev('arrivals_request')[0].status, 502);
 });
 
-test('metrics: events are logged as objects, never as pre-serialized JSON strings', async () => {
+test('shouldLogEventsAsObjectsWhenRecordingMetrics', async () => {
   globalThis.fetch = panelOk({ n: 0 });
   await worker.fetch(new Request('http://x/api?stop=1515'));
   assert.ok(rawArgs.length >= 2, 'events were logged');
@@ -814,7 +814,7 @@ test('shouldKeyIpv6ByDeclared64WhenAddressIsCompressed', () => {
   assert.equal(rateKey('203.0.113.9'), '203.0.113.9');
 });
 
-test('shouldGiveEquivalentIpv6FormsOneKeyAndSplitAcrossSlash64', () => {
+test('shouldGiveEquivalentIpv6FormsOneKeyAndSplitAcrossSlash64WhenKeyingTheRateLimit', () => {
   const k = rateKey('2a0c:5a80:1:2::1');
   assert.equal(rateKey('2A0C:5A80:0001:0002:0000:0000:0000:0001'), k);
   assert.equal(rateKey('2a0c:5a80:1:2:ffff:ffff:ffff:ffff'), k);
@@ -837,7 +837,7 @@ test('shouldNotConsumeRateLimitWhenMethodIsRejected', async () => {
   }
 });
 
-test('Nominatim hits outside lat/lon range or beyond the cap are rejected and never cached', async () => {
+test('shouldRejectAndNeverCacheWhenNominatimHitsAreOutOfRangeOrBeyondTheCap', async () => {
   const hit = (lat, lon) => ({ lat: String(lat), lon: String(lon) });
   const bad = [[hit(91, -6.3)], [hit(36.5, -181)], [{ lat: null, lon: '' }], [{ lat: ' ', lon: '-6.3' }], [{ lat: [], lon: true }], Array.from({ length: 11 }, () => hit(36.5, -6.3))];
   for (const body of bad) {
@@ -850,7 +850,7 @@ test('Nominatim hits outside lat/lon range or beyond the cap are rejected and ne
   assert.equal((await worker.fetch(new Request('http://x/geocode?q=plaza'), TURSO_ENV)).status, 200);
 });
 
-test('/proxy-health is GET only', async () => {
+test('shouldRejectOtherMethodsWhenRequestingProxyHealth', async () => {
   for (const method of ['POST', 'HEAD']) {
     const res = await worker.fetch(new Request('http://x/proxy-health', { method }), TURSO_ENV);
     assert.equal(res.status, 405, method);
