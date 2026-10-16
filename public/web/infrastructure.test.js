@@ -76,7 +76,7 @@ test('shouldPassAnAbortSignalAndReturnServiceFailureWhenTheRequestTimesOut', asy
   assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
 });
 
-test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLine', async () => {
+test('shouldReportServiceFailureWhenTheRouteIsShorterThanTheStraightLine', async () => {
   const fakeFetch = async () => ({
     ok: true,
     json: async () => ({
@@ -96,7 +96,7 @@ test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLine', async () => {
     { lat: 36.525, lon: -6.285 },
   );
 
-  assert.equal(route, null);
+  assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
 });
 
 test('shouldStitchHopCoordinatesWithoutDuplicateJunctionsWhenRoutingABus', async () => {
