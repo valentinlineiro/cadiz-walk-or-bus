@@ -926,6 +926,11 @@ test('shouldAnswerUpstreamErrorWhenTheProviderOrThePanelAnswersWith5xx', async (
   await assertError(await worker.fetch(new Request('http://x/api?stop=1215'), TURSO_ENV), { status: 502, code: 'UPSTREAM_ERROR' });
 });
 
+test('shouldAnswerUpstreamErrorWhenThePanelAnswersWithAnyNonOkStatus', async () => {
+  withTurso(async () => ({ ok: false, status: 404, text: async () => '' }));
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1215'), TURSO_ENV), { status: 502, code: 'UPSTREAM_ERROR' });
+});
+
 test('shouldAnswerUpstreamInvalidResponseWhenTheBodyIsMalformedOrHasTheWrongShape', async () => {
   withTurso(async () => ({ ok: true, status: 200, text: async () => 'not json' }));
   await assertError(await fetchRoute(), { status: 502, code: 'UPSTREAM_INVALID_RESPONSE' });
