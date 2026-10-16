@@ -338,10 +338,11 @@ export function heroCardHTML(cand) {
   }
 
   const totalMins = cand.totalMinutes ?? cand.exactJourney?.totalMinutes ?? cand.estimatedMinutes;
+  const approx = cand.dataQuality === 'degraded' ? '~' : ''; // a straight-line estimate, not a routed time
   return `
     <div class="decision-card walk">
       <div class="decision-mode"><span class="icon">${ICON.walk}</span>ANDAR</div>
-      <div class="decision-wait">${totalMins}<span class="unit">′</span></div>
+      <div class="decision-wait">${approx}${totalMins}<span class="unit">′</span></div>
       <div class="decision-line">Ruta directa a pie</div>
       <button type="button" class="start-journey">Iniciar trayecto</button>
     </div>

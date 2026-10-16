@@ -38,9 +38,11 @@ export class OsrmRoutingAdapter {
         if (!Number.isFinite(route.distance) || !Number.isFinite(route.duration)) {
             return { status: 'service_failure', coordinates: [] };
         }
-        // Reject degenerate routes shorter than straight line
+        // A route more than 5 % shorter than the straight line is physically impossible (the router
+        // snapped the endpoints badly): unusable data, not "no route". Report it as a service failure so
+        // the walking candidate survives as a degraded estimate instead of vanishing.
         if (route.distance < haversineMeters(from.lat, from.lon, to.lat, to.lon) * 0.95) {
-            return null;
+            return { status: 'service_failure', coordinates: [] };
         }
         const speed = route.distance / route.duration;
         const minutes = (speed > 3.5 || speed < 0.5)

@@ -437,7 +437,7 @@ test('shouldReturnMinutesAndLatLonCoordinatesWhenRoutingOnFoot', async () => {
   ]);
 });
 
-test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLineBetweenItsEndpoints', async () => {
+test('shouldReportServiceFailureWhenTheRouteIsShorterThanTheStraightLineBetweenItsEndpoints', async () => {
   // 36.52,-6.28 -> 36.53,-6.29 is ~1426m apart as the crow flies; a "route"
   // claiming 300m is physically impossible (e.g. a corrupted/degenerate
   // response cutting straight through something no one can walk across).
@@ -445,7 +445,7 @@ test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLineBetweenItsEndpoints'
     ok: true,
     json: async () => ({ routes: [{ duration: 60, distance: 300, geometry: { coordinates: [] } }] }),
   });
-  assert.equal(await walkRoute(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), null);
+  assert.deepEqual(await walkRoute(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), { status: 'service_failure', coordinates: [] });
 });
 
 test('shouldRouteEachHopIndependentlyAndStitchWithoutDuplicateJunctionsWhenRoutingABus', async () => {
