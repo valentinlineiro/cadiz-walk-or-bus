@@ -103,7 +103,7 @@ test('shouldUseCacheFirstOnTheShellAndNeverInterceptApiWhenServiceWorkerHandlesF
 // FRONTIER D: GPS ACCURACY AND POSITION REASONING
 // ============================================================================
 
-test('shouldCheckCadizContainmentAndCompareGpsAccuracyToThreshold', () => {
+test('shouldCompareGpsAccuracyToThresholdWhenCheckingCadizContainment', () => {
   // Test matrix of requested GPS cases
   const cadizCenter = { lat: 36.5271, lon: -6.2885 }; // Inside Cádiz
   const sanFernando = { lat: 36.4650, lon: -6.1980 }; // Outside Cádiz (San Fernando)
