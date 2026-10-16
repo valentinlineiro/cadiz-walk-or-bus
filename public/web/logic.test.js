@@ -392,7 +392,7 @@ test('shouldMarkWaitGrayWithoutDataAndAmberWithMinutesAndAddAHaloWhenFocused', (
   assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], true), { label: '4′', color: 'amber', scale: 1.25, halo: true });
 });
 
-test('shouldParseAndFormatUpToTheLimitWhenSearchingDestinations', async () => {
+test('shouldParseAndFormatSuggestionsWhenSearchingDestinations', async () => {
   const hits = [
     { name: 'Hospital Puerta del Mar', display_name: 'Hospital Puerta del Mar, Avda Ana de Viya, Cádiz', lat: '36.505', lon: '-6.278' },
     { display_name: 'Calle Hospital de Mujeres, Cádiz', lat: '36.531', lon: '-6.299' },

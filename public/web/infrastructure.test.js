@@ -884,7 +884,7 @@ test('shouldBoundTheLookaheadToSixtyMinutesWhenListingScheduledArrivals', async 
   }]);
 });
 
-test('shouldApplyCalendarExceptionsAndKeepPostMidnightTimesWithinLookaheadWhenListingArrivals', async () => {
+test('shouldKeepPostMidnightTimesWithinTheLookaheadWhenListingArrivals', async () => {
   // At 23:30 on 2026-09-17: next departure is at 25:10 (100 min away, > 3600s) -> excluded
   const beforeMidnightFar = new GtfsTransitAdapter(gtfsSnapshot, {
     now: () => new Date('2026-09-17T23:30:00+02:00'),
