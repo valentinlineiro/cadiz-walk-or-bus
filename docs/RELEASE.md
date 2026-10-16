@@ -211,3 +211,11 @@ Tests are named `shouldXWhenY`. The architecture gate (`scripts/test-names.mjs`)
 whose name does not follow it, except those listed in `scripts/test-names.baseline.json` (tests that
 predate the rule). The baseline only shrinks: rename a test and remove its entry, which the gate
 also demands (`node scripts/test-names.mjs --write-baseline` regenerates it after renames).
+
+## Service worker E2E
+
+`npm run test:e2e` drives real Chromium (Playwright) against a local server that serves `public/`
+with `Cache-Control: max-age=0, must-revalidate`: the shell is served Cache-First even when the
+network answer changes, and `/api` reaches the server and is never stored by the shell cache. No
+wrangler, secrets or external network. First run: `npx playwright install chromium`. It runs in its
+own CI job («Service worker E2E») and is not part of `release:check`.
