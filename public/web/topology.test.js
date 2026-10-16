@@ -208,7 +208,7 @@ test('shouldSkipACloserStopWhenItOnlyRepeatsACoveredLine', () => {
   assert.deepEqual(picked.map((s) => s.stop), ['s1', 's3']);
 });
 
-test('shouldFallBackToNearestStopsWhenEveryLineIsCoveredOrUnknown', () => {
+test('shouldRetainStopsWithoutKnownLinesWhenDiversifyingByLine', () => {
   const lines = { A: { X: ['s1'] } };
   const sorted = [{ stop: 's1' }, { stop: 's1b' }, { stop: 's2' }];
   const picked = diversifyByLine(sorted, lines, 3);
