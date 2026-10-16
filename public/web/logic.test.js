@@ -73,7 +73,7 @@ const busRoute = async (fetchImpl, stopCoords) => {
   return route?.coordinates ?? null;
 };
 
-test('domain constants: values match urban transit kinematics and planning defaults', () => {
+test('shouldMatchTheUrbanKinematicsAndPlanningDefaultsWhenConstantsAreRead', () => {
   assert.equal(WALK_METERS_PER_MINUTE, 80);
   assert.equal(BUS_METERS_PER_MINUTE, 250);
   assert.deepEqual(DOMAIN_PLANNING_POLICY, {
@@ -87,7 +87,7 @@ test('domain constants: values match urban transit kinematics and planning defau
   });
 });
 
-test('domain identity: JourneyIdentity is a structured Value Object', () => {
+test('shouldBuildStructuredValueObjectsWhenCreatingJourneyIdentities', () => {
   // Constructors return structured objects, not strings
   const walk = createWalkIdentity();
   assert.deepEqual(walk, { mode: 'walk', variant: 'direct' });
@@ -138,7 +138,7 @@ test('domain identity: JourneyIdentity is a structured Value Object', () => {
   assert.equal(isSameIdentity(createWalkIdentity(), createBusIdentity('1', '10', '20')), false);
 });
 
-test('domain last-mile: computes routed and degraded last-mile durations with explicit flags', () => {
+test('shouldFlagDegradedLastMileUnlessTheRouteHasFiniteMinutesWhenComputingIt', () => {
   // exact route finite
   const exact = domainComputeLastMile({ minutes: 6, coordinates: [] }, 600);
   assert.deepEqual(exact, { lastMileMinutes: 6, lastMileDegraded: false });
@@ -160,7 +160,7 @@ test('domain last-mile: computes routed and degraded last-mile durations with ex
   assert.deepEqual(fastPace, { lastMileMinutes: 5, lastMileDegraded: true });
 });
 
-test('domain diversity: pure rules classify divergence and filter diverse alternatives', () => {
+test('shouldClassifyDivergenceAndFilterDiverseAlternativesWhenApplyingDiversityRules', () => {
   // Modal divergence — classifyDivergence accepts serialized strings (persistence boundary)
   assert.equal(
     classifyDivergence({ mode: 'bus', identity: 'bus:1:10:20' }, { kind: 'walk', identity: 'walk:direct' }),
@@ -220,7 +220,7 @@ test('domain diversity: pure rules classify divergence and filter diverse altern
   assert.equal(domainIsStructurallyDiverse(candEstimateWalk, heroExactWalk), true);
 });
 
-test('domain models: conform to structured Decision, EvaluatedJourney, and Candidate contracts', () => {
+test('shouldConformToTheDecisionEvaluatedJourneyAndCandidateContractsWhenBuildingDomainModels', () => {
   const candidate = {
     identity: createBusIdentity('1', '10', '20'),
     mode: 'bus',
@@ -297,7 +297,7 @@ test('domain models: conform to structured Decision, EvaluatedJourney, and Candi
   assert.equal('candidate' in evaluated, false);
 });
 
-test('nearestStops returns 3 closest with dist in meters', () => {
+test('shouldReturnTheThreeClosestStopsWithDistanceInMetersWhenFindingNearestStops', () => {
   const stops = [
     { name: 'FAR', number: '1', stop: '1', lat: 36.6, lon: -6.2 },
     { name: 'NEAR', number: '2', stop: '2', lat: 36.5272, lon: -6.2886 },
@@ -309,14 +309,14 @@ test('nearestStops returns 3 closest with dist in meters', () => {
   assert.ok(n[0].dist < 50);
 });
 
-test('isInCadiz returns true for Cádiz landmarks inside service polygon', () => {
+test('shouldReturnTrueWhenAPointIsInsideTheServicePolygon', () => {
   assert.equal(isInCadiz(36.5271, -6.2885), true, 'Cádiz center');
   assert.equal(isInCadiz(36.5350, -6.2970), true, 'Plaza Mina');
   assert.equal(isInCadiz(36.5280, -6.3180), true, 'Castillo San Sebastián');
   assert.equal(isInCadiz(36.4950, -6.2700), true, 'Cortadura');
 });
 
-test('isInCadiz returns false for locations outside service polygon', () => {
+test('shouldReturnFalseWhenAPointIsOutsideTheServicePolygon', () => {
   assert.equal(isInCadiz(40.4168, -3.7038), false, 'Madrid');
   assert.equal(isInCadiz(36.4650, -6.1980), false, 'San Fernando Plaza del Rey');
   assert.equal(isInCadiz(36.5280, -6.1900), false, 'Puerto Real');
@@ -326,7 +326,7 @@ test('isInCadiz returns false for locations outside service polygon', () => {
   assert.equal(isInCadiz(36.5271, -6.351), false, 'Ocean west of Cádiz');
 });
 
-test('transition follows the locating→ready→deciding flow', () => {
+test('shouldFollowTheLocatingReadyDecidingFlowWhenTransitioningTheAppState', () => {
   assert.equal(transition('LOCATING', 'LOCATED'), 'LOADING_STOPS');
   assert.equal(transition('LOADING_STOPS', 'STOPS_LOADED'), 'READY');
   assert.equal(transition('READY', 'SEARCH'), 'GEOCODING');
@@ -338,38 +338,38 @@ test('transition follows the locating→ready→deciding flow', () => {
   assert.equal(transition('ROUTING', 'FAILED'), 'ERROR');
 });
 
-test('transition: OUT_OF_CADIZ from LOCATING goes to READY', () => {
+test('shouldGoToReadyWhenOutOfCadizHappensWhileLocating', () => {
   assert.equal(transition('LOCATING', 'OUT_OF_CADIZ'), 'READY');
 });
 
-test('getArrivals exposes panel outage to the resilient infrastructure boundary', async () => {
+test('shouldRejectWithTheStatusWhenThePanelOutageReachesTheResilientBoundary', async () => {
   const f = async () => ({ ok: false, status: 502 });
   await assert.rejects(async () => getArrivals(f, '9905'), /arrivals 502/);
 });
 
-test('geocode bounds to Cádiz and returns null on no hit', async () => {
+test('shouldBoundTheQueryToCadizAndReturnNullWhenGeocodingFindsNoHit', async () => {
   let url = '';
   const f = async (u) => { url = String(u); return { ok: true, json: async () => [] }; };
   assert.equal(await geocode(f, 'Plaza Mina'), null);
   assert.match(url, /bounded=1/);
 });
 
-test('walkMinutes rounds OSRM duration up', async () => {
+test('shouldRoundTheOsrmDurationUpWhenComputingWalkMinutes', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 1120, distance: 1500 }] }) });
   assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 19);
 });
 
-test('walkMinutes estimates from distance at the domain pace (80 m/min, rounded up) when OSRM duration is impossibly fast', async () => {
+test('shouldEstimateFromDistanceAtTheDomainPaceWhenOsrmDurationIsImpossiblyFast', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [{ duration: 522, distance: 3373 }] }) });
   assert.equal(await walkMinutes(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), 43);
 });
 
-test('walkMinutes is null when no route', async () => {
+test('shouldReturnNullWhenOsrmFindsNoRoute', async () => {
   const f = async () => ({ ok: true, json: async () => ({ routes: [] }) });
   assert.equal(await walkMinutes(f, { lat: 1, lon: 2 }, { lat: 3, lon: 4 }), null);
 });
 
-test('regression: map must not highlight a stop whose only bus runs the opposite direction (Santa María del Mar 1106 -> Plaza Mina)', () => {
+test('shouldNotHighlightAStopWhenItsOnlyBusRunsTheOppositeDirection', () => {
   const destMina = { lat: 36.5338, lon: -6.2974 };
   const arrivals = [{ line: '1', destination: 'CORTADURA', minutes: 1 }];
   const resolveAlight = (arr) => findAlightStop({
@@ -386,13 +386,13 @@ test('regression: map must not highlight a stop whose only bus runs the opposite
   assert.deepEqual(pinStyle(eligible, true), { label: '—', color: 'gray', scale: 1, halo: false });
 });
 
-test('pinStyle marks wait gray when no data, amber with minutes, halo when focused', () => {
+test('shouldMarkWaitGrayWithoutDataAndAmberWithMinutesAndAddAHaloWhenFocused', () => {
   assert.deepEqual(pinStyle([], false), { label: '—', color: 'gray', scale: 1, halo: false });
   assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], false), { label: '4′', color: 'amber', scale: 1, halo: false });
   assert.deepEqual(pinStyle([{ line: '1', destination: 'CORTADURA', minutes: 4 }], true), { label: '4′', color: 'amber', scale: 1.25, halo: true });
 });
 
-test('searchDestinations parses and formats up to limit suggestions', async () => {
+test('shouldParseAndFormatUpToTheLimitWhenSearchingDestinations', async () => {
   const hits = [
     { name: 'Hospital Puerta del Mar', display_name: 'Hospital Puerta del Mar, Avda Ana de Viya, Cádiz', lat: '36.505', lon: '-6.278' },
     { display_name: 'Calle Hospital de Mujeres, Cádiz', lat: '36.531', lon: '-6.299' },
@@ -409,7 +409,7 @@ test('shouldRejectSearchWhenProviderAnswersWithServerError', async () => {
   await assert.rejects(searchDestinations(f, 'Plaza', 3), { name: 'GeocodingUnavailableError' });
 });
 
-test('walkRoute returns minutes and coordinates converted to [lat, lon]', async () => {
+test('shouldReturnMinutesAndLatLonCoordinatesWhenRoutingOnFoot', async () => {
   const f = async () => ({
     ok: true,
     json: async () => ({
@@ -435,7 +435,7 @@ test('walkRoute returns minutes and coordinates converted to [lat, lon]', async 
   ]);
 });
 
-test('walkRoute rejects a route shorter than the straight-line distance between its endpoints', async () => {
+test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLineBetweenItsEndpoints', async () => {
   // 36.52,-6.28 -> 36.53,-6.29 is ~1426m apart as the crow flies; a "route"
   // claiming 300m is physically impossible (e.g. a corrupted/degenerate
   // response cutting straight through something no one can walk across).
@@ -446,7 +446,7 @@ test('walkRoute rejects a route shorter than the straight-line distance between 
   assert.equal(await walkRoute(f, { lat: 36.52, lon: -6.28 }, { lat: 36.53, lon: -6.29 }), null);
 });
 
-test('busRoute routes each stop-to-stop hop independently and stitches them without duplicate junctions', async () => {
+test('shouldRouteEachHopIndependentlyAndStitchWithoutDuplicateJunctionsWhenRoutingABus', async () => {
   const f = async (url) => ({
     ok: true,
     json: async () => ({
@@ -468,7 +468,7 @@ test('busRoute routes each stop-to-stop hop independently and stitches them with
   ]);
 });
 
-test('busRoute falls back to a straight line only for the hop that fails to route', async () => {
+test('shouldFallBackToAStraightLineOnlyForTheHopThatFailsWhenRoutingABus', async () => {
   const f = async (url) => {
     if (url.includes('-6.285,36.525;-6.29,36.53')) return { ok: false, status: 500 };
     return { ok: true, json: async () => ({ routes: [{ distance: 2000, geometry: { coordinates: [[-6.28, 36.52], [-6.2825, 36.5225], [-6.285, 36.525]] } }] }) };
