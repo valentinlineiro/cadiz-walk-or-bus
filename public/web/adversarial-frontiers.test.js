@@ -85,7 +85,7 @@ test('shouldListAllRequiredAssetsAndPassTheGateWhenTheServiceWorkerShellIsChecke
   assert.deepEqual(problems, [], 'All SHELL_URLS in sw.js must exist on disk and GTFS_FEED_VERSION must match');
 });
 
-test('shouldUseCacheFirstOnTheShellAndNeverInterceptApiWhenServiceWorkerHandlesFetches', () => {
+test('shouldKeepLiveApiEndpointsOutOfTheShellAndIncludeGtfsSnapshotWhenCheckingServiceWorkerShell', () => {
   const swSource = readFileSync(join(root, 'public/sw.js'), 'utf8');
 
   // Verify that live API endpoints are NOT in SHELL_URLS
