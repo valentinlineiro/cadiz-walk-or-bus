@@ -23,6 +23,9 @@ import {
 
 let state = 'LOCATING';
 let me = null;
+// Where `me` really comes from, set together with it: the result must never pass a city-centre
+// calculation off as the user's GPS position.
+let originKind = 'city-center';
 let stops = [];
 let lines = null;
 let focused = null;
@@ -34,6 +37,20 @@ let lastWalkRoute = null;
 let lastNear = [];
 let currentPlanningSession = null;
 const CADIZ = { lat: 36.5271, lon: -6.2885 };
+
+/** The origin to plan from and its provenance: the GPS fix only when it is inside Cádiz. */
+export function resolveOrigin(coords) {
+  if (coords && isPointInCadiz(coords.latitude, coords.longitude)) {
+    return { origin: { lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy }, originKind: 'gps' };
+  }
+  return { origin: { ...CADIZ }, originKind: 'city-center' };
+}
+
+export function originNoteHTML(kind) {
+  return kind === 'city-center'
+    ? '<div class="decision-note origin-note">Calculado desde el centro de Cádiz</div>'
+    : '';
+}
 
 
 // Inline SVG glyphs — no emoji as primary iconography.
@@ -177,9 +194,10 @@ export function errorCardHTML(query, customMessage) {
 
 // Shown when no nearby stop returned live OR scheduled data. The walking time is information,
 // never a verdict: with no transit data we cannot say the bus is not better.
-export function noTransitDataCardHTML(walkMinutes) {
+export function noTransitDataCardHTML(walkMinutes, originKind) {
   const walk = typeof walkMinutes === 'number' ? `<div class="decision-fact">Andando: ${Math.round(walkMinutes)}′</div>` : '';
   return `
+    ${originNoteHTML(originKind)}
     <div class="decision-card no-data">
       <div class="decision-mode">SIN DATOS DE HORARIOS</div>
       <div class="decision-line">Ahora mismo no tenemos llegadas ni horarios de las paradas cercanas, así que no podemos comparar con el bus.</div>
@@ -327,7 +345,7 @@ export function planningCardsHTML(selectedCandidates, activeIndex = 0, context =
   }
   const heroIndex = selectedCandidates[activeIndex] ? activeIndex : 0;
   const hero = selectedCandidates[heroIndex];
-  const heroHTML = decisionCardHTML(hero);
+  const heroHTML = originNoteHTML(context.originKind) + decisionCardHTML(hero);
   const explanation = comparisonExplanation(hero, selectedCandidates, context.walkMinutes);
   const explanationHTML = explanation
     ? `<div class="decision-explanation">${escapeHTML(explanation)}</div>`
@@ -739,10 +757,6 @@ async function routeToDestination(dest) {
     showSearchError(dest.label, 'El destino seleccionado está fuera del área de servicio de Cádiz.');
     return;
   }
-  // If user origin is outside Cádiz, fallback to CADIZ center for manual exploration
-  if (!isPointInCadiz(me.lat, me.lon)) {
-    me = { ...CADIZ };
-  }
   const id = ++requestId;
   destCoords = { lat: dest.lat, lon: dest.lon };
   destLabel = dest.label;
@@ -793,7 +807,7 @@ async function routeToDestination(dest) {
     arrivalsByStop = new Map();
     const box = document.getElementById('decision');
     if (box) {
-      box.innerHTML = noTransitDataCardHTML(decision.walkMinutes);
+      box.innerHTML = noTransitDataCardHTML(decision.walkMinutes, originKind);
       box.classList.remove('hidden');
     }
     applyCandidateToMap(decision.hero);
@@ -850,7 +864,7 @@ async function routeToDestination(dest) {
   const promote = (cand) => {
     const idx = candidatesForUI.findIndex((c) => isSameIdentity(c.identity, cand.identity));
     if (idx !== -1) {
-      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
+      renderDecisionWithAlternatives(candidatesForUI, idx, onPromote, { walkMinutes: decision.walkMinutes, originKind }, onStart);
       onPromote(candidatesForUI[idx]);
     }
   };
@@ -860,7 +874,7 @@ async function routeToDestination(dest) {
     onPromote: promote,
   };
 
-  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes }, onStart);
+  renderDecisionWithAlternatives(candidatesForUI, 0, onPromote, { walkMinutes: decision.walkMinutes, originKind }, onStart);
   if (decision.transitData === 'partial' && winningHero.mode === 'walk') {
     document.getElementById('decision')?.insertAdjacentHTML('beforeend', partialTransitDataNoteHTML());
   }
@@ -956,6 +970,7 @@ export async function loadScenario(name) {
   }
 
   me = snapshot.origin;
+  originKind = 'gps'; // a scenario fixture states where the user is
   destCoords = { lat: snapshot.destination.lat, lon: snapshot.destination.lon };
   destLabel = snapshot.destination.label;
   setSheetState('VERDICT');
@@ -1159,7 +1174,7 @@ function locate() {
     settled = true;
     clearTimeout(autoFallbackId);
     skipBtn?.classList.add('hidden');
-    me = { ...CADIZ };
+    ({ origin: me, originKind } = resolveOrigin(null));
     setState('GPS_DENIED', 'Sin GPS: explora Cádiz manualmente');
     showMe(me.lat, me.lon);
     Promise.all([cachedTransitPort.getStops(), cachedTransitPort.getLines()])
@@ -1184,8 +1199,10 @@ function locate() {
       clearTimeout(autoFallbackId);
       skipBtn?.classList.add('hidden');
       const { latitude, longitude, accuracy } = pos.coords;
-      if (!isPointInCadiz(latitude, longitude)) {
-        me = { ...CADIZ };
+      const resolved = resolveOrigin(pos.coords);
+      originKind = resolved.originKind;
+      if (originKind === 'city-center') {
+        me = resolved.origin;
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(latitude, longitude, accuracy);
         Promise.all([cachedTransitPort.getStops(), cachedTransitPort.getLines()])
@@ -1197,7 +1214,7 @@ function locate() {
           .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
         return;
       }
-      me = { lat: latitude, lon: longitude, accuracy };
+      me = resolved.origin;
       const isLowAccuracy = typeof accuracy === 'number' && accuracy > 1500;
       const statusMsg = isLowAccuracy
         ? `Ubicación aproximada (±${Math.round(accuracy / 1000)} km)`
