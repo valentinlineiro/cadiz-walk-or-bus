@@ -1061,7 +1061,7 @@ test('shouldPreserveAndUpdateTheStructuredChoiceWhenAppendingLogEntries', () => 
   assert.equal(log[0].choice.deltaMinutes, -2);
 });
 
-test('journey-log: getRecentDestinations groups by destination and ranks by recency desc', () => {
+test('shouldGroupByDestinationAndRankByRecencyWhenListingRecentDestinations', () => {
   const store = new Map();
   const mockStorage = {
     getItem: (k) => store.get(k) ?? null,
@@ -1153,7 +1153,7 @@ test('journey-log: getRecentDestinations groups by destination and ranks by rece
   assert.equal(recent2[1].label, 'Destino A');
 });
 
-test('planner: createWalkCandidate produces normalized candidate', () => {
+test('shouldProduceANormalizedWalkCandidateWhenCreatingOne', () => {
   const walk = createWalkCandidate({
     walkMinutes: 18,
     origin: { lat: 36.52, lon: -6.28 },
@@ -1167,7 +1167,7 @@ test('planner: createWalkCandidate produces normalized candidate', () => {
   assert.deepEqual(walk.estimate, { walkToStopMinutes: 0, waitMinutes: 0, rideMinutes: 0, lastMileMinutes: 18 });
 });
 
-test('planner: selectCandidates is mode-agnostic: selects minimum as primary and alternatives within similarity delta', () => {
+test('shouldSelectTheMinimumAsPrimaryAndAlternativesWithinTheSimilarityDeltaWhenSelectingCandidatesOfAnyMode', () => {
   // Case 1: Bus is primary (14m), Walk (18m) and another Bus (16m) are alternatives within 5m
   const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 14 };
   const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 16 };
@@ -1191,7 +1191,7 @@ test('planner: selectCandidates is mode-agnostic: selects minimum as primary and
   assert.equal(isSameIdentity(res2.alternatives[0].identity, createBusIdentity('1', 'A', 'X')), true);
 });
 
-test('planner: selectCandidates deduplicates identical structural identities, keeping the fastest', () => {
+test('shouldKeepTheFastestWhenCandidatesShareAStructuralIdentity', () => {
   // Two buses on same line, same boarding stop, same alight stop (e.g. 1st bus vs 2nd bus)
   const early = { identity: createBusIdentity('1', '1106', '1204'), mode: 'bus', estimatedMinutes: 14 };
   const later = { identity: createBusIdentity('1', '1106', '1204'), mode: 'bus', estimatedMinutes: 18 };
@@ -1204,7 +1204,7 @@ test('planner: selectCandidates deduplicates identical structural identities, ke
   assert.equal(isSameIdentity(res.alternatives[0].identity, createBusIdentity('2', '1106', '1205')), true);
 });
 
-test('planner: selectCandidates respects custom policy overrides', () => {
+test('shouldHonourCustomSimilarityDeltaAndMaxAlternativesWhenSelectingCandidates', () => {
   const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 10 };
   const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 13 };
   const c3 = { identity: createBusIdentity('3', 'C', 'Z'), mode: 'bus', estimatedMinutes: 14 };
@@ -1222,7 +1222,7 @@ test('planner: selectCandidates respects custom policy overrides', () => {
   assert.equal(isSameIdentity(resLimit.alternatives[0].identity, createBusIdentity('2', 'B', 'Y')), true);
 });
 
-test('planner: selectCandidates enforces maxCandidates as a hard budget on total candidates', () => {
+test('shouldEnforceMaxCandidatesAsAHardBudgetWhenSelectingCandidates', () => {
   const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 10 };
   const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 11 };
   const c3 = { identity: createBusIdentity('3', 'C', 'Z'), mode: 'bus', estimatedMinutes: 12 };
@@ -1245,7 +1245,7 @@ test('planner: selectCandidates enforces maxCandidates as a hard budget on total
   assert.deepEqual(res0.alternatives, []);
 });
 
-test('planner: two-stage selection re-ranks candidates after exact routing refinement', () => {
+test('shouldReRankAndPruneBeyondTheDeltaWhenSelectingAgainAfterExactRouting', () => {
   // Stage 1 (cheap pre-ranking):
   // Bus L1 is estimated at 15m (primary), Bus L2 at 16m, Walk at 18m
   const bus1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 15 };
@@ -1287,7 +1287,7 @@ test('planner: two-stage selection re-ranks candidates after exact routing refin
   assert.equal(isSameIdentity(prunedSelection.alternatives[0].identity, createWalkIdentity()), true);
 });
 
-test('planner: isStructurallyDiverse validates modal, line, and access diversity against Hero', () => {
+test('shouldValidateModalLineAndAccessDiversityAgainstTheHeroWhenCheckingStructuralDiversity', () => {
   const heroBus = {
     identity: 'bus:1:1106:1204',
     mode: 'bus',
@@ -1383,7 +1383,7 @@ test('planner: isStructurallyDiverse validates modal, line, and access diversity
   assert.equal(isStructurallyDiverse(heroBus, null), false);
 });
 
-test('planner: isStructurallyDiverse respects exactJourney walk-to-stop precedence over estimate', () => {
+test('shouldPreferTheExactWalkToStopOverTheEstimateWhenCheckingStructuralDiversity', () => {
   // Hero: estimate is 2m, but exactJourney walkToStopRoute is 6m
   const heroBus = {
     identity: createBusIdentity('1', '1106', '1204'),
@@ -1431,7 +1431,7 @@ test('planner: isStructurallyDiverse respects exactJourney walk-to-stop preceden
   assert.equal(isStructurallyDiverse(candidateBus, heroBusFlatMinutes), true);
 });
 
-test('planner: selectCandidates filters out redundant same-line alternatives in favor of useful diversity', () => {
+test('shouldFilterRedundantSameLineAlternativesInFavourOfUsefulDiversityWhenSelectingCandidates', () => {
   // Hero is Bus L1 (14m)
   const hero = {
     identity: createBusIdentity('1', '1106', '1204'),
@@ -1474,7 +1474,7 @@ test('planner: selectCandidates filters out redundant same-line alternatives in 
   assert.equal(isSameIdentity(res.alternatives[1].identity, createBusIdentity('2', '1106', '1205')), true);
 });
 
-test('planner: selectCandidates ensures diversity among multiple admitted alternatives', () => {
+test('shouldEnsureDiversityAmongMultipleAdmittedAlternativesWhenSelectingCandidates', () => {
   // Hero is Walk (14m)
   const heroWalk = {
     identity: createWalkIdentity(),
@@ -1516,7 +1516,7 @@ test('planner: selectCandidates ensures diversity among multiple admitted altern
   assert.equal(isSameIdentity(res.alternatives[1].identity, createBusIdentity('2', '1110', '1206')), true);
 });
 
-test('planner: candidate diverse from cheap hero becomes redundant against final exact hero and is pruned', () => {
+test('shouldPruneACandidateWhenItIsRedundantAgainstTheFinalExactHero', () => {
   // Cheap phase:
   // Provisional Hero: Bus L2 (12m)
   // Candidate B: Bus L1 at Stop 1106 (14m, walk 2m, alight 1204)
@@ -1569,7 +1569,7 @@ test('planner: candidate diverse from cheap hero becomes redundant against final
   assert.equal(isSameIdentity(finalSelection.alternatives[0].identity, createBusIdentity('2', '2001', '1205')), true);
 });
 
-test('ui: renderDecisionWithAlternatives wires hero card tap to onPromote with none divergence', () => {
+test('shouldWireTheHeroCardTapToOnPromoteWithNoDivergenceWhenRenderingDecisionWithAlternatives', () => {
   // Mock DOM
   const prevDoc = globalThis.document;
   const heroCard = {
@@ -1623,7 +1623,7 @@ test('ui: renderDecisionWithAlternatives wires hero card tap to onPromote with n
   globalThis.document = prevDoc;
 });
 
-test('planner+ui: alternative diff wording prioritizes line > boarding stop > alighting stop', () => {
+test('shouldPrioritizeLineThenBoardingThenAlightingStopWhenWordingAnAlternativeDiff', () => {
   const primary = {
     identity: 'bus:1:1106:1204',
     mode: 'bus',
@@ -1681,7 +1681,7 @@ test('planner+ui: alternative diff wording prioritizes line > boarding stop > al
   assert.equal(alternativeDiffText(describeAlternativeDiff(walkAlt, primary)), 'Ruta directa a pie');
 });
 
-test('planner: cheapWalkToStop uses walkToStopCache first, haversine/80 as fallback', () => {
+test('shouldUseTheWalkToStopCacheFirstAndEstimateFromDistanceOnAMissWhenComputingCheapWalkToStop', () => {
   const cache = new Map();
   cache.set('1106', { minutes: 5 });
 
@@ -1696,7 +1696,7 @@ test('planner: cheapWalkToStop uses walkToStopCache first, haversine/80 as fallb
   assert.ok(typeof est === 'number' && est > 0);
 });
 
-test('ui: buildAlternativeCardHTML renders compact card with differentiator and delta', () => {
+test('shouldRenderDifferentiatorDeltaAndDegradedMarkWhenBuildingAnAlternativeCard', () => {
   const primary = {
     identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
@@ -1762,7 +1762,7 @@ test('ui: buildAlternativeCardHTML renders compact card with differentiator and 
   assert.ok(fasterHtml.includes('-2′'));
 });
 
-test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and alternatives', () => {
+test('shouldRenderHeroAndAlternativesWhenBuildingPlanningCards', () => {
   const cWalk = {
     identity: createWalkIdentity(),
     mode: 'walk',
@@ -1827,7 +1827,7 @@ test('ui: planningCardsHTML and renderDecisionWithAlternatives render hero and a
   assert.ok(!htmlSingle.includes('alternatives-container'));
 });
 
-test('ui: scheduled bus candidates expose a scheduled source label', () => {
+test('shouldExposeAScheduledSourceLabelWhenTheBusCandidateIsScheduled', () => {
   const scheduledBus = {
     identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
@@ -1840,7 +1840,7 @@ test('ui: scheduled bus candidates expose a scheduled source label', () => {
   assert.ok(planningCardsHTML([scheduledBus], 0, { walkMinutes: 18 }).includes('Horario programado'));
 });
 
-test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', () => {
+test('shouldPromoteTheTappedAlternativeWhenRenderingDecisionWithAlternatives', () => {
   const cWalk = {
     identity: createWalkIdentity(),
     mode: 'walk',
@@ -1893,7 +1893,7 @@ test('ui: renderDecisionWithAlternatives supports tap-to-promote interaction', (
   }
 });
 
-test('ui: promoting an alternative preserves the comparison context', () => {
+test('shouldPreserveTheComparisonContextWhenPromotingAnAlternative', () => {
   const cBus = {
     identity: createBusIdentity('1', '1106', '1204'),
     mode: 'bus',
@@ -1930,7 +1930,7 @@ test('ui: promoting an alternative preserves the comparison context', () => {
   }
 });
 
-test('ui: start journey action persists started state without changing navigation mode', () => {
+test('shouldPersistStartedStateWithoutSelectingWhenTheStartButtonIsClicked', () => {
   const cWalk = {
     identity: createWalkIdentity(),
     mode: 'walk',
@@ -1975,7 +1975,7 @@ test('ui: start journey action persists started state without changing navigatio
 });
 
 // --- home favorite chips -------------------------------------------------------------------
-test('renderHomeFavorites: no favorites -> nothing shown; favorites -> one chip each with a badge', async () => {
+test('shouldShowOneChipWithABadgePerFavoriteAndNothingWithoutFavoritesOrInScenarioModeWhenRenderingHomeFavorites', async () => {
   const { renderHomeFavorites } = await import('./ui.js');
   const el = () => ({
     children: [], className: '', textContent: '', _classes: new Set(), listeners: {},
