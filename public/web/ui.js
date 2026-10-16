@@ -46,6 +46,11 @@ export function resolveOrigin(coords) {
   return { origin: { ...CADIZ }, originKind: 'city-center' };
 }
 
+/** One line for a whole set of estimates (chips, «Habituales»), as the card note is for one result. */
+export function originCaptionText(kind) {
+  return kind === 'city-center' ? 'Tiempos desde el centro de Cádiz' : '';
+}
+
 export function originNoteHTML(kind) {
   return kind === 'city-center'
     ? '<div class="decision-note origin-note">Calculado desde el centro de Cádiz</div>'
@@ -80,7 +85,10 @@ export function setSheetState(nextState) {
   const destName = document.getElementById('dest-name');
   const decision = document.getElementById('decision');
 
-  if (nextState !== 'IDLE') document.getElementById('home-favorites')?.classList.add('hidden');
+  if (nextState !== 'IDLE') {
+    document.getElementById('home-favorites')?.classList.add('hidden');
+    document.getElementById('home-favorites-origin')?.classList.add('hidden');
+  }
   if (nextState === 'IDLE') {
     renderHomeFavorites();
     searchTrigger?.classList.remove('hidden');
@@ -569,7 +577,7 @@ export function fillQuickVerdictBadge(row, dest) {
 
 // Habituales on the idle sheet: one tap from app open to a verdict, no search and no keyboard.
 // Same favorites, same badge filler and same selection handler as the dropdown list.
-export function renderHomeFavorites() {
+export function renderHomeFavorites(kind = originKind) {
   const box = document.getElementById('home-favorites');
   if (!box) return;
   box.replaceChildren();
@@ -578,6 +586,12 @@ export function renderHomeFavorites() {
     try { favorites = getFavorites(); } catch { favorites = []; }
   }
   box.classList.toggle('hidden', favorites.length === 0);
+  const caption = document.getElementById('home-favorites-origin');
+  if (caption) {
+    const text = favorites.length > 0 ? originCaptionText(kind) : '';
+    caption.textContent = text;
+    caption.classList.toggle('hidden', text === '');
+  }
   for (const fav of favorites) {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -596,12 +610,19 @@ export function renderHomeFavorites() {
   }
 }
 
-function appendDropdownSection(dropdown, title, items, icon, { removable, badge } = {}) {
+export function appendDropdownSection(dropdown, title, items, icon, { removable, badge, originKind: kind = originKind } = {}) {
   if (items.length === 0) return;
   if (title) {
     const header = document.createElement('div');
     header.className = 'dropdown-header';
     header.textContent = title;
+    const caption = badge ? originCaptionText(kind) : '';
+    if (caption) {
+      const origin = document.createElement('span');
+      origin.className = 'dropdown-header-origin';
+      origin.textContent = ` · ${caption}`;
+      header.appendChild(origin);
+    }
     dropdown.appendChild(header);
   }
   for (const item of items) {
