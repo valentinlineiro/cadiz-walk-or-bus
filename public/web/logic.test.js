@@ -488,11 +488,11 @@ test('shouldFallBackToAStraightLineOnlyForTheHopThatFailsWhenRoutingABus', async
   ]);
 });
 
-test('busRoute needs at least 2 stops and returns null on total failure', async () => {
+test('shouldReturnNullWhenABusRouteHasFewerThanTwoStopsOrEveryHopFails', async () => {
   assert.equal(await busRoute(async () => ({ ok: false }), [{ lat: 1, lon: 2 }]), null);
 });
 
-test('getRecent survives missing storage or corrupt JSON', () => {
+test('shouldSurviveWhenReadingRecentsWithMissingStorageOrCorruptJson', () => {
   assert.deepEqual(getRecent(null), []);
   const badJsonStorage = { getItem: () => 'invalid-json{{{' };
   assert.deepEqual(getRecent(badJsonStorage), []);
@@ -500,7 +500,7 @@ test('getRecent survives missing storage or corrupt JSON', () => {
   assert.deepEqual(getRecent(notArrayStorage), []);
 });
 
-test('saveRecent prepends, deduplicates by label/coords, caps at 5, and survives errors', () => {
+test('shouldPrependDeduplicateAndCapAtFiveAndSurviveErrorsWhenSavingRecents', () => {
   const store = new Map();
   const mockStorage = {
     getItem: (k) => store.get(k) ?? null,
@@ -531,7 +531,7 @@ test('saveRecent prepends, deduplicates by label/coords, caps at 5, and survives
   assert.doesNotThrow(() => getRecent(throwingStorage));
 });
 
-test('favorites: add, isFavorite, remove, dedupe by coords, and survives errors', () => {
+test('shouldAddRemoveAndDedupeByCoordsAndSurviveErrorsWhenManagingFavorites', () => {
   const store = new Map();
   const mockStorage = {
     getItem: (k) => store.get(k) ?? null,
@@ -561,7 +561,7 @@ test('favorites: add, isFavorite, remove, dedupe by coords, and survives errors'
   assert.doesNotThrow(() => getFavorites(throwingStorage));
 });
 
-test('escapeHTML escapes HTML control characters and safely handles non-string values', () => {
+test('shouldEscapeControlCharactersAndHandleNonStringValuesWhenEscapingHtml', () => {
   assert.equal(escapeHTML('foo & bar <baz> "qux" \'123\''), 'foo &amp; bar &lt;baz&gt; &quot;qux&quot; &#39;123&#39;');
   assert.equal(escapeHTML(null), '');
   assert.equal(escapeHTML(undefined), '');
@@ -570,7 +570,7 @@ test('escapeHTML escapes HTML control characters and safely handles non-string v
   assert.equal(escapeHTML('Plaza de España'), 'Plaza de España');
 });
 
-test('decisionCardHTML with bus verdict renders mode, door-to-door total, context line and walk alternative', () => {
+test('shouldRenderModeTotalContextAndWalkAlternativeWhenTheVerdictIsBus', () => {
   const busVerdict = {
     kind: 'bus',
     walkMinutes: 22,
@@ -612,7 +612,7 @@ test('decisionCardHTML with bus verdict renders mode, door-to-door total, contex
   assert.ok(!htmlFallback.includes('Bájate en'));
 });
 
-test('decisionCardHTML BUS card renders "?′" instead of "null′" when walkToStop is null', () => {
+test('shouldRenderAQuestionMarkInsteadOfNullWhenWalkToStopIsNull', () => {
   const v = {
     kind: 'bus',
     walkMinutes: 18,
@@ -624,22 +624,22 @@ test('decisionCardHTML BUS card renders "?′" instead of "null′" when walkToS
   assert.ok(html.includes('>?′<'));
 });
 
-test('computeLastMile: successful lastMile uses routed minutes, not degraded', () => {
+test('shouldUseRoutedMinutesAndNotFlagDegradedWhenLastMileRoutingSucceeds', () => {
   const result = domainComputeLastMile({ minutes: 7, coordinates: [] }, 900);
   assert.deepEqual(result, { lastMileMinutes: 7, lastMileDegraded: false });
 });
 
-test('computeLastMile: null lastMile (walkRoute\'s realistic failure mode) falls back to distance/80, flagged degraded', () => {
+test('shouldFallBackToDistanceAndFlagDegradedWhenLastMileRouteIsNull', () => {
   const result = domainComputeLastMile(null, 800);
   assert.deepEqual(result, { lastMileMinutes: 10, lastMileDegraded: true });
 });
 
-test('computeLastMile: lastMile object with no minutes also falls back, flagged degraded', () => {
+test('shouldFallBackAndFlagDegradedWhenTheLastMileRouteHasNoMinutes', () => {
   const result = domainComputeLastMile({ minutes: null }, 400);
   assert.deepEqual(result, { lastMileMinutes: 5, lastMileDegraded: true });
 });
 
-test('decisionCardHTML BUS card renders all four journey timeline segments with correct minutes', () => {
+test('shouldRenderAllFourTimelineSegmentsWithTheirMinutesWhenTheVerdictIsBus', () => {
   const v = {
     kind: 'bus',
     walkMinutes: 18,
@@ -663,7 +663,7 @@ test('decisionCardHTML BUS card renders all four journey timeline segments with 
   assert.ok(html.includes('>2′<'));
 });
 
-test('decisionCardHTML BUS card handles null lastMileMinutes without throwing', () => {
+test('shouldNotThrowWhenLastMileMinutesAreNull', () => {
   const v = {
     kind: 'bus',
     walkMinutes: 18,
@@ -675,7 +675,7 @@ test('decisionCardHTML BUS card handles null lastMileMinutes without throwing', 
   assert.ok(html.includes('13<span class="unit">′ total</span>')); // 13 + 0
 });
 
-test('decisionCardHTML BUS card marks a degraded (fallback) last-mile estimate visibly, not as a routed duration', () => {
+test('shouldMarkADegradedLastMileVisiblyWhenItIsAFallbackEstimate', () => {
   const v = {
     kind: 'bus',
     walkMinutes: 18,
@@ -690,7 +690,7 @@ test('decisionCardHTML BUS card marks a degraded (fallback) last-mile estimate v
   assert.notEqual(routed, degraded);
 });
 
-test('decisionCardHTML with walk verdict renders subtitle and bus alternative door-to-door total', () => {
+test('shouldRenderSubtitleAndBusAlternativeTotalWhenTheVerdictIsWalk', () => {
   const walkVerdictWithAlt = {
     kind: 'walk',
     walkMinutes: 12,
@@ -717,7 +717,7 @@ test('decisionCardHTML with walk verdict renders subtitle and bus alternative do
   assert.ok(!htmlOnly.includes('decision-alt'));
 });
 
-test('errorCardHTML properly HTML-escapes raw queries preventing XSS', () => {
+test('shouldEscapeTheQueryWhenRenderingTheErrorCard', () => {
   // Script tag injection attempt
   const htmlScript = errorCardHTML('<script>alert("xss")</script>');
   assert.ok(htmlScript.includes('class="decision-error"'));
@@ -739,7 +739,7 @@ test('errorCardHTML properly HTML-escapes raw queries preventing XSS', () => {
   assert.equal(errorCardHTML('algo & nada'), '<div class="decision-error">No encontramos «algo &amp; nada». Prueba con otro nombre.</div>');
 });
 
-test('journey-log: getLog survives missing storage, corrupt JSON, or invalid shapes', () => {
+test('shouldSurviveWhenReadingTheLogWithMissingStorageCorruptJsonOrInvalidShapes', () => {
   assert.deepEqual(getLog(null), []);
   const badJsonStorage = { getItem: () => '{{broken' };
   assert.deepEqual(getLog(badJsonStorage), []);
@@ -747,7 +747,7 @@ test('journey-log: getLog survives missing storage, corrupt JSON, or invalid sha
   assert.deepEqual(getLog(notArrayStorage), []);
 });
 
-test('journey-log: formatRecommendationSub formats walk and bus correctly', () => {
+test('shouldFormatWalkAndBusWhenBuildingTheRecommendationSubtitle', () => {
   assert.equal(formatRecommendationSub(null), null);
   assert.equal(formatRecommendationSub({ kind: 'walk', walkMinutes: 12 }), 'última vez: ANDAR · 12′');
   assert.equal(
@@ -760,7 +760,7 @@ test('journey-log: formatRecommendationSub formats walk and bus correctly', () =
   );
 });
 
-test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and deduplicates within 5 minutes', () => {
+test('shouldValidatePrependCapAndDeduplicateWhenAppendingLogEntries', () => {
   const store = new Map();
   const mockStorage = {
     getItem: (k) => store.get(k) ?? null,
@@ -832,7 +832,7 @@ test('journey-log: appendEntry validates, prepends LIFO, caps at 200, and dedupl
   assert.equal(log[0].id, 'bulk-204');
 });
 
-test('journey-log: classifyDivergence identifies none, mode, line, and access divergences', () => {
+test('shouldIdentifyNoneModeLineAndAccessDivergencesWhenClassifyingDivergence', () => {
   const recBus = {
     identity: 'bus:1:1106:1204',
     kind: 'bus',
@@ -871,7 +871,7 @@ test('journey-log: classifyDivergence identifies none, mode, line, and access di
   assert.equal(classifyDivergence({ identity: 'bus:1' }, null), 'none');
 });
 
-test('journey-log: getLog normalizes legacy v1 entries with string choice safely', () => {
+test('shouldNormalizeLegacyV1EntriesWithAStringChoiceWhenReadingTheLog', () => {
   const legacyData = [
     {
       id: 'legacy-1',
@@ -910,7 +910,7 @@ test('journey-log: getLog normalizes legacy v1 entries with string choice safely
   assert.equal(log[1].recommendation.identity, 'walk:direct');
 });
 
-test('journey-log: normalizes legacy recommendation without busLine extracting line from identity', () => {
+test('shouldExtractTheLineFromTheIdentityWhenALegacyRecommendationHasNoBusLine', () => {
   const legacyWithoutBusLine = [
     {
       id: 'legacy-no-busline',
@@ -969,7 +969,7 @@ test('journey-log: normalizes legacy recommendation without busLine extracting l
   assert.equal(appendLog[0].recommendation.alightStopId, '1206');
 });
 
-test('journey-log: appendEntry preserves and updates structured choice', () => {
+test('shouldPreserveAndUpdateTheStructuredChoiceWhenAppendingLogEntries', () => {
   const store = new Map();
   const mockStorage = {
     getItem: (k) => store.get(k) ?? null,
