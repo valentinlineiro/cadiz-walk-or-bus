@@ -1,4 +1,4 @@
-import { isInCadiz } from './geo.js';
+import { isPointInCadiz } from './domain/topology.js';
 import { escapeHTML, initMap, showMe, showStops, showDestination, showAlightStop, showWalkRoute, showBusRoute, fitRoute, clearRoute } from './map.js';
 import { transition } from './state.js';
 import { getRecent, saveRecent } from './recent.js';
@@ -153,8 +153,8 @@ function eligibleArrivalsByStop(near) {
 // itself answers "bus or walk", without touching the current search state
 // (destCoords, arrivalsByStop, the map) that a real routeToDestination uses.
 export async function quickVerdictFor(dest) {
-  if (!dest || !isInCadiz(dest.lat, dest.lon)) return null;
-  if (!me || !isInCadiz(me.lat, me.lon)) return null;
+  if (!dest || !isPointInCadiz(dest.lat, dest.lon)) return null;
+  if (!me || !isPointInCadiz(me.lat, me.lon)) return null;
   try {
     return await getQuickVerdictUseCase.execute({
       origin: me,
@@ -710,7 +710,7 @@ function applyCandidateToMap(cand) {
 
 async function routeToDestination(dest) {
   if (!me) return;
-  if (!isInCadiz(dest.lat, dest.lon)) {
+  if (!isPointInCadiz(dest.lat, dest.lon)) {
     console.warn('[D2] destination outside Cádiz service area — aborting route', dest);
     destCoords = null;
     destLabel = null;
@@ -721,7 +721,7 @@ async function routeToDestination(dest) {
     return;
   }
   // If user origin is outside Cádiz, fallback to CADIZ center for manual exploration
-  if (!isInCadiz(me.lat, me.lon)) {
+  if (!isPointInCadiz(me.lat, me.lon)) {
     me = { ...CADIZ };
   }
   const id = ++requestId;
@@ -989,7 +989,7 @@ export function initUI() {
       if (!me) return;
       closeDropdown();
       const input = document.getElementById('q');
-      if (!isInCadiz(coords.lat, coords.lon)) {
+      if (!isPointInCadiz(coords.lat, coords.lon)) {
         if (input) input.value = '';
         destCoords = null;
         destLabel = null;
@@ -1165,7 +1165,7 @@ function locate() {
       clearTimeout(autoFallbackId);
       skipBtn?.classList.add('hidden');
       const { latitude, longitude, accuracy } = pos.coords;
-      if (!isInCadiz(latitude, longitude)) {
+      if (!isPointInCadiz(latitude, longitude)) {
         me = { ...CADIZ };
         setState('OUT_OF_CADIZ', 'Parece que no estás en Cádiz — explora manualmente');
         showMe(latitude, longitude, accuracy);

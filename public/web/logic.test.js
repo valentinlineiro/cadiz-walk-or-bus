@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nearestStops, isInCadiz } from './geo.js';
+import { nearestStops, isPointInCadiz as isInCadiz } from './domain/topology.js';
 import { transition } from './state.js';
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
@@ -296,7 +296,7 @@ test('domain models: conform to structured Decision, EvaluatedJourney, and Candi
   assert.equal('candidate' in evaluated, false);
 });
 
-test('nearestStops returns 3 closest with _km', () => {
+test('nearestStops returns 3 closest with dist in meters', () => {
   const stops = [
     { name: 'FAR', number: '1', stop: '1', lat: 36.6, lon: -6.2 },
     { name: 'NEAR', number: '2', stop: '2', lat: 36.5272, lon: -6.2886 },
@@ -305,7 +305,7 @@ test('nearestStops returns 3 closest with _km', () => {
   ];
   const n = nearestStops(stops, 36.5271, -6.2885, 3);
   assert.deepEqual(n.map((s) => s.name), ['NEAR', 'MID', 'FAR']);
-  assert.ok(n[0]._km < 0.05);
+  assert.ok(n[0].dist < 50);
 });
 
 test('isInCadiz returns true for Cádiz landmarks inside service polygon', () => {
