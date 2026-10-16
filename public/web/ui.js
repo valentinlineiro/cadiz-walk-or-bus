@@ -262,7 +262,9 @@ function comparisonExplanation(hero, candidates, walkMinutes) {
   const busTotal = bus?.totalMinutes ?? bus?.exactJourney?.totalMinutes ?? bus?.estimatedMinutes;
   if (walkTotal == null || typeof busTotal !== 'number') return '';
 
-  const { verdict, minutes } = compareWalkAndBus({ walkMinutes: walkTotal, busMinutes: busTotal });
+  const comparison = compareWalkAndBus({ walkMinutes: walkTotal, busMinutes: busTotal });
+  if (!comparison) return '';
+  const { verdict, minutes } = comparison;
   if (verdict === 'equivalent') return 'Las dos opciones tardan prácticamente lo mismo.';
   if (verdict === 'bus-faster') {
     return hero.mode === 'walk'

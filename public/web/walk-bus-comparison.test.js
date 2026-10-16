@@ -48,3 +48,18 @@ test('shouldKeepTheCurrentWordingWhenTheDomainVerdictIsShown', () => {
   assert.equal(explanationFor(bus, walk(BUS + 1), BUS + 1), 'Las dos opciones tardan prácticamente lo mismo.');
   assert.equal(explanationFor(walk(BUS - 1), bus, BUS - 1), 'Las dos opciones tardan prácticamente lo mismo.');
 });
+
+test('shouldReturnNoComparisonWhenAnyTimeIsNotFinite', () => {
+  for (const [walkMinutes, busMinutes] of [[NaN, 20], [20, NaN], [Infinity, 20], [20, -Infinity], [undefined, 20], [20, null]]) {
+    assert.equal(compareWalkAndBus({ walkMinutes, busMinutes }), null, `${walkMinutes} vs ${busMinutes}`);
+  }
+});
+
+test('shouldShowNoExplanationWhenAJourneyTimeIsNotANumber', () => {
+  const explanation = /Las dos opciones|El bus es|Bus te ahorra|Andando llegas|NaN′/;
+  const bus = journey('bus', NaN);
+  const walk = journey('walk', 20);
+
+  assert.doesNotMatch(planningCardsHTML([bus, walk], 0, { walkMinutes: 20 }), /Las dos opciones|El bus es|Bus te ahorra|Andando llegas/);
+  assert.doesNotMatch(planningCardsHTML([walk, journey('bus', 18)], 0, { walkMinutes: NaN }), explanation);
+});
