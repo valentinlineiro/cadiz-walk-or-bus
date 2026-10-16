@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { transitionSheet } from './sheet-state.js';
 
-test('sheet-state: IDLE transitions', () => {
+test('shouldTransitionFromIdleWhenSearchOpensOrADestinationIsSelected', () => {
   assert.equal(transitionSheet('IDLE', 'OPEN_SEARCH'), 'SEARCH');
   assert.equal(transitionSheet('IDLE', 'SELECT_DEST'), 'VERDICT');
   assert.equal(transitionSheet('IDLE', 'UNKNOWN_EVENT'), 'IDLE');
   assert.equal(transitionSheet('IDLE', 'CANCEL'), 'IDLE');
 });
 
-test('sheet-state: SEARCH transitions', () => {
+test('shouldTransitionFromSearchWhenItIsCancelledClosedOrADestinationIsSelected', () => {
   assert.equal(transitionSheet('SEARCH', 'SELECT_DEST'), 'VERDICT');
   // Without active destination, cancel/close returns to IDLE
   assert.equal(transitionSheet('SEARCH', 'CANCEL', { hasDestination: false }), 'IDLE');
@@ -20,14 +20,14 @@ test('sheet-state: SEARCH transitions', () => {
   assert.equal(transitionSheet('SEARCH', 'UNKNOWN_EVENT'), 'SEARCH');
 });
 
-test('sheet-state: VERDICT transitions', () => {
+test('shouldTransitionFromVerdictWhenTheDestinationChangesOrTheSheetResets', () => {
   assert.equal(transitionSheet('VERDICT', 'CHANGE_DEST'), 'SEARCH');
   assert.equal(transitionSheet('VERDICT', 'OPEN_SEARCH'), 'SEARCH');
   assert.equal(transitionSheet('VERDICT', 'RESET'), 'IDLE');
   assert.equal(transitionSheet('VERDICT', 'UNKNOWN_EVENT'), 'VERDICT');
 });
 
-test('sheet-state: full user flows (IDLE -> SEARCH -> VERDICT -> SEARCH -> VERDICT -> IDLE)', () => {
+test('shouldFollowTheFullFlowWhenTheUserSearchesChangesDestinationAndResets', () => {
   let state = 'IDLE';
 
   // 1. User taps search trigger from IDLE

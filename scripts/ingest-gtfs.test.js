@@ -12,7 +12,7 @@ const files = {
   'stop_times.txt': 'trip_id,arrival_time,departure_time,stop_id,stop_sequence\nt1,08:00:00,08:00:00,A,1\nt1,08:10:00,08:10:00,B,2\nt2,08:00:00,08:00:00,A,1\n',
 };
 
-test('buildSnapshot filters the selected agency and preserves GTFS schedules and exceptions', () => {
+test('shouldKeepOnlyTheSelectedAgencyAndPreserveSchedulesAndExceptionsWhenBuildingASnapshot', () => {
   const snapshot = buildSnapshot(files, {
     feedVersion: 'nap-test',
     generatedAt: '2026-09-17T03:31:55Z',
@@ -30,7 +30,7 @@ test('buildSnapshot filters the selected agency and preserves GTFS schedules and
   ]);
 });
 
-test('syncServiceWorkerFeedVersion updates sw.js feed version guaranteeing cache invalidation', async () => {
+test('shouldUpdateTheFeedVersionInTheServiceWorkerWhenSyncingSoTheCacheIsInvalidated', async () => {
   const { syncServiceWorkerFeedVersion } = await import('./ingest-gtfs.mjs');
   const tempSw = 'const GTFS_FEED_VERSION = "nap-2026-09-18";\nconst CACHE_VERSION = `v10-${GTFS_FEED_VERSION}`;\n';
   const fs = await import('node:fs');
