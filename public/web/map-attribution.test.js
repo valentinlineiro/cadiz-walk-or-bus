@@ -37,11 +37,11 @@ test('shouldCreditOpenStreetMapOnTilesWhenMapIsInitialised', () => {
   assert.match(calls.tileOptions.attribution, /openstreetmap\.org\/copyright/);
 });
 
-test('shouldPlaceAttributionAwayFromTheBottomSheetWhenMapIsInitialised', () => {
+test('shouldPlaceAttributionAwayFromTheBottomSheetAndLinkPrivacyWhenMapIsInitialised', () => {
   const calls = withFakeLeaflet(() => initMap(() => {}, null));
 
   assert.equal(calls.mapOptions.attributionControl, false, 'default bottom-right control sits under the sheet');
   assert.equal(calls.controls.length, 1);
   assert.equal(calls.controls[0].position, 'topright');
-  assert.equal(calls.controls[0].prefix, false);
+  assert.match(calls.controls[0].prefix, /href="\/privacy\.html"/, 'the privacy notice is one tap away from the map');
 });
