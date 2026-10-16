@@ -7,13 +7,6 @@ import { MAP_HTML, SECURITY_HEADERS } from './map-page.js';
 // required even though there's no real domain for this internal panel.
 const PANEL_HOST = 'static-76-241-224-77.ipcom.comunitel.net';
 
-export function decide(arrivals, walkMinutes) {
-  if (arrivals.length === 0) return { decision: 'walk', soonest: null };
-  const soonest = arrivals.reduce((a, b) => (a.minutes <= b.minutes ? a : b));
-  const decision = soonest.minutes < walkMinutes ? 'bus' : 'walk';
-  return { decision, soonest };
-}
-
 const LIVE_ARRIVAL_PATTERN = /^(\d+\s*min|inminente)$/i;
 const OUT_OF_SERVICE_PATTERN = /^(sin servicio|en cochera|fuera de servicio)$/i;
 

@@ -106,8 +106,9 @@ export function selectCandidates(candidates, policy = DEFAULT_PLANNING_POLICY) {
     if (unique.length === 0) {
         return { primary: null, alternatives: [] };
     }
-    // Sort strictly by estimatedMinutes ascending
-    unique.sort((a, b) => (a.estimatedMinutes ?? 0) - (b.estimatedMinutes ?? 0));
+    // Ascending by estimatedMinutes; on a tie walking wins (the bus adds waiting risk for no gain).
+    const walkFirst = (c) => (c.mode === 'walk' ? 0 : 1);
+    unique.sort((a, b) => (a.estimatedMinutes ?? 0) - (b.estimatedMinutes ?? 0) || walkFirst(a) - walkFirst(b));
     const primary = unique[0];
     const alternatives = filterDiverseAlternatives(unique.slice(1), primary, policy);
     return { primary, alternatives };

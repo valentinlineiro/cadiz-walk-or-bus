@@ -18,22 +18,6 @@ Abre la aplicación, permite el GPS si quieres usar tu posición, busca un
 destino y selecciona una opción. La aplicación calcula la recomendación con
 los datos disponibles en ese momento.
 
-También conserva el artefacto de línea de comandos original:
-
-Given a bus stop, a route, and how long it takes you to walk to your
-destination, tells you the soonest bus and whether it beats walking.
-
-```
-node index.js <stop> <route> <walkMinutes>
-node index.js 1106 110001 19
-```
-
-```
-Bus 1 (CORTADURA): arrives in 3 min.
-Walk: 19 min.
--> bus.
-```
-
 Data source: Cadiz's own live transit arrival panel
 (`http://77.224.241.76/urbanos/mobile/panel.aspx?stop=<stop>`)
 — the same source BusCadiz uses. `stop` is the transit system's internal
