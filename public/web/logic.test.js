@@ -1204,7 +1204,7 @@ test('shouldKeepTheFastestWhenCandidatesShareAStructuralIdentity', () => {
   assert.equal(isSameIdentity(res.alternatives[0].identity, createBusIdentity('2', '1106', '1205')), true);
 });
 
-test('shouldHonourCustomSimilarityDeltaAndMaxAlternativesWhenSelectingCandidates', () => {
+test('shouldApplyCustomSimilarityDeltaAndCandidateBudgetWhenSelectingCandidates', () => {
   const c1 = { identity: createBusIdentity('1', 'A', 'X'), mode: 'bus', estimatedMinutes: 10 };
   const c2 = { identity: createBusIdentity('2', 'B', 'Y'), mode: 'bus', estimatedMinutes: 13 };
   const c3 = { identity: createBusIdentity('3', 'C', 'Z'), mode: 'bus', estimatedMinutes: 14 };
