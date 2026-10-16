@@ -13,7 +13,7 @@ import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTrans
 import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
 import officialGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
-test('SearchDestinationsUseCase: delegates query and limit to GeocodingPort', async () => {
+test('shouldDelegateQueryAndLimitToGeocodingPortWhenSearchingDestinations', async () => {
   let capturedQuery = null;
   let capturedLimit = null;
   const fakeGeocoding = {
@@ -34,7 +34,7 @@ test('SearchDestinationsUseCase: delegates query and limit to GeocodingPort', as
   assert.equal(results[0].label, 'Plaza Mina');
 });
 
-test('GetQuickVerdictUseCase: returns null when direct walking fails', async () => {
+test('shouldReturnNullWhenDirectWalkingFailsForAQuickVerdict', async () => {
   let transitCalls = 0;
   const useCase = new GetQuickVerdictUseCase({
     routing: {
@@ -60,7 +60,7 @@ test('GetQuickVerdictUseCase: returns null when direct walking fails', async () 
   assert.equal(transitCalls, 1);
 });
 
-test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
+test('shouldKeepTheWalkFallbackLightweightWhenGivingAQuickVerdict', async () => {
   let routeBusCalls = 0;
   const useCase = new GetQuickVerdictUseCase({
     routing: {
@@ -86,7 +86,7 @@ test('GetQuickVerdictUseCase: keeps walk fallback lightweight', async () => {
   assert.equal(routeBusCalls, 0);
 });
 
-test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and still produces BUS', async () => {
+test('shouldFallBackToScheduledGtfsAndStillProduceBusWhenMunicipalPanelIsDown', async () => {
   const sourceTrip = officialGtfsSnapshot.trips.find((trip) => trip.line === 'M-021');
   assert.ok(sourceTrip, 'official snapshot must contain M-021');
   const originStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes[0].stop);
@@ -137,7 +137,7 @@ test('FindBestJourneysUseCase: municipal outage falls back to scheduled GTFS and
   assert.equal(typeof result.walkMinutes, 'number');
 });
 
-test('GetEligibleArrivalsUseCase: filters arrivals and resolves alighting in Application', async () => {
+test('shouldFilterArrivalsAndResolveAlightingWhenGettingEligibleArrivals', async () => {
   const stops = [
     { stop: '1', lat: 36.520, lon: -6.280 },
     { stop: '2', lat: 36.535, lon: -6.297 },
@@ -174,7 +174,7 @@ class FakeJourneyLog {
   }
 }
 
-test('RecordUserChoiceUseCase: implicit acceptance when choice is null', () => {
+test('shouldRecordImplicitAcceptanceWhenChoiceIsNull', () => {
   const fakeLog = new FakeJourneyLog();
   const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });
 
@@ -224,7 +224,7 @@ test('RecordUserChoiceUseCase: implicit acceptance when choice is null', () => {
   assert.strictEqual(fakeLog.records[0], record);
 });
 
-test('RecordUserChoiceUseCase: start persists an explicit startedAt state', () => {
+test('shouldPersistAnExplicitStartedAtWhenAJourneyIsStarted', () => {
   const fakeLog = new FakeJourneyLog();
   const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });
   const record = useCase.start({
@@ -245,7 +245,7 @@ test('RecordUserChoiceUseCase: start persists an explicit startedAt state', () =
   assert.equal(fakeLog.records[0].startedAt, 1700000001000);
 });
 
-test('RecordUserChoiceUseCase: explicit promotion preserves alternative details', () => {
+test('shouldPreserveAlternativeDetailsWhenThePromotionIsExplicit', () => {
   const fakeLog = new FakeJourneyLog();
   const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });
 
@@ -318,7 +318,7 @@ test('RecordUserChoiceUseCase: explicit promotion preserves alternative details'
   assert.strictEqual(fakeLog.records[0], record);
 });
 
-test('RecordUserChoiceUseCase: bus recommendation extracts line and stops from metadata or identity fallback', () => {
+test('shouldExtractLineAndStopsFromMetadataOrIdentityWhenRecordingABusRecommendation', () => {
   const fakeLog = new FakeJourneyLog();
   const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });
 
@@ -391,7 +391,7 @@ test('RecordUserChoiceUseCase: bus recommendation extracts line and stops from m
   assert.equal(record.choice.totalMinutes, 17);
 });
 
-test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 candidates routed)', async () => {
+test('shouldDoNoRoutingBeforeTheBudgetGateWhenFindingJourneys', async () => {
   const routingLog = {
     walkDirect: [],
     walkToStop: [],
@@ -493,7 +493,7 @@ test('FindBestJourneysUseCase: zero network routing before budget gate (<= 3 can
   assert.ok(decision.alternatives.length <= 2);
 });
 
-test('FindBestJourneysUseCase: handles pedestrian routing failure gracefully without throwing Sin ruta andando', async () => {
+test('shouldNotThrowWhenPedestrianRoutingFails', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.524, lon: -6.280, label: 'Plaza San Antonio' };
 
@@ -537,7 +537,7 @@ test('FindBestJourneysUseCase: handles pedestrian routing failure gracefully wit
   });
 });
 
-test('FindBestJourneysUseCase: exact re-ranking promotes post-routing fastest candidate to Hero', async () => {
+test('shouldPromoteTheFastestPostRoutingCandidateToHeroWhenReRanking', async () => {
   const origin = { lat: 36.5200, lon: -6.2800 };
   const destination = { lat: 36.5240, lon: -6.2800, label: 'Plaza Central' };
 
@@ -586,7 +586,7 @@ test('FindBestJourneysUseCase: exact re-ranking promotes post-routing fastest ca
   assert.ok(decision.alternatives[0].deltaMinutes > 0);
 });
 
-test('FindBestJourneysUseCase: structural diversity prunes redundant same-line bus alternatives against final Hero', async () => {
+test('shouldPruneRedundantSameLineAlternativesAgainstTheFinalHeroWhenFilteringForDiversity', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.528, lon: -6.285, label: 'Hospital' };
 
@@ -644,7 +644,7 @@ test('FindBestJourneysUseCase: structural diversity prunes redundant same-line b
   assert.equal(walkAlt.deltaMinutes, 3);
 });
 
-test('FindBestJourneysUseCase: flags degraded last-mile when pedestrian routing fails', async () => {
+test('shouldFlagDegradedLastMileWhenPedestrianRoutingFails', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.528, lon: -6.285, label: 'Hospital' };
 
@@ -691,7 +691,7 @@ test('FindBestJourneysUseCase: flags degraded last-mile when pedestrian routing 
   assert.ok(decision.hero.breakdown.lastMileMinutes > 0);
 });
 
-test('FindBestJourneysUseCase: scheduled arrival never produces dataQuality live', async () => {
+test('shouldNeverProduceLiveDataQualityWhenTheArrivalIsScheduled', async () => {
   const origin = { lat: 36.520, lon: -6.280 };
   const destination = { lat: 36.530, lon: -6.290 };
   const fakeRouting = {
