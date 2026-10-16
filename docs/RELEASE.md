@@ -134,7 +134,8 @@ not deliberately disrupt the public production service.
 
 - [ ] HTTPS, CORS, public endpoints, secrets, and rate limiting are reviewed.
 - [ ] Logs do not contain unnecessary personal or location data.
-- [ ] GPS/location use is disclosed.
+- [ ] GPS/location use is disclosed. (Notice in `public/privacy.html`, inventory in
+  `docs/PRIVACY.md`; still open: controller and contact, clearing the history, legal review.)
 - [ ] Privacy policy and data-retention behavior are documented.
 - [ ] OSM, map, geocoding, routing, GTFS, and municipal-source attributions
   are present and accurate.
