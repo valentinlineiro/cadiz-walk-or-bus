@@ -5,7 +5,7 @@ import { WALK_METERS_PER_MINUTE } from './constants.js';
  * fallbacks; routed minutes returned by the router are not recomputed with it.
  */
 export function walkMinutes(meters, pace = WALK_METERS_PER_MINUTE) {
-    if (!Number.isFinite(meters) || meters <= 0 || !(pace > 0))
+    if (!Number.isFinite(meters) || meters <= 0 || !Number.isFinite(pace) || pace <= 0)
         return 0;
     return Math.ceil(meters / pace);
 }

@@ -13,7 +13,9 @@ export function computeLastMile(lastMileRoute, distanceMeters, walkPaceMetersPer
         return { lastMileMinutes: lastMileRoute.minutes, lastMileDegraded: false };
     }
     const dist = typeof distanceMeters === 'number' && Number.isFinite(distanceMeters) ? Math.max(0, distanceMeters) : 0;
-    const pace = walkPaceMetersPerMinute > 0 ? walkPaceMetersPerMinute : WALK_METERS_PER_MINUTE;
+    const pace = Number.isFinite(walkPaceMetersPerMinute) && walkPaceMetersPerMinute > 0
+        ? walkPaceMetersPerMinute
+        : WALK_METERS_PER_MINUTE;
     return {
         lastMileMinutes: walkMinutes(dist, pace),
         lastMileDegraded: true,
