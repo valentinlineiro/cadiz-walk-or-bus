@@ -24,3 +24,24 @@ jobs:
 
       - name: Run release check
         run: npm run release:check
+
+  e2e:
+    name: Service worker E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run service worker E2E
+        run: npm run test:e2e
