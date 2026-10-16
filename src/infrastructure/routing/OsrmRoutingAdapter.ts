@@ -56,6 +56,12 @@ export class OsrmRoutingAdapter implements RoutingPort {
     const [route] = data.routes ?? [];
     if (!route || data.code === 'NoRoute') return null;
 
+    // A route without finite distance and duration is a malformed answer, not a route: report the
+    // service as failed so callers degrade honestly instead of showing NaN or an invented time.
+    if (!Number.isFinite(route.distance) || !Number.isFinite(route.duration)) {
+      return { status: 'service_failure', coordinates: [] };
+    }
+
     // Reject degenerate routes shorter than straight line
     if (route.distance < haversineMeters(from.lat, from.lon, to.lat, to.lon) * 0.95) {
       return null;
