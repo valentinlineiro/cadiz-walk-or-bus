@@ -17,6 +17,7 @@ import {
   heroCardHTML,
   planningCardsHTML,
   renderDecisionWithAlternatives,
+  alternativeDiffText,
 } from './ui.js';
 import { findAlightStop } from './domain/topology.js';
 import {
@@ -24,7 +25,7 @@ import {
   createWalkCandidate,
   createBusCandidates,
   selectCandidates,
-  formatAlternativeDiff,
+  describeAlternativeDiff,
   cheapWalkToStop,
   isStructurallyDiverse,
   filterDiverseAlternatives,
@@ -1622,7 +1623,7 @@ test('ui: renderDecisionWithAlternatives wires hero card tap to onPromote with n
   globalThis.document = prevDoc;
 });
 
-test('planner: formatAlternativeDiff prioritizes line > boarding stop > alighting stop', () => {
+test('planner+ui: alternative diff wording prioritizes line > boarding stop > alighting stop', () => {
   const primary = {
     identity: 'bus:1:1106:1204',
     mode: 'bus',
@@ -1644,7 +1645,7 @@ test('planner: formatAlternativeDiff prioritizes line > boarding stop > alightin
       alightStop: { stop: '1204', name: 'Plaza Mina' },
     },
   };
-  assert.equal(formatAlternativeDiff(diffLine, primary), 'Línea 2 · espera 3′');
+  assert.equal(alternativeDiffText(describeAlternativeDiff(diffLine, primary)), 'Línea 2 · espera 3′');
 
   // 2. Boarding stop differs (same line)
   const diffBoard = {
@@ -1657,7 +1658,7 @@ test('planner: formatAlternativeDiff prioritizes line > boarding stop > alightin
       alightStop: { stop: '1204', name: 'Plaza Mina' },
     },
   };
-  assert.equal(formatAlternativeDiff(diffBoard, primary), 'Desde San Felipe (caminar 4′)');
+  assert.equal(alternativeDiffText(describeAlternativeDiff(diffBoard, primary)), 'Desde San Felipe (caminar 4′)');
 
   // 3. Alighting stop differs
   const diffAlight = {
@@ -1669,7 +1670,7 @@ test('planner: formatAlternativeDiff prioritizes line > boarding stop > alightin
       alightStop: { stop: '1208', name: 'Audiencia' },
     },
   };
-  assert.equal(formatAlternativeDiff(diffAlight, primary), 'Baja en Audiencia');
+  assert.equal(alternativeDiffText(describeAlternativeDiff(diffAlight, primary)), 'Baja en Audiencia');
 
   // 4. Walk alternative
   const walkAlt = {
@@ -1677,7 +1678,7 @@ test('planner: formatAlternativeDiff prioritizes line > boarding stop > alightin
     mode: 'walk',
     metadata: {},
   };
-  assert.equal(formatAlternativeDiff(walkAlt, primary), 'Ruta directa a pie');
+  assert.equal(alternativeDiffText(describeAlternativeDiff(walkAlt, primary)), 'Ruta directa a pie');
 });
 
 test('planner: cheapWalkToStop uses walkToStopCache first, haversine/80 as fallback', () => {
