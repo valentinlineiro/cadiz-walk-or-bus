@@ -53,11 +53,13 @@ import {
 import stopsFixture from '../../stops.json' with { type: 'json' };
 import linesFixture from '../../lines.json' with { type: 'json' };
 
-const getLog = (storage) => new LocalStorageJourneyLogAdapter(storage).getLog();
-const getRecentDestinations = (n, storage) => new LocalStorageJourneyLogAdapter(storage).getRecentDestinations(n);
-const getTopDestinations = (n, storage) => new LocalStorageJourneyLogAdapter(storage).getTopDestinations(n);
+// The fixtures are dated around 2023-11-14; the clock keeps them inside the 30-day retention window.
+const FIXTURE_CLOCK = () => 1700000000000 + 24 * 60 * 60 * 1000;
+const getLog = (storage) => new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK).getLog();
+const getRecentDestinations = (n, storage) => new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK).getRecentDestinations(n);
+const getTopDestinations = (n, storage) => new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK).getTopDestinations(n);
 const appendEntry = (entry, storage, max = 200) => {
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   adapter.append(entry, max);
   return adapter.getLog().slice(0, max);
 };

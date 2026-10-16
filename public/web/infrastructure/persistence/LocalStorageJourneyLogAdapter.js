@@ -1,4 +1,5 @@
 import { parseIdentity } from '../../domain/identity.js';
+import { isRetained } from '../../domain/constants.js';
 export const STORAGE_KEY = 'cadiz_journey_log';
 export const DEDUPE_WINDOW_MS = 300000; // 5 minutes
 export const DEDUPE_COORD_EPSILON = 0.0002;
@@ -100,8 +101,39 @@ function normalizeEntry(item) {
 }
 export class LocalStorageJourneyLogAdapter {
     storageImpl;
-    constructor(storageImpl = typeof localStorage !== 'undefined' ? localStorage : null) {
+    now;
+    constructor(storageImpl = typeof localStorage !== 'undefined' ? localStorage : null, now = () => Date.now()) {
         this.storageImpl = storageImpl;
+        this.now = now;
+    }
+    /** Forget the whole log. Favourites live elsewhere and are not touched. */
+    clear() {
+        try {
+            this.storageImpl?.removeItem(STORAGE_KEY);
+        }
+        catch {
+            // storage disabled: nothing to clear
+        }
+    }
+    /** Physically drop entries past the retention window (reads already ignore them). */
+    purgeExpired() {
+        if (!this.storageImpl)
+            return;
+        try {
+            const raw = this.storageImpl.getItem(STORAGE_KEY);
+            if (!raw)
+                return;
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed))
+                return;
+            const now = this.now();
+            const kept = parsed.filter((item) => item && isRetained(item.timestamp, now));
+            if (kept.length !== parsed.length)
+                this.storageImpl.setItem(STORAGE_KEY, JSON.stringify(kept));
+        }
+        catch {
+            // unreadable log: leave it, reads already treat it as empty
+        }
     }
     getLog() {
         if (!this.storageImpl)
@@ -118,6 +150,7 @@ export class LocalStorageJourneyLogAdapter {
                 typeof item === 'object' &&
                 typeof item.id === 'string' &&
                 typeof item.timestamp === 'number' &&
+                isRetained(item.timestamp, this.now()) &&
                 item.destination &&
                 typeof item.destination.label === 'string' &&
                 Number.isFinite(Number(item.destination.lat)) &&

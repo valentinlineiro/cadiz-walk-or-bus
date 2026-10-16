@@ -3,7 +3,7 @@ const GTFS_FEED_VERSION = 'nap-2026-09-18';
 // SHELL_HASH fingerprints every file in SHELL_URLS plus this file. Never edit it by hand:
 // `npm run shell:hash` rewrites it, and the architecture gate fails while it is stale. A new
 // hash is what makes installed clients drop the previous cache-first shell.
-const SHELL_HASH = 'a67490026563';
+const SHELL_HASH = '9d4101520a33';
 const CACHE_VERSION = `${SHELL_HASH}-${GTFS_FEED_VERSION}`;
 const CACHE_NAME = `andar-o-bus-shell-${CACHE_VERSION}`;
 
@@ -19,6 +19,7 @@ const SHELL_URLS = [
   '/vendor/leaflet/leaflet.css',
   '/web/ui.js',
   '/web/favorites.js',
+  '/web/history.js',
   '/web/map.js',
   '/web/recent.js',
   '/web/scenario.js',

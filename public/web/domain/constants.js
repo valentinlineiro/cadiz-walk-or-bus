@@ -14,3 +14,10 @@ export const DEFAULT_DIVERSITY_THRESHOLDS = {
 };
 // Walking and the bus are "equivalent" when their door-to-door times differ by at most this.
 export const EQUIVALENT_WITHIN_MINUTES = 1;
+// Recents and the journey log are kept this long, then dropped (favourites are never expired).
+export const HISTORY_RETENTION_DAYS = 30;
+export const HISTORY_RETENTION_MS = HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+/** Whether an entry saved at `savedAt` (ms since epoch) is still within the retention window. */
+export function isRetained(savedAt, now) {
+    return Number.isFinite(savedAt) && now - savedAt <= HISTORY_RETENTION_MS;
+}

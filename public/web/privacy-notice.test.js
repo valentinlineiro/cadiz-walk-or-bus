@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { MAX_ENTRIES } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
+import { HISTORY_RETENTION_DAYS } from './domain/constants.js';
 
 // The privacy page states numbers and behaviours; each is read back from the code so the page
 // cannot silently drift from what the application does.
@@ -15,8 +16,10 @@ test('shouldStateTheLocalLimitsThatTheCodeEnforcesWhenDescribingStoredData', () 
   const recents = constant(read('public/web/recent.js'), 'MAX_RECENT');
 
   assert.match(page, new RegExp(`hasta ${favorites}, hasta que los quites`));
-  assert.match(page, new RegExp(`<td>hasta ${recents}</td>`));
-  assert.match(page, new RegExp(`<td>hasta ${MAX_ENTRIES}</td>`));
+  assert.match(page, new RegExp(`<td>hasta ${recents}, durante ${HISTORY_RETENTION_DAYS} días</td>`));
+  assert.match(page, new RegExp(`<td>hasta ${MAX_ENTRIES}, durante ${HISTORY_RETENTION_DAYS} días</td>`));
+  assert.match(page, new RegExp(`se eliminan solos a los ${HISTORY_RETENTION_DAYS} días`));
+  assert.match(page, /Borrar historial/);
 });
 
 test('shouldStateTheProxyCacheRetentionThatTheWorkerUsesWhenDescribingServerCopies', () => {
