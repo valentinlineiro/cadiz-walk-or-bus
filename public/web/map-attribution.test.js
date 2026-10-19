@@ -37,6 +37,15 @@ test('shouldCreditOpenStreetMapOnTilesWhenMapIsInitialised', () => {
   assert.match(calls.tileOptions.attribution, /openstreetmap\.org\/copyright/);
 });
 
+test('shouldCreditTheRoutingProvidersAndLinkFixTheMapWhenMapIsInitialised', () => {
+  const calls = withFakeLeaflet(() => initMap(() => {}, null));
+  const credit = calls.tileOptions.attribution;
+
+  assert.match(credit, /href="https:\/\/project-osrm\.org\/"[^>]*>OSRM<\/a>/);
+  assert.match(credit, /href="https:\/\/www\.fossgis\.de\/"[^>]*>FOSSGIS<\/a>/);
+  assert.match(credit, /href="https:\/\/www\.openstreetmap\.org\/fixthemap"/);
+});
+
 test('shouldPlaceAttributionAwayFromTheBottomSheetAndLinkPrivacyWhenMapIsInitialised', () => {
   const calls = withFakeLeaflet(() => initMap(() => {}, null));
 

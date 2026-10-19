@@ -26,7 +26,10 @@ export function initMap(onPin, onMapClick) {
   }).addTo(map);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    attribution: [
+      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors<br>',
+      'Rutas: <a href="https://project-osrm.org/" target="_blank" rel="noopener">OSRM</a> · <a href="https://www.fossgis.de/" target="_blank" rel="noopener">FOSSGIS</a> · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">Mejorar el mapa</a>',
+    ].join(' | '),
   }).addTo(map);
   map._onPin = onPin;
   if (onMapClick) {

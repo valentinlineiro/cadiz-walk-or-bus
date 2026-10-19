@@ -48,6 +48,8 @@
   #map { position: absolute; inset: 0; z-index: 1; }
   /* viewport-fit=cover: keep the OSM credit out from under the notch / status bar */
   .leaflet-top.leaflet-right { margin-top: env(safe-area-inset-top, 0px); }
+  /* The attribution wraps to two lines on narrow screens: keep the zoom buttons below it. */
+  @media (max-width: 640px) { .leaflet-top.leaflet-left { margin-top: calc(36px + env(safe-area-inset-top, 0px)); } }
 
   /* Bottom Sheet */
   #sheet {
