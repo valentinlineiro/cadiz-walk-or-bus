@@ -95,7 +95,6 @@ function normalizeEntry(item: any): DecisionRecord | null {
 
   const normalized: DecisionRecord = {
     timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
-    ...(typeof item.startedAt === 'number' ? { startedAt: item.startedAt } : {}),
     destination: {
       label: item.destination?.label != null ? String(item.destination.label).trim() : '',
       lat: Number(item.destination?.lat),
@@ -208,7 +207,6 @@ export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
           ...existing,
           id: normalized.id ?? existing.id,
           timestamp: normalized.timestamp,
-          ...(normalized.startedAt !== undefined ? { startedAt: normalized.startedAt } : {}),
           destination: normalized.destination,
           recommendation: normalized.recommendation,
           choice: normalized.choice ?? existing.choice ?? null,
