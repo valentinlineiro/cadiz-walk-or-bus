@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { __resetArrivalsCache } from './worker.js';
 import stopsJson from './stops.json' with { type: 'json' };
@@ -244,7 +244,18 @@ function withTurso(upstream, { slotBusy = false, writeDelayMs = 0 } = {}) {
     const { sql, args } = JSON.parse(init.body).requests[0].stmt;
     const v = args.map((a) => a.value);
     let result;
-    if (sql.startsWith('SELECT')) {
+    if (sql.startsWith('SELECT next_at FROM proxy_slot')) {
+      // Circuit-breaker state: block:<upstream> = reopen time, blockdur:<upstream> = last window.
+      result = { rows: slots.has(v[0]) ? [[{ type: 'integer', value: String(slots.get(v[0])) }]] : [] };
+    } else if (sql.startsWith('UPDATE proxy_slot')) {
+      const [nextAt, name, now] = [Number(v[0]), v[1], Number(v[2])];
+      const claimed = slots.has(name) && slots.get(name) <= now;
+      if (claimed) slots.set(name, nextAt);
+      result = { rows: [], affected_row_count: claimed ? 1 : 0 };
+    } else if (sql.startsWith('INSERT OR REPLACE INTO proxy_slot')) {
+      slots.set(v[0], Number(v[1]));
+      result = { rows: [], affected_row_count: 1 };
+    } else if (sql.startsWith('SELECT')) {
       const hit = cache.get(v[0]);
       result = { rows: hit && hit.expires_at > Number(v[1]) ? [[{ type: 'text', value: hit.body }]] : [] };
     } else if (sql.startsWith('DELETE FROM proxy_slot')) {
@@ -391,9 +402,181 @@ test('shouldTurnUpstream429Into503WithRetryAfterAndKeepUpstream400AsNoResultWhen
   const limited = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
   assert.equal(limited.status, 503);
   assert.equal(limited.headers.get('retry-after'), '30');
+  __resetArrivalsCache(); // a fresh isolate: the breaker opened by the 429 is covered by its own tests
   withTurso(async () => ({ ok: false, status: 400, text: async () => '' }));
   const bad = await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
   assert.equal(bad.status, 404);
+});
+
+// --- Circuit breaker: 403/429 from an upstream stop the calls for max(Retry-After, 30 s) ---
+const BREAKER_OSRM_OK = '{"code":"Ok","routes":[{"distance":120,"duration":90,"geometry":{"coordinates":[[-6.29,36.53],[-6.28,36.54]]}}]}';
+const FOOT2 = 'http://x/route/foot/-6.31,36.50;-6.29,36.52';
+const DRIVE = 'http://x/route/drive/-6.30,36.50;-6.29,36.51';
+const reply = (status, retryAfter) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  headers: new Headers(retryAfter === undefined ? {} : { 'retry-after': String(retryAfter) }),
+  text: async () => (status === 200 ? BREAKER_OSRM_OK : ''),
+});
+// Upstream double whose answer can change; counts only calls that reach the provider.
+function provider(first) {
+  const state = { calls: 0, answer: first };
+  const upstream = async () => { state.calls++; return state.answer(); };
+  return Object.assign(state, { upstream });
+}
+async function assertBlocked(res) {
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).code, 'UPSTREAM_REJECTED');
+  assert.ok(Number(res.headers.get('retry-after')) > 0, 'the client is told when to come back');
+}
+const trip = async (retryAfter, url = FOOT) => {
+  const p = provider(() => reply(429, retryAfter));
+  const slots = withTurso(p.upstream).slots;
+  const res = await fetchRoute(url);
+  return { p, slots, res };
+};
+
+test('shouldBlockTheUpstreamForRetryAfterWithoutCallingItWhenItAnswers429', async () => {
+  const { p, res } = await trip(120);
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get('retry-after'), '120');
+
+  const blocked = await fetchRoute(FOOT2);
+  await assertBlocked(blocked.clone());
+  assert.ok(Number(blocked.headers.get('retry-after')) > 0 && Number(blocked.headers.get('retry-after')) <= 120);
+  assert.equal(p.calls, 1, 'the blocked request never reaches the provider');
+});
+
+test('shouldBlockOnlyTheRejectingUpstreamWhenFootIsLimitedAndDriveIsNot', async () => {
+  const { p } = await trip(120);
+  const drive = provider(() => reply(200));
+  withTurso(drive.upstream);
+  assert.equal((await fetchRoute(DRIVE)).status, 200);
+  assert.equal(drive.calls, 1);
+  assert.equal(p.calls, 1);
+});
+
+test('shouldApplyTheThirtySecondFloorWhenRetryAfterIsMissingOrShorter', async () => {
+  for (const retryAfter of [undefined, 5, 'soon']) {
+    __resetArrivalsCache();
+    const { slots } = await trip(retryAfter);
+    const reopensIn = (slots.get('block:osrm-foot') - Date.now()) / 1000;
+    assert.ok(reopensIn > 29 && reopensIn <= 30, `Retry-After ${retryAfter}: ${reopensIn}s`);
+  }
+});
+
+test('shouldStayBlockedAcrossIsolatesWhenTheStateLivesInTurso', async () => {
+  const { p, slots } = await trip(120);
+  __resetArrivalsCache(); // another isolate: no memory, same Turso
+  withTurso(p.upstream).slots.set('block:osrm-foot', slots.get('block:osrm-foot'));
+  assert.equal((await fetchRoute(FOOT2)).status, 503);
+  assert.equal(p.calls, 1);
+});
+
+test('shouldLetExactlyOneProbeThroughWhenTheWindowEndsAndCloseOnSuccess', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 10_000_000 });
+  try {
+    const { p, slots } = await trip(60);
+    p.answer = () => reply(200);
+    mock.timers.tick(61_000);
+    const results = await Promise.all([fetchRoute(FOOT2), fetchRoute(FOOT2), fetchRoute(FOOT2)]);
+
+    assert.equal(p.calls, 2, 'one original call plus one probe');
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 503, 503]);
+    assert.equal(slots.size, 0, 'a successful probe clears the Turso state');
+    assert.equal((await fetchRoute(FOOT)).status, 200, 'closed again');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldDoubleTheWindowAndCapItAtFifteenMinutesWhenTheProbeIsRejectedAgain', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 20_000_000 });
+  try {
+    const { slots } = await trip(40);
+    assert.equal(slots.get('blockdur:osrm-foot'), 40_000);
+    for (const expected of [80_000, 160_000, 320_000, 640_000, 900_000, 900_000]) {
+      mock.timers.tick(slots.get('blockdur:osrm-foot') + 1_000);
+      assert.equal((await fetchRoute(FOOT2)).status, 503);
+      assert.equal(slots.get('blockdur:osrm-foot'), expected);
+    }
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldNotOpenTheBreakerWhenTheUpstreamFailsWith5xxOrTimesOut', async () => {
+  const p = provider(() => reply(503));
+  const { slots } = { slots: withTurso(p.upstream).slots };
+  assert.equal((await fetchRoute(FOOT)).status, 502);
+  assert.equal((await fetchRoute(FOOT2)).status, 502);
+  assert.equal(p.calls, 2, 'a 5xx is not a block');
+  assert.equal(slots.size, 0);
+});
+
+test('shouldFailClosedWhenTursoIsConfiguredButDownOnAnOsrmCall', async () => {
+  let osrm = 0;
+  globalThis.fetch = async (url) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    osrm++;
+    return reply(200);
+  };
+  const res = await fetchRoute(FOOT);
+  await assertError(res, { status: 503, code: 'BUSY', retryAfter: '2' });
+  assert.equal(osrm, 0, 'no shared state, no traffic');
+});
+
+test('shouldKeepAKnownBlockWhenTursoGoesDownAfterTheBreakerOpened', async () => {
+  const { p } = await trip(120);
+  const upstream = p.upstream;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) throw new TypeError('turso unreachable');
+    return upstream(url, init);
+  };
+  await assertBlocked(await fetchRoute(FOOT2));
+  assert.equal(p.calls, 1);
+});
+
+test('shouldBlockInMemoryWhenTursoIsNotConfigured', async () => {
+  const p = provider(() => reply(429, 90));
+  globalThis.fetch = p.upstream;
+  assert.equal((await worker.fetch(new Request(FOOT))).status, 503);
+  assert.equal((await worker.fetch(new Request(FOOT2))).status, 503);
+  assert.equal(p.calls, 1, 'local dev still protects the provider');
+});
+
+test('shouldNotConsumeTheNominatimSlotWhenTheBreakerIsOpen', async () => {
+  const p = provider(() => ({ ...reply(429, 120), text: async () => '' }));
+  const { slots } = { slots: withTurso(p.upstream).slots };
+  assert.equal((await worker.fetch(new Request('http://x/geocode?q=plaza'), TURSO_ENV)).status, 503);
+  const slotAfterTrip = slots.get('nominatim');
+  const blocked = await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
+  await assertBlocked(blocked);
+  assert.equal(p.calls, 1);
+  assert.equal(slots.get('nominatim'), slotAfterTrip, 'the 1.1 s gap is not spent on a call that never goes out');
+});
+
+test('shouldServeCachedRoutesWhenTheUpstreamIsBlocked', async () => {
+  const p = provider(() => reply(200));
+  withTurso(p.upstream);
+  const stop = stopsJson[0];
+  const fromStop = `http://x/route/foot/${stop.lon},${stop.lat};-6.29,36.51`;
+  assert.equal((await fetchRoute(fromStop)).status, 200);
+  p.answer = () => reply(429, 300);
+  assert.equal((await fetchRoute(FOOT)).status, 503); // opens the breaker with another route
+  const cached = await fetchRoute(fromStop);
+  assert.equal(cached.status, 200);
+  assert.equal(cached.headers.get('x-proxy-cache'), 'hit');
+});
+
+test('shouldLogOnlyTheUpstreamAndTheStateWhenTheBreakerOpensAndBlocks', async () => {
+  await trip(120);
+  await fetchRoute(FOOT2);
+  const opened = ev('upstream_breaker')[0];
+  const blocked = ev('upstream_blocked')[0];
+  assert.deepEqual(Object.keys(opened).sort(), ['event', 'level', 'probe', 'state', 'status', 'upstream', 'window_s']);
+  assert.deepEqual(Object.keys(blocked).sort(), ['event', 'level', 'state', 'upstream']);
+  assert.doesNotMatch(lines.join('\n'), /-6\.3|36\.5|route\/foot/);
 });
 
 test('shouldReport503WhenUnconfiguredAnd200WhenTursoAnswersOnProxyHealth', async () => {

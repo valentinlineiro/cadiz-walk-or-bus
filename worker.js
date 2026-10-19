@@ -81,8 +81,9 @@ const knownStop = (id) => (KNOWN_STOPS.has(id) ? id : 'other');
 const routeKind = (pathname) => (pathname === '/api' ? 'api' : pathname === '/geocode' ? 'geocode' : 'route');
 
 // --- Upstream proxy: Nominatim + OSRM, cached/rate-limited via optional Turso. ---
-// Needs secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN. Nominatim cache misses FAIL CLOSED
-// (503 + Retry-After) when the global limiter is unavailable; cache hits and OSRM keep working.
+// Needs secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN. Upstream calls FAIL CLOSED (503 + Retry-After)
+// when their shared state is unavailable: the Nominatim limiter and every upstream's circuit breaker
+// (below). Cache hits keep working.
 // Staleness contract: shared cache 24h; browsers may reuse a response for 1h.
 const PROXY_UA = 'cadiz-walk-or-bus/0.1 (+https://github.com/valentinlineiro/cadiz-walk-or-bus)';
 const PROXY_TTL_S = 24 * 60 * 60;
@@ -148,13 +149,115 @@ const errorBody = (code, error) => ({ code, error });
 const errorResponse = (code, error, status, headers) =>
   Response.json(errorBody(code, error), headers ? { status, headers } : { status });
 
-async function upstreamJson(url, isValid) {
+// --- Circuit breaker per upstream (nominatim, osrm-foot, osrm-drive) ---
+// A 403/429 means the provider is limiting or blocking us: stop calling it for max(Retry-After, 30 s),
+// then let ONE probe through; a probe that is rejected again doubles the window (cap 15 min), any
+// other answer below 500 closes the breaker. State is one pair of `proxy_slot` rows per upstream
+// (`block:<upstream>` = reopen time, `blockdur:<upstream>` = last window): no user data. It is
+// shared across isolates through Turso. Turso configured but failing => fail CLOSED (503), never
+// open: the in-isolate memory only ever keeps a block we already know about. Without Turso
+// secrets (local dev) the memory is the only state.
+const BREAKER_MIN_MS = 30_000;
+const BREAKER_MAX_MS = 15 * 60_000;
+const BREAKER_PROBE_MS = 10_000; // how long a claimed probe holds the others back
+const UPSTREAM_BY_HOST = {
+  'nominatim.openstreetmap.org': 'nominatim',
+  'routing.openstreetmap.de': 'osrm-foot',
+  'router.project-osrm.org': 'osrm-drive',
+};
+const memoryBlock = new Map(); // upstream -> reopen time (ms)
+const memoryWindow = new Map(); // upstream -> last window (ms)
+const retryAfterSeconds = (ms) => String(Math.max(1, Math.ceil(ms / 1000)));
+const blockedResponse = (until, now) =>
+  errorResponse('UPSTREAM_REJECTED', 'upstream blocked', 503, { 'retry-after': retryAfterSeconds(until - now) });
+
+// Returns { response } when the call must not go out, or { probe } when it may.
+async function breakerGate(env, upstream) {
+  const now = Date.now();
+  const known = memoryBlock.get(upstream) ?? 0;
+  if (known > now) {
+    logEvent('upstream_blocked', { upstream, state: 'open' }, 'warn');
+    return { response: blockedResponse(known, now) };
+  }
+  const db = tursoDb(env);
+  if (!db) return { probe: false };
+  let until;
+  try {
+    until = await db.first('SELECT next_at FROM proxy_slot WHERE name = ?1', [`block:${upstream}`]);
+  } catch {
+    logEvent('upstream_blocked', { upstream, state: 'state_unavailable' }, 'warn');
+    return { response: errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' }) };
+  }
+  if (until === null) return { probe: false };
+  until = Number(until);
+  if (until > now) {
+    memoryBlock.set(upstream, until);
+    logEvent('upstream_blocked', { upstream, state: 'open' }, 'warn');
+    return { response: blockedResponse(until, now) };
+  }
+  // Window over: exactly one request claims the probe, the rest keep waiting.
+  let claimed;
+  try {
+    claimed = await db.run('UPDATE proxy_slot SET next_at = ?1 WHERE name = ?2 AND next_at <= ?3', [now + BREAKER_PROBE_MS, `block:${upstream}`, now]);
+  } catch {
+    return { response: errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' }) };
+  }
+  if (claimed > 0) return { probe: true };
+  logEvent('upstream_blocked', { upstream, state: 'probe_taken' }, 'warn');
+  return { response: blockedResponse(now + BREAKER_PROBE_MS, now) };
+}
+
+// Called with the upstream's HTTP status as soon as it answers.
+async function breakerReport(env, upstream, probe, status, retryAfter) {
+  const db = tursoDb(env);
+  if (status === 403 || status === 429) {
+    const now = Date.now();
+    let previous = memoryWindow.get(upstream) ?? 0;
+    if (db) {
+      previous = Math.max(previous, Number(await db.first('SELECT next_at FROM proxy_slot WHERE name = ?1', [`blockdur:${upstream}`]).catch(() => 0)) || 0);
+    }
+    const asked = Math.max(BREAKER_MIN_MS, (Number(retryAfter) || 0) * 1000);
+    const window = Math.min(BREAKER_MAX_MS, previous > 0 ? Math.max(asked, previous * 2) : asked);
+    memoryBlock.set(upstream, now + window);
+    memoryWindow.set(upstream, window);
+    if (db) {
+      await db.run('INSERT OR REPLACE INTO proxy_slot (name, next_at) VALUES (?1, ?2)', [`block:${upstream}`, now + window]).catch(() => {});
+      await db.run('INSERT OR REPLACE INTO proxy_slot (name, next_at) VALUES (?1, ?2)', [`blockdur:${upstream}`, window]).catch(() => {});
+    }
+    logEvent('upstream_breaker', { upstream, state: 'opened', status, window_s: Math.round(window / 1000), probe }, 'warn');
+  } else if (status < 500 && (probe || memoryBlock.has(upstream))) {
+    memoryBlock.delete(upstream);
+    memoryWindow.delete(upstream);
+    if (db) {
+      await db.run('DELETE FROM proxy_slot WHERE name = ?1', [`block:${upstream}`]).catch(() => {});
+      await db.run('DELETE FROM proxy_slot WHERE name = ?1', [`blockdur:${upstream}`]).catch(() => {});
+    }
+    logEvent('upstream_breaker', { upstream, state: 'closed' });
+  }
+}
+
+// `beforeCall` runs once the breaker allows the call (the Nominatim slot is only claimed then).
+async function callUpstream(env, url, isValid, beforeCall) {
+  const upstream = UPSTREAM_BY_HOST[new URL(url).hostname];
+  const gate = await breakerGate(env, upstream);
+  if (gate.response) return gate.response;
+  if (beforeCall) {
+    const stop = await beforeCall();
+    if (stop) return stop;
+  }
+  return upstreamJson(url, isValid, (status, retryAfter) =>
+    breakerReport(env, upstream, gate.probe, status, retryAfter).catch(() => {}),
+  );
+}
+
+async function upstreamJson(url, isValid, report) {
   let r;
   try {
     r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA }, signal: AbortSignal.timeout(5000) });
   } catch {
     return errorResponse('UPSTREAM_UNREACHABLE', 'upstream unreachable', 502);
   }
+  await report?.(r.status, r.headers?.get?.('retry-after'));
   if (r.status >= 500) return errorResponse('UPSTREAM_ERROR', `upstream ${r.status}`, 502);
   if (r.status === 400 || r.status === 404) return errorResponse('UPSTREAM_NOT_FOUND', `upstream ${r.status}`, 404);
   if (!r.ok) {
@@ -248,15 +351,14 @@ function handleGeocode(url, env) {
   const q = (url.searchParams.get('q') ?? '').trim().replace(/\s+/g, ' ');
   if (q.length < 2 || q.length > 100) return errorResponse('INVALID_QUERY', 'invalid q', 400);
   const limit = Math.min(5, Math.max(1, Math.trunc(Number(url.searchParams.get('limit'))) || 5));
-  return proxyCached(env, `geo:${q.toLowerCase()}:${limit}`, async () => {
-    if (!(await claimNominatimSlot(tursoDb(env)))) {
-      return errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' });
-    }
-    return upstreamJson(
+  return proxyCached(env, `geo:${q.toLowerCase()}:${limit}`, () =>
+    callUpstream(
+      env,
       `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=${limit}&viewbox=${CADIZ_VIEWBOX}&bounded=1&q=${encodeURIComponent(q)}`,
       validNominatim,
-    );
-  });
+      async () => ((await claimNominatimSlot(tursoDb(env))) ? null : errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' })),
+    ),
+  );
 }
 
 function handleRoute(url, env) {
@@ -269,7 +371,7 @@ function handleRoute(url, env) {
     return errorResponse('OUTSIDE_SERVICE_AREA', 'outside service area', 400);
   }
   const coords = `${lon1.toFixed(5)},${lat1.toFixed(5)};${lon2.toFixed(5)},${lat2.toFixed(5)}`;
-  const produce = () => upstreamJson(`${ROUTE_UPSTREAM[m[1]]}${coords}?overview=full&geometries=geojson`, validOsrm);
+  const produce = () => callUpstream(env, `${ROUTE_UPSTREAM[m[1]]}${coords}?overview=full&geometries=geojson`, validOsrm);
   if (!STOP_ORIGINS.has(`${lon1.toFixed(5)},${lat1.toFixed(5)}`)) return proxyUncached(m[1], produce);
   return proxyCached(env, `route:${m[1]}:${coords}`, produce);
 }
@@ -293,6 +395,8 @@ const inflightArrivals = new Map();
 export function __resetArrivalsCache() {
   isolateArrivals.clear();
   inflightArrivals.clear();
+  memoryBlock.clear();
+  memoryWindow.clear();
 }
 
 // IPv6 clients own a whole /64, so key on its 4 hextets; IPv4-mapped IPv6 collapses to its IPv4.
