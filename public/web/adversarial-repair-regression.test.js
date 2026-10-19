@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isPointInCadiz, CADIZ_SERVICE_AREA_POLYGON } from './domain/topology.js';
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
-import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
+import { TimeoutTransitAdapter } from './infrastructure/transit/TimeoutTransitAdapter.js';
 import { FindBestJourneysUseCase } from './application/use-cases/FindBestJourneysUseCase.js';
 import { filterDiverseAlternatives } from './domain/diversity.js';
 import { createWalkCandidate, createBusCandidates, selectCandidates } from './domain/planner.js';
@@ -205,28 +205,15 @@ test('shouldNeverPruneDirectWalkWhenFilteringBySimilarityDelta', () => {
 // ISSUE #21: AUTHORITATIVE EMPTY REALTIME CONTRACT (POLICY A)
 // ============================================================================
 
-test('shouldNotQueryScheduledGtfsWhenRealtimeArrivalsAreAnAuthoritativeEmptyList', async () => {
-  let scheduledQueried = false;
+test('shouldKeepAnAuthoritativeEmptyRealtimeListAsLiveNoBusesWhenArrivalsAreAskedWithoutAnyFallback', async () => {
   const realtime = {
     getStops: async () => [{ stop: '101', lat: 36.52, lon: -6.28 }],
     getLines: async () => ({ '1': { Centro: ['101'] } }),
     getArrivals: async () => [], // Live API returned 200 OK with no live vehicles (authoritative)
   };
 
-  const scheduled = {
-    getStops: async () => [{ stop: '101', lat: 36.52, lon: -6.28 }],
-    getLines: async () => ({ '1': { Centro: ['101'] } }),
-    getArrivals: async () => {
-      scheduledQueried = true;
-      return [
-        { line: '1', destination: 'Plaza España', minutes: 14, source: 'scheduled' },
-      ];
-    },
-  };
+  const adapter = new TimeoutTransitAdapter(realtime, 100);
 
-  const resilient = new ResilientTransitAdapter(realtime, scheduled, 100);
-  const arrivals = await resilient.getArrivals('101');
-
-  assert.equal(scheduledQueried, false, 'Scheduled adapter must not be queried when realtime returns empty array');
-  assert.deepEqual(arrivals, []);
+  assert.deepEqual(await adapter.getArrivals('101'), []);
+  assert.deepEqual(await adapter.getArrivalsResult('101'), { status: 'live', arrivals: [] });
 });

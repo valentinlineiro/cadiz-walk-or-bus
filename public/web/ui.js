@@ -201,15 +201,17 @@ export function errorCardHTML(query, customMessage) {
   return `<div class="decision-error">No encontramos${q}. Prueba con otro nombre.</div>`;
 }
 
-// Shown when no nearby stop returned live OR scheduled data. The walking time is information,
-// never a verdict: with no transit data we cannot say the bus is not better.
+// Shown when no nearby stop got an answer from the municipal service. Walking is offered as an
+// option to weigh, never as a verdict: with no bus data we cannot say it is faster or better.
 export function noTransitDataCardHTML(walkMinutes, originKind) {
-  const walk = typeof walkMinutes === 'number' ? `<div class="decision-fact">Andando: ${Math.round(walkMinutes)}′</div>` : '';
+  const walk = typeof walkMinutes === 'number'
+    ? `<div class="decision-line">Puedes valorar ir andando; el tiempo estimado a pie es de ${Math.round(walkMinutes)} minutos.</div>`
+    : '';
   return `
     ${originNoteHTML(originKind)}
     <div class="decision-card no-data">
       <div class="decision-mode">SIN DATOS DE HORARIOS</div>
-      <div class="decision-line">Ahora mismo no tenemos llegadas ni horarios de las paradas cercanas, así que no podemos comparar con el bus.</div>
+      <div class="decision-line">No podemos consultar los horarios del autobús ahora mismo, así que no podemos compararlo con andar.</div>
       ${walk}
     </div>
   `;
@@ -247,11 +249,7 @@ export function buildAlternativeCardHTML(alt, primary) {
     ? (alt.metadata?.line ? `Bus L${escapeHTML(alt.metadata.line)}` : 'Bus')
     : 'Andar';
   const degradedMark = (alt.breakdown?.lastMileDegraded ?? alt.exactJourney?.lastMileDegraded) ? '~' : '';
-  const sourceLabel = alt.metadata?.source === 'scheduled'
-    ? 'Horario programado'
-    : alt.metadata?.source === 'realtime'
-      ? 'Tiempo real'
-      : '';
+  const sourceLabel = alt.metadata?.source === 'realtime' ? 'Tiempo real' : '';
 
   return `
     <button type="button" class="alternative-card" data-identity="${escapeHTML(serializeIdentity(alt.identity))}">
@@ -269,7 +267,6 @@ export function buildAlternativeCardHTML(alt, primary) {
 }
 
 function sourceLabelFor(source) {
-  if (source === 'scheduled') return 'Horario programado';
   if (source === 'realtime') return 'Tiempo real';
   return '';
 }
@@ -831,7 +828,7 @@ async function routeToDestination(dest) {
   setState('ROUTED');
 
   if (decision.transitData === 'unavailable') {
-    // No stop answered (live or scheduled): do not recommend walking, do not log a "choice".
+    // No stop answered: do not recommend walking, do not log a "choice".
     currentPlanningSession = null;
     lastNear = [];
     arrivalsByStop = new Map();
@@ -1197,6 +1194,17 @@ export function initUI() {
   }
 }
 
+// A catalogue that failed to load is an error the user can retry; nothing stands in for it.
+function showCatalogueError() {
+  setState('FAILED', 'No se pudieron cargar las paradas');
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.id = 'retry-catalogues';
+  retry.textContent = 'Reintentar';
+  retry.addEventListener('click', locate);
+  document.getElementById('status')?.append(' ', retry);
+}
+
 // Locating can hang forever (denied, stuck "prompt" permission state, no
 // GPS hardware) — never leave the user stuck behind a spinner: offer a
 // manual skip immediately-ish, and fall back to it automatically too.
@@ -1219,7 +1227,7 @@ function locate() {
         lines = l;
         setSheetState('IDLE');
       })
-      .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
+      .catch(showCatalogueError);
   };
 
   if (skipBtn) {
@@ -1247,7 +1255,7 @@ function locate() {
             lines = l;
             setSheetState('IDLE');
           })
-          .catch(() => setState('FAILED', 'No se pudieron cargar las paradas'));
+          .catch(showCatalogueError);
         return;
       }
       me = resolved.origin;
@@ -1261,7 +1269,7 @@ function locate() {
         stops = await cachedTransitPort.getStops();
         lines = await cachedTransitPort.getLines();
       } catch {
-        setState('FAILED', 'No se pudieron cargar las paradas');
+        showCatalogueError();
         return;
       }
       setState('STOPS_LOADED', '');

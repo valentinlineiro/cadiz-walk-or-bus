@@ -108,7 +108,7 @@ export function createBusCandidates({
       identity: createBusIdentity(lineStr, stopId, alightId),
       mode: 'bus',
       estimatedMinutes: totalEstimated,
-      dataQuality: arr.source === 'scheduled' ? 'estimated' : (arr.minutes != null ? 'live' : 'estimated'),
+      dataQuality: arr.minutes != null ? 'live' : 'estimated',
       estimate: {
         walkToStopMinutes: walkToStop,
         waitMinutes: arr.minutes,

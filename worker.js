@@ -53,7 +53,7 @@ export function parseArrivals(html) {
 
   // If the table contains <td> data rows but we found neither actionable live arrivals
   // nor an explicit out-of-service status (e.g. only static clock times, bounds, error messages,
-  // or empty cells), live realtime tracking is unavailable -> return null to allow GTFS scheduled fallback.
+  // or empty cells), live realtime tracking is unavailable -> return null so the caller reports the panel as unavailable.
   const allTdRows = rows.filter((r) => /<td[^>]*>/i.test(r));
   if (allTdRows.length > 0 && !hasLiveArrival && !hasAuthoritativeStatus) {
     return null;

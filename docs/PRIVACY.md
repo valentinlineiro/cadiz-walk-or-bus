@@ -46,7 +46,7 @@ No cookies, no analytics (no `document.cookie` / `Set-Cookie` in the code; check
 Consequences worth stating: the user's GPS position is no longer stored in the shared cache. The Worker cannot
 tell a GPS fix from a stop by itself, so a fix that lands exactly on a stop (to 5 decimals, ~1 m) is treated as that
 stop; routes that start at a stop still store the **destination** coordinates (a place someone asked about, not who).
-A topology that falls back to GTFS stops (ids not in `stops.json`) is never cached either. The position still
+The position still
 reaches OSRM, which has to compute the route, and appears in the request URL seen by Cloudflare.
 
 ## Not verified (outside what the code can show)

@@ -100,13 +100,13 @@ test('shouldReturn502WhenTheUpstreamHtmlIsMalformedOrUnrecognizable', async () =
   assert.equal(emptyArrivalRes.status, 502);
   assert.deepEqual(await emptyArrivalRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
-  // Upstream returns a table containing ONLY timetable clock times (e.g. 15:30) and no live relative arrivals -> 502 to trigger scheduled GTFS fallback
+  // Upstream returns a table containing ONLY timetable clock times (e.g. 15:30) and no live relative arrivals -> 502 (the app reports no bus data)
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>15:30</td></tr></table>' });
   const clockOnlyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(clockOnlyRes.status, 502);
   assert.deepEqual(await clockOnlyRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
-  // Upstream returns a table containing ONLY bounds (e.g. > 45 min) without live arrivals or out-of-service indicator -> 502 to trigger scheduled GTFS fallback
+  // Upstream returns a table containing ONLY bounds (e.g. > 45 min) without live arrivals or out-of-service indicator -> 502 (the app reports no bus data)
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>> 45 min</td></tr></table>' });
   const boundsOnlyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(boundsOnlyRes.status, 502);

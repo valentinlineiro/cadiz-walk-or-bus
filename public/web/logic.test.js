@@ -1829,19 +1829,6 @@ test('shouldRenderHeroAndAlternativesWhenBuildingPlanningCards', () => {
   assert.ok(!htmlSingle.includes('alternatives-container'));
 });
 
-test('shouldExposeAScheduledSourceLabelWhenTheBusCandidateIsScheduled', () => {
-  const scheduledBus = {
-    identity: createBusIdentity('1', '1106', '1204'),
-    mode: 'bus',
-    estimatedMinutes: 14,
-    exactJourney: { totalMinutes: 14 },
-    estimate: { walkToStopMinutes: 3, waitMinutes: 2, rideMinutes: 7, lastMileMinutes: 2 },
-    metadata: { line: '1', source: 'scheduled', alightStop: { name: 'Plaza Mina' } },
-  };
-
-  assert.ok(planningCardsHTML([scheduledBus], 0, { walkMinutes: 18 }).includes('Horario programado'));
-});
-
 test('shouldPromoteTheTappedAlternativeWhenRenderingDecisionWithAlternatives', () => {
   const cWalk = {
     identity: createWalkIdentity(),

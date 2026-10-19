@@ -1,7 +1,6 @@
 export { OsrmRoutingAdapter } from './routing/OsrmRoutingAdapter.js';
 export { MunicipalTransitAdapter } from './transit/MunicipalTransitAdapter.js';
-export { GtfsTransitAdapter } from './transit/GtfsTransitAdapter.js';
-export { ResilientTransitAdapter } from './transit/ResilientTransitAdapter.js';
+export { TimeoutTransitAdapter } from './transit/TimeoutTransitAdapter.js';
 export {
   NominatimGeocodingAdapter,
   CADIZ_VIEWBOX,
