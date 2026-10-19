@@ -58,7 +58,7 @@ reaches OSRM, which has to compute the route, and appears in the request URL see
 - The controller's identity and a contact address (the notice has none yet).
 - Legal review (GDPR/LOPDGDD obligations, information duties, provider terms).
 
-## Planned (F-10), not yet implemented
+## Planned privacy work (historical F-10 items)
 
 1. ~~This inventory and the notice.~~ Done.
 2. ~~A control to clear recents and the journey log, and a 30-day automatic retention for both.~~ Done.
