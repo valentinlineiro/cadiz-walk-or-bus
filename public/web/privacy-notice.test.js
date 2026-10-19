@@ -54,7 +54,7 @@ test('shouldNameBothRoutersWhenListingWhatLeavesTheDevice', () => {
   assert.match(page, /servidor demo de OSRM para el trayecto en bus/);
 });
 
-test('shouldCreditBothRoutingProvidersAndLinkFixTheMapInThePrivacyNotice', () => {
+test('shouldCreditBothRoutingProvidersAndLinkFixTheMapWhenShowingPrivacyNotice', () => {
   assert.match(page, /Crédito de las rutas/);
   assert.match(page, /href="https:\/\/project-osrm\.org\/"/);
   assert.match(page, /href="https:\/\/www\.fossgis\.de\/"/);
