@@ -1652,3 +1652,124 @@ test('shouldReportNoCacheStatusWhenARouteFromANonStopOriginIsAnswered', async ()
   const event = ev('proxy_request').at(-1);
   assert.deepEqual([event.kind, event.status, event.cache_status], ['foot', 200, 'none']);
 });
+
+// --- /table/foot: walking matrix (F2, step 2). Off by default; the contract is tested with a provider double ---
+const TABLE_ENV = { ...TURSO_ENV, TABLE_ENABLED: 'true' };
+const TC = '-6.30,36.50;-6.29,36.51;-6.28,36.52;-6.27,36.53';
+const tableUrl = (coords = TC, q = 'sources=0;1&destinations=2;3') => `http://x/table/foot/${coords}?${q}`;
+const fetchTable = (url = tableUrl(), env = TABLE_ENV) => worker.fetch(new Request(url), env);
+const wp = (d) => ({ location: [-6.3, 36.5], distance: d });
+const tableAnswer = (patch = {}) => ({
+  code: 'Ok',
+  durations: [[60, 120], [null, 30]],
+  sources: [wp(3), wp(4)],
+  destinations: [wp(5), wp(6)],
+  ...patch,
+});
+const tableProvider = (body, status = 200) => {
+  const state = { calls: 0, urls: [] };
+  const upstream = async (u) => { state.calls++; state.urls.push(String(u)); return { ok: status === 200, status, headers: new Headers(), text: async () => JSON.stringify(body) }; };
+  state.cache = withTurso(upstream);
+  return state;
+};
+
+test('shouldAnswerTableDisabledWithoutCallingTheProviderWhenTheSwitchIsOff', async () => {
+  const p = tableProvider(tableAnswer());
+  for (const env of [TURSO_ENV, { ...TURSO_ENV, TABLE_ENABLED: 'false' }]) {
+    const res = await fetchTable(tableUrl(), env);
+    await assertError(res, { status: 503, code: 'TABLE_DISABLED' });
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+  }
+  assert.equal(p.calls, 0);
+});
+
+test('shouldNormaliseTheMatrixAndNeverCacheItWhenTheProviderAnswers', async () => {
+  const p = tableProvider(tableAnswer());
+  const res = await fetchTable();
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await res.json(), { code: 'Ok', durations: [[60, 120], [null, 30]], snap_m: { sources: [3, 4], destinations: [5, 6] } });
+  assert.equal(p.urls[0], `https://routing.openstreetmap.de/routed-foot/table/v1/foot/-6.30000,36.50000;-6.29000,36.51000;-6.28000,36.52000;-6.27000,36.53000?sources=0;1&destinations=2;3`);
+  skipGap(p.cache);
+  await fetchTable();
+  assert.equal(p.calls, 2, 'no cache and no coalescing');
+});
+
+test('shouldRejectTheRequestBeforeAnyProviderCallWhenTheMatrixContractIsBroken', async () => {
+  const p = tableProvider(tableAnswer());
+  const nine = Array.from({ length: 9 }, (_, i) => `-6.3,36.${40 + i}`).join(';');
+  const eight = Array.from({ length: 8 }, (_, i) => `-6.3,36.${40 + i}`).join(';');
+  const bad = [
+    tableUrl('-6.30,36.50', 'sources=0&destinations=0'),
+    tableUrl(nine, 'sources=0&destinations=1'),
+    tableUrl(eight, 'sources=0;1;2;3;4&destinations=5'),
+    tableUrl(TC, 'sources=0;0&destinations=2;3'),
+    tableUrl(TC, 'sources=0;1&destinations=1;2'),
+    tableUrl(TC, 'sources=0;1&destinations=2;9'),
+    tableUrl(TC, 'sources=0;1'),
+    tableUrl(TC, 'sources=a&destinations=1'),
+    tableUrl(TC, 'sources=&destinations=1'),
+  ];
+  for (const url of bad) await assertError(await fetchTable(url), { status: 400, code: 'INVALID_ROUTE' });
+  assert.equal(p.calls, 0);
+});
+
+test('shouldAcceptEightCoordinatesAndRepeatedPositionsAcrossListsWhenTheIndicesAreDisjoint', async () => {
+  const same = '-6.30,36.50;-6.30,36.50';
+  const p = tableProvider({ code: 'Ok', durations: [[0]], sources: [wp(1)], destinations: [wp(1)] });
+  const res = await fetchTable(tableUrl(same, 'sources=0&destinations=1'));
+  assert.equal(res.status, 200);
+  assert.equal(p.calls, 1);
+});
+
+test('shouldRejectTheWholeMatrixWhenAnyCoordinateIsOutsideTheServiceArea', async () => {
+  const p = tableProvider(tableAnswer());
+  await assertError(await fetchTable(tableUrl('-6.30,36.50;-6.29,36.51;-6.28,36.52;-3.70,40.41')), { status: 400, code: 'OUTSIDE_SERVICE_AREA' });
+  assert.equal(p.calls, 0);
+});
+
+test('shouldAnswerInvalidResponseWhenTheMatrixShapeIsWrong', async () => {
+  const wrong = [
+    tableAnswer({ durations: [[60, 120]] }),
+    tableAnswer({ durations: [[60], [1, 2]] }),
+    tableAnswer({ durations: [[60, 'x'], [1, 2]] }),
+    tableAnswer({ durations: [[-1, 2], [1, 2]] }),
+    tableAnswer({ sources: [wp(1)] }),
+    tableAnswer({ destinations: [wp(1), { location: [1], distance: 1 }] }),
+    tableAnswer({ sources: [wp(1), wp(-3)] }),
+    tableAnswer({ code: 'Ok', durations: null }),
+    null,
+  ];
+  for (const body of wrong) {
+    __resetArrivalsCache();
+    tableProvider(body);
+    await assertError(await fetchTable(), { status: 502, code: 'UPSTREAM_INVALID_RESPONSE' });
+  }
+});
+
+test('shouldMapProviderFailuresToTheStableContractWhenTheMatrixFails', async () => {
+  tableProvider({ code: 'NoTable' });
+  const none = await fetchTable();
+  await assertError(none, { status: 404, code: 'UPSTREAM_NOT_FOUND' });
+  assert.equal(none.headers.get('cache-control'), 'no-store');
+  __resetArrivalsCache();
+  tableProvider({}, 503);
+  const down = await fetchTable();
+  await assertError(down, { status: 502, code: 'UPSTREAM_ERROR' });
+  assert.equal(down.headers.get('cache-control'), 'no-store');
+});
+
+test('shouldShareTheFootBudgetAndAnswerBusyWhenARouteCallIsStillReserved', async () => {
+  const p = tableProvider(tableAnswer());
+  assert.equal((await fetchTable()).status, 200);
+  const busy = await fetchTable();
+  await assertError(busy, { status: 503, code: 'BUSY', retryAfter: '2' });
+  assert.equal(busy.headers.get('cache-control'), 'no-store');
+  assert.equal(p.calls, 1);
+});
+
+test('shouldRejectNonGetTableRequestsWhenTheMethodIsNotGet', async () => {
+  tableProvider(tableAnswer());
+  const res = await worker.fetch(new Request(tableUrl(), { method: 'POST' }), TABLE_ENV);
+  assert.equal(res.status, 405);
+});
