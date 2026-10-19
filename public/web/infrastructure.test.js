@@ -6,6 +6,9 @@ import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimG
 import { GeocodingUnavailableError } from './application/ports/GeocodingPort.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
 import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
+import { isDeepStrictEqual } from 'node:util';
+import { findGtfsExpiryProblems, lastServiceDate } from '../../scripts/gtfs-expiry.mjs';
+import { findAddedDateScenario, findRegularScenario, madridInstant, shiftDate } from '../../scripts/gtfs-scenarios.mjs';
 import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
 import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedStops as _setStops, setCachedLines as _setLines } from './application/composition.js';
 
@@ -1017,10 +1020,8 @@ test('shouldHaveAValidFeedWindowCalendarServicesAndActiveDatesWhenReadingTheProd
   assert.ok(Object.keys(realGtfsSnapshot.stops).length > 0, 'snapshot must contain stops');
   assert.ok(Object.keys(realGtfsSnapshot.lines).length > 0, 'snapshot must contain lines');
 
-  // Verify service calendar bounds
-  const endDates = realGtfsSnapshot.services.map((s) => s.endDate);
-  const maxEndDate = endDates.reduce((max, d) => (d > max ? d : max), '0');
-  assert.ok(maxEndDate >= '20261231', `feed must be valid through 2026-12-31 (found ${maxEndDate})`);
+  // The feed must have been usable for the product when it was generated (same threshold as release:check).
+  assert.deepEqual(findGtfsExpiryProblems(realGtfsSnapshot, new Date(realGtfsSnapshot.generatedAt)), []);
 
   // Verify that services exist for weekdays (L-V) and weekends (S-D)
   const hasWeekdayService = realGtfsSnapshot.services.some((s) => s.weekdays.slice(0, 5).some(Boolean));
@@ -1028,59 +1029,27 @@ test('shouldHaveAValidFeedWindowCalendarServicesAndActiveDatesWhenReadingTheProd
   assert.ok(hasWeekdayService, 'feed must contain active weekday service definitions');
   assert.ok(hasWeekendService, 'feed must contain active weekend service definitions');
 
-  // Verify Cádiz local exception dates exist (Carnaval, festivos)
-  const allAddedDates = new Set(realGtfsSnapshot.services.flatMap((s) => s.addedDates));
-  assert.ok(allAddedDates.has('20260211'), 'feed must include Cádiz Carnaval local holiday (2026-02-11)');
-  assert.ok(allAddedDates.has('20261012'), 'feed must include Fiesta Nacional (2026-10-12)');
-  assert.ok(allAddedDates.has('20261225'), 'feed must include Navidad (2026-12-25)');
+  // The feed must carry calendar exceptions for the exception logic to be exercised at all.
+  assert.ok(realGtfsSnapshot.services.some((s) => s.addedDates.length > 0), 'feed must contain addedDates exceptions');
 });
 
 test('shouldReturnScheduledArrivalsOnWeekdaysWeekendsAndHolidaysWhenRunningTheProductionSnapshot', async () => {
-  const stopId = realGtfsSnapshot.stops[0].stop; // '2_1' (Avda. Del Puerto)
+  const adapterAt = (now) => new GtfsTransitAdapter(realGtfsSnapshot, { now: () => now });
 
-  // 1. Regular Monday (2026-10-19 10:00 Madrid time): evaluates active Monday service calendar
-  const mondayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-10-19T10:00:00+02:00'),
-  });
-  const mondayArrivals = await mondayAdapter.getArrivals(stopId);
-  assert.ok(mondayArrivals.length > 0, 'Monday must return active scheduled arrivals');
-  assert.equal(mondayArrivals[0].source, 'scheduled');
-  assert.ok(mondayArrivals[0].minutes >= 0 && mondayArrivals[0].minutes <= 60);
+  // Ordinary weekday and ordinary Sunday: a trip of the snapshot is listed ten minutes before it leaves.
+  for (const weekday of [0, 6]) {
+    const regular = findRegularScenario(realGtfsSnapshot, weekday);
+    assert.ok((await adapterAt(regular.now).getArrivals(regular.stop)).some((a) => isDeepStrictEqual(a, regular.expected)), `weekday ${weekday}: ${regular.trip.tripId} on ${regular.dateKey}`);
+  }
 
-  // 2. Regular Sunday (2026-10-18 10:00 Madrid time): evaluates Sunday service schedule
-  const sundayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-10-18T10:00:00+02:00'),
-  });
-  const sundayArrivals = await sundayAdapter.getArrivals(stopId);
-  assert.ok(sundayArrivals.length > 0, 'Sunday must return active scheduled arrivals');
-  assert.equal(sundayArrivals[0].source, 'scheduled');
+  // A date added by an exception activates a service whose weekday is off; a week earlier it is absent.
+  const added = findAddedDateScenario(realGtfsSnapshot);
+  assert.ok((await adapterAt(added.now).getArrivals(added.stop)).some((a) => isDeepStrictEqual(a, added.expected)), `${added.trip.tripId} must run on added date ${added.dateKey}`);
+  assert.equal((await adapterAt(added.at(added.controlDateKey)).getArrivals(added.stop)).some((a) => isDeepStrictEqual(a, added.expected)), false, 'the same trip must not run on the control date');
 
-  // 3. Local holiday exception: Carnaval de Cádiz (Wednesday 2026-02-11 10:00 Madrid time):
-  // 20260211 is defined in addedDates for holiday services (e.g. M-021, which only runs on weekends and added holiday dates)
-  const carnavalAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-02-11T10:00:00+01:00'),
-  });
-  const carnavalArrivals = await carnavalAdapter.getArrivals(stopId);
-  assert.ok(carnavalArrivals.length > 0, 'Carnaval holiday must return active scheduled arrivals');
-  assert.equal(carnavalArrivals[0].source, 'scheduled');
-
-  // Prove that Carnaval arrivals strictly originate from addedDates exception services:
-  // Contrast against a regular non-holiday Wednesday (2026-02-18 10:00)
-  const normalWednesdayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-02-18T10:00:00+01:00'),
-  });
-  const normalWednesdayArrivals = await normalWednesdayAdapter.getArrivals(stopId);
-  const hasCarnavalExceptionLine = carnavalArrivals.some((a) => a.line === 'M-021');
-  const normalWednesdayHasLine = normalWednesdayArrivals.some((a) => a.line === 'M-021');
-  assert.ok(hasCarnavalExceptionLine, 'Carnaval Wednesday must activate holiday exception service line M-021 via addedDates');
-  assert.equal(normalWednesdayHasLine, false, 'Weekend-only line M-021 must NOT run on a normal Wednesday');
-
-  // 4. Past or future date outside feed validity window (e.g. 2035-01-01): returns empty []
-  const expiredAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2035-01-01T10:00:00+01:00'),
-  });
-  const expiredArrivals = await expiredAdapter.getArrivals(stopId);
-  assert.deepEqual(expiredArrivals, [], 'Date outside feed bounds must return empty arrivals');
+  // Beyond the last service date nothing is scheduled.
+  const afterFeed = madridInstant(shiftDate(lastServiceDate(realGtfsSnapshot), 30), 12 * 3600);
+  assert.deepEqual(await adapterAt(afterFeed).getArrivals(added.stop), [], 'Date outside feed bounds must return empty arrivals');
 });
 
 test('shouldFallBackToScheduledWhenTheMunicipalResponseIsMalformed', async () => {
