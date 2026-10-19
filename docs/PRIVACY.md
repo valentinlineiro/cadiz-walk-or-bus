@@ -41,6 +41,7 @@ No cookies, no analytics (no `document.cookie` / `Set-Cookie` in the code; check
 | Turso `proxy_cache`, geocode | key `geo:{normalised query}:{limit}`, body = Nominatim answer | 24 h (`PROXY_TTL_S`) | `worker.js` `handleGeocode` |
 | Turso `proxy_cache`, routes | only when the origin is a **known stop** (`STOP_ORIGINS`, from `stops.json`): key `route:{foot\|drive}:{lon,lat;lon,lat}` at 5 decimals (~1 m), so the **destination** coordinates are part of the key; body = OSRM answer. Any other origin (in practice the user's GPS position) is answered without touching `proxy_cache` and with `Cache-Control: private` | 24 h | `worker.js` `handleRoute`, `proxyUncached` |
 | Turso `proxy_cache`, arrivals | key `arr:{stop}` | 15 s (`ARRIVALS_TTL_S`) | `worker.js` |
+| Turso `proxy_slot`, upstream control | `lease:<upstream>` (budget), `block:<upstream>` and `blockdur:<upstream>` (circuit breaker) for `osrm-foot`, `osrm-drive`, `nominatim`: **timestamps only**, no coordinates, no IP, no user data | a few seconds to 15 min; overwritten in place | `worker.js` `leaseAcquire`, `breakerGate` |
 | Expired rows | read-ignored at once; physically deleted by a sweep that runs on ~2 % of arrivals writes | — | `worker.js` |
 | Workers Logs | operational events only; no IP, headers, bodies, coordinates or search text (asserted in `worker.test.js`) | 7 days on Paid, 3 on Free (`docs/OBSERVABILITY.md`) | `worker.js` |
 | Rate limiting | key derived from the client IP, handed to Cloudflare's rate-limit binding | not audited | `rateKey` |

@@ -99,6 +99,8 @@ const ROUTE_UPSTREAM = {
 };
 const ROUTE_PATH = /^\/route\/(foot|drive)\/(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?);(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/;
 
+const TURSO_TIMEOUT_MS = 1500; // cap of every Turso operation (also part of the budget lease invariant)
+
 // Turso over its HTTP pipeline API: no SDK, nothing to bundle.
 function tursoDb(env) {
   if (!env?.TURSO_DATABASE_URL || !env?.TURSO_AUTH_TOKEN) return null;
@@ -108,7 +110,7 @@ function tursoDb(env) {
       method: 'POST',
       headers: { authorization: `Bearer ${env.TURSO_AUTH_TOKEN}`, 'content-type': 'application/json' },
       body: JSON.stringify({ requests: [{ type: 'execute', stmt: { sql, args: args.map(arg) } }, { type: 'close' }] }),
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(TURSO_TIMEOUT_MS),
     });
     if (!r.ok) throw new Error(`turso ${r.status}`);
     const res = (await r.json()).results?.[0];
@@ -173,8 +175,11 @@ const retryAfterSeconds = (ms) => String(Math.max(1, Math.ceil(ms / 1000)));
 const blockedResponse = (until, now) =>
   errorResponse('UPSTREAM_REJECTED', 'upstream blocked', 503, { 'retry-after': retryAfterSeconds(until - now) });
 
-// Returns { response } when the call must not go out, or { probe } when it may.
-async function breakerGate(env, upstream) {
+const busyResponse = () => errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' });
+
+// Read-only step: is the breaker open? Returns { response } when the call must not go out, otherwise
+// { halfOpen, until } (halfOpen = the window is over and one request has to claim the probe).
+async function breakerRead(env, upstream) {
   const now = Date.now();
   const known = memoryBlock.get(upstream) ?? 0;
   if (known > now) {
@@ -183,30 +188,21 @@ async function breakerGate(env, upstream) {
   }
 
   const db = tursoDb(env);
-  if (!db) {
-    // Local development has no shared coordinator. Claim the probe synchronously in this isolate
-    // before yielding, so concurrent requests cannot all probe when the window expires.
-    if (known > 0) {
-      const probeUntil = now + BREAKER_PROBE_MS;
-      memoryBlock.set(upstream, probeUntil);
-      return { probeUntil };
-    }
-    return { probeUntil: null };
-  }
+  if (!db) return { halfOpen: known > 0, until: known };
 
   let until;
   try {
     until = await db.first('SELECT next_at FROM proxy_slot WHERE name = ?1', [`block:${upstream}`]);
   } catch {
     logEvent('upstream_blocked', { upstream, state: 'state_unavailable' }, 'warn');
-    return { response: errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' }) };
+    return { response: busyResponse() };
   }
   if (until === null) {
     if (known > 0 && known <= now) {
       memoryBlock.delete(upstream);
       memoryWindow.delete(upstream);
     }
-    return { probeUntil: null };
+    return { halfOpen: false, until: 0 };
   }
 
   until = Number(until);
@@ -215,10 +211,25 @@ async function breakerGate(env, upstream) {
     logEvent('upstream_blocked', { upstream, state: 'open' }, 'warn');
     return { response: blockedResponse(until, now) };
   }
+  return { halfOpen: true, until };
+}
+
+// Claims the recovery probe when the window is over. Returns { response } or { probeUntil }
+// (null when the breaker is closed and nothing was claimed).
+async function breakerClaim(env, upstream, read) {
+  if (!read.halfOpen) return { probeUntil: null };
+  const now = Date.now();
+  const db = tursoDb(env);
+  const probeUntil = now + BREAKER_PROBE_MS;
+  if (!db) {
+    // Local development has no shared coordinator. Claim the probe synchronously in this isolate
+    // before yielding, so concurrent requests cannot all probe when the window expires.
+    memoryBlock.set(upstream, probeUntil);
+    return { probeUntil };
+  }
 
   // The conditional UPDATE is the shared atomic claim. Keep its exact value as a fencing token:
   // a late response must not clear a newer block written by another request/isolate.
-  const probeUntil = now + BREAKER_PROBE_MS;
   let claimed;
   try {
     claimed = await db.run(
@@ -226,7 +237,7 @@ async function breakerGate(env, upstream) {
       [probeUntil, `block:${upstream}`, now],
     );
   } catch {
-    return { response: errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' }) };
+    return { response: busyResponse() };
   }
   if (claimed > 0) {
     memoryBlock.set(upstream, probeUntil);
@@ -234,6 +245,22 @@ async function breakerGate(env, upstream) {
   }
   logEvent('upstream_blocked', { upstream, state: 'probe_taken' }, 'warn');
   return { response: blockedResponse(now + BREAKER_PROBE_MS, now) };
+}
+
+// A claimed probe that never reached the provider goes back to its previous (expired) value, only
+// if it is still ours, so the next request can probe at once and a newer state is never touched.
+async function breakerReturnProbe(env, upstream, probeUntil, previous) {
+  const db = tursoDb(env);
+  if (memoryBlock.get(upstream) === probeUntil) memoryBlock.set(upstream, previous);
+  if (!db) return;
+  await db
+    .run('UPDATE proxy_slot SET next_at = ?1 WHERE name = ?2 AND next_at = ?3', [previous, `block:${upstream}`, probeUntil])
+    .catch(() => {});
+}
+
+async function breakerGate(env, upstream) {
+  const read = await breakerRead(env, upstream);
+  return read.response ? read : breakerClaim(env, upstream, read);
 }
 
 // Called with the upstream's HTTP status as soon as it answers.
@@ -302,24 +329,112 @@ async function breakerReport(env, upstream, probeUntil, status, retryAfter) {
   }
 }
 
+// --- Budget per upstream: one request in flight and >= 1 s between requests, no queue ---
+// One `lease:<upstream>` row in `proxy_slot` (no migration) shared by every flow and every isolate.
+// Reserve and create in one atomic statement; 0 rows changed (or any Turso error) => BUSY at once.
+// The lease is counted from `at`, taken BEFORE the reserve is sent, so its round trip already eats it:
+//   CALL_TIMEOUT_MS + 2 x TURSO_TIMEOUT_MS (reserve + probe claim) + SAFETY_MS < LEASE_MS.
+// Local guarantee only: one outgoing request active from the Worker's point of view. Aborting closes
+// our connection; it cannot guarantee the provider stopped processing (residual risk, see the F2 design).
+const BUDGETED_UPSTREAMS = new Set(['osrm-foot', 'osrm-drive']); // Nominatim keeps its own 1.1 s slot
+const CALL_TIMEOUT_MS = 4_000;
+const SAFETY_MS = 1_000; // Worker scheduling and clock skew between isolates
+const LEASE_MS = 10_000;
+const LEASE_GAP_MS = 1_000;
+// Latest start of the request: after the two Turso round trips (reserve + probe claim) nothing legitimate remains.
+// The call then ends at most MAX_PRE_CALL_MS + CALL_TIMEOUT_MS = 7 s after `at`, leaving >= SAFETY_MS before expiry.
+const MAX_PRE_CALL_MS = 2 * TURSO_TIMEOUT_MS;
+if (!(MAX_PRE_CALL_MS + CALL_TIMEOUT_MS + SAFETY_MS < LEASE_MS)) throw new Error('budget lease invariant violated');
+const memoryLease = new Map(); // upstream -> lease end (ms); the only state without Turso (local dev)
+export const __budget = Object.freeze({ CALL_TIMEOUT_MS, TURSO_TIMEOUT_MS, SAFETY_MS, LEASE_MS, LEASE_GAP_MS, MAX_PRE_CALL_MS }); // read by the invariant test
+
+async function leaseAcquire(env, upstream) {
+  const at = Date.now();
+  const value = at + LEASE_MS;
+  const db = tursoDb(env);
+  if (!db) {
+    if ((memoryLease.get(upstream) ?? 0) > at) {
+      logEvent('upstream_budget', { upstream, state: 'busy' }, 'warn');
+      return { response: busyResponse() };
+    }
+    memoryLease.set(upstream, value);
+    return { lease: { at, value, db: null } };
+  }
+  let changed;
+  try {
+    changed = await db.run(
+      'INSERT INTO proxy_slot (name, next_at) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET next_at = ?2 WHERE next_at <= ?3',
+      [`lease:${upstream}`, value, at],
+    );
+  } catch {
+    logEvent('upstream_budget', { upstream, state: 'state_unavailable' }, 'warn');
+    return { response: busyResponse() };
+  }
+  if (!(changed > 0)) {
+    logEvent('upstream_budget', { upstream, state: 'busy' }, 'warn');
+    return { response: busyResponse() };
+  }
+  return { lease: { at, value, db } };
+}
+
+// Only the owner releases (the exact value it reserved). `called` adds the 1 s separation.
+async function leaseRelease(upstream, lease, called) {
+  const next = Date.now() + (called ? LEASE_GAP_MS : 0);
+  if (!lease.db) {
+    if (memoryLease.get(upstream) === lease.value) memoryLease.set(upstream, next);
+    return;
+  }
+  await lease.db
+    .run('UPDATE proxy_slot SET next_at = ?1 WHERE name = ?2 AND next_at = ?3', [next, `lease:${upstream}`, lease.value])
+    .catch(() => {}); // it expires by itself within LEASE_MS
+}
+
 // `beforeCall` runs once the breaker allows the call (the Nominatim slot is only claimed then).
 async function callUpstream(env, url, isValid, beforeCall) {
   const upstream = UPSTREAM_BY_HOST[new URL(url).hostname];
-  const gate = await breakerGate(env, upstream);
-  if (gate.response) return gate.response;
-  if (beforeCall) {
-    const stop = await beforeCall();
-    if (stop) return stop;
+  const read = await breakerRead(env, upstream);
+  if (read.response) return read.response;
+
+  if (!BUDGETED_UPSTREAMS.has(upstream)) {
+    const gate = await breakerClaim(env, upstream, read);
+    if (gate.response) return gate.response;
+    if (beforeCall) {
+      const stop = await beforeCall();
+      if (stop) return stop;
+    }
+    return upstreamJson(url, isValid, (status, retryAfter) => breakerReport(env, upstream, gate.probeUntil ?? null, status, retryAfter));
   }
-  return upstreamJson(url, isValid, (status, retryAfter) =>
-    breakerReport(env, upstream, gate.probeUntil ?? null, status, retryAfter),
-  );
+
+  const got = await leaseAcquire(env, upstream);
+  if (got.response) return got.response;
+  let called = false;
+  let probeUntil = null;
+  try {
+    // The probe is claimed only now that the lease is ours, so it can never be held without a call.
+    const gate = await breakerClaim(env, upstream, read);
+    if (gate.response) return gate.response;
+    probeUntil = gate.probeUntil ?? null;
+    if (Date.now() - got.lease.at > MAX_PRE_CALL_MS) {
+      logEvent('upstream_budget', { upstream, state: 'late' }, 'warn');
+      return busyResponse();
+    }
+    called = true;
+    return await upstreamJson(
+      url,
+      isValid,
+      (status, retryAfter) => breakerReport(env, upstream, probeUntil, status, retryAfter),
+      CALL_TIMEOUT_MS,
+    );
+  } finally {
+    if (!called && probeUntil !== null) await breakerReturnProbe(env, upstream, probeUntil, read.until ?? 0);
+    await leaseRelease(upstream, got.lease, called);
+  }
 }
 
-async function upstreamJson(url, isValid, report) {
+async function upstreamJson(url, isValid, report, timeoutMs = 5000) {
   let r;
   try {
-    r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA, referer: PROXY_REFERER }, signal: AbortSignal.timeout(5000) });
+    r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA, referer: PROXY_REFERER }, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     return errorResponse('UPSTREAM_UNREACHABLE', 'upstream unreachable', 502);
   }
@@ -467,6 +582,7 @@ export function __resetArrivalsCache() {
   inflightArrivals.clear();
   memoryBlock.clear();
   memoryWindow.clear();
+  memoryLease.clear();
 }
 
 // IPv6 clients own a whole /64, so key on its 4 hextets; IPv4-mapped IPv6 collapses to its IPv4.
