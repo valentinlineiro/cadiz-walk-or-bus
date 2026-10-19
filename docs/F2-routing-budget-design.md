@@ -160,13 +160,18 @@ Base teórica: ~0,2 s de latencia (2 muestras del 2026-10-19) + 1 s de separaci�
 - Regla de plausibilidad de duraciones (D3b).
 - **Riesgo residual R1**: el proveedor puede seguir procesando tras un aborto o tras la muerte de una invocación; no es observable ni garantizable desde el Worker.
 
-## 11. Secuencia de implementación (una PR independiente, commits ordenados)
-1. Presupuesto genérico por upstream (§4.1–4.4) en el Worker, con pruebas de arrendamiento, exclusión mutua real y secuencia con el cortocircuito; aplicado a `route` foot/drive (cliente sin cambios).
-2. Endpoint `/table/foot`, validadores, `no-store`, `TABLE_ENABLED` y pruebas de contrato.
-3. Puerto `walkingMatrix`, adaptador y `FindBestJourneysUseCase` (matriz, degradaciones, geometría solo del héroe), con dobles.
-4. UI: promoción coherente, geometría diferida y descartes, "ruta aproximada", chips (3 automáticos, estado neutral, cancelación).
-5. Documentación (`PRIVACY.md`, `OBSERVABILITY.md`: eventos de presupuesto), `public/web` regenerado con `tsc` y `SHELL_HASH`.
-Cada paso deja `npm test`, `release:check` y E2E en verde. Despliegue con el interruptor apagado primero.
+## 11. Secuencia de implementación y despliegue
+**Estado**: el paso 1 está completado; los pasos 2–5 no están autorizados.
+
+1. **Presupuesto genérico por upstream (§4.1–4.4): completado.** PR #87 fusionada en `main` (squash `ab7b83d`), aplicado a `route` foot/drive; cliente sin cambios. Valores definitivos: `MAX_PRE_CALL_MS = 2 × TURSO_TIMEOUT_MS = 3000 ms`, `CALL_TIMEOUT_MS = 4000 ms`, `SAFETY_MS = 1000 ms`, `LEASE_MS = 10000 ms`; invariante `3000 + 4000 + 1000 < 10000` (la llamada termina como muy tarde a los 7 s). La garantía es desde la perspectiva del Worker: no se promete que el proveedor remoto haya dejado de procesar tras una cancelación (R1). Validado contra libSQL local; Turso Cloud sin validar.
+2. **Endpoint `/table/foot`**, validadores, `no-store`, `TABLE_ENABLED` (apagado) y pruebas de contrato. No se asume demostrada la equivalencia `table`/`route` (§10); verificarla con el proveedor requiere autorización explícita, y hasta entonces las pruebas solo demuestran la lógica con dobles.
+3. **Planificador y degradación**: puerto `walkingMatrix`, adaptador y `FindBestJourneysUseCase`. Debe funcionar **también con la matriz desactivada**. Las estimaciones alternativas se identifican como estimaciones (nunca como tiempos de rutas verificadas) y la ruta seleccionada conserva una degradación honesta cuando el presupuesto responde `BUSY`. Geometría solo del elegido.
+4. **UI, chips y activación**: promoción coherente, geometría diferida y descartes, "ruta aproximada", chips (máximo 3 automáticos por origen, estado neutral, cancelación). La **activación** de la matriz y de los chips es un cambio posterior de configuración, con autorización explícita.
+5. Documentación (`PRIVACY.md`, `OBSERVABILITY.md`), `public/web` regenerado con `tsc` y `SHELL_HASH`.
+
+**Despliegue**: los pasos 2–4 pueden fusionarse en `main` individualmente, pero **se despliegan juntos** en una única unidad; la #87 no se despliega aislada porque, hasta entonces, las llamadas OSRM concurrentes recibirían `BUSY` y las búsquedas reales degradarían. El despliegue inicial mantiene `TABLE_ENABLED` apagado. Cada paso deja `npm test`, `release:check` y E2E en verde.
+
+**Verificación previa al despliegue (criterio de aceptación)**: comprobar expresamente qué ve el usuario con `TABLE_ENABLED` apagado y el presupuesto devolviendo `BUSY` (varias llamadas concurrentes en una búsqueda real simulada). No basta con que pasen las pruebas: la interfaz no debe presentar estimaciones como rutas confirmadas ni ocultar un fallo de cálculo, y debe verificarse en el navegador con el estado degradado.
 
 ## 12. Estado de las decisiones (propietario)
 | Decisión | Resolución |
@@ -180,5 +185,6 @@ Cada paso deja `npm test`, `release:check` y E2E en verde. Despliegue con el int
 | Equivalencia `table`/`route` | No verificada; **no autorizada** ninguna petición adicional |
 | `annotations=distance` | No depender de ella sin verificar |
 | Activación | `TABLE_ENABLED` apagado inicialmente |
-| Implementación | **No autorizada todavía** |
+| Paso 1 (presupuesto) | Fusionado (#87, `ab7b83d`); **sin desplegar** |
+| Pasos 2–4 | **No autorizados todavía**; se desplegarán juntos con `TABLE_ENABLED` apagado |
 | F9 | Independiente y pendiente (sin inventar dominio, dirección ni responsable) |
