@@ -104,7 +104,7 @@ test('shouldTreatConfirmedEmptyAnswerAsAvailableWalkWhenNoBusIsDue', async () =>
   assert.equal(decision.hero.mode, 'walk');
 });
 
-test('shouldKeepAnEmptyLineCatalogueInNoDataStateRatherThanConcludingNoBusIsDue', async () => {
+test('shouldKeepNoDataWhenLinesAreEmpty', async () => {
   const transit = {
     ...transitWith({ S1: live([]), S2: live([]) }),
     getLines: async () => ({}),
