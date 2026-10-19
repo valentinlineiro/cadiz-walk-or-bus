@@ -26,7 +26,11 @@ export function initMap(onPin, onMapClick) {
   }).addTo(map);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+    attribution: [
+      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+      '<a href="https://www.transportes.gob.es/" target="_blank" rel="noopener">Powered by MITRAMS</a>',
+      '<a href="https://api.ctan.es/avisolegal.html" target="_blank" rel="noopener">Datos GTFS: Red de Consorcios de Transporte de Andalucía</a>',
+    ].join(' | '),
   }).addTo(map);
   map._onPin = onPin;
   if (onMapClick) {
