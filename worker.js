@@ -179,8 +179,19 @@ async function breakerGate(env, upstream) {
     logEvent('upstream_blocked', { upstream, state: 'open' }, 'warn');
     return { response: blockedResponse(known, now) };
   }
+
   const db = tursoDb(env);
-  if (!db) return { probe: false };
+  if (!db) {
+    // Local development has no shared coordinator. Claim the probe synchronously in this isolate
+    // before yielding, so concurrent requests cannot all probe when the window expires.
+    if (known > 0) {
+      const probeUntil = now + BREAKER_PROBE_MS;
+      memoryBlock.set(upstream, probeUntil);
+      return { probeUntil };
+    }
+    return { probeUntil: null };
+  }
+
   let until;
   try {
     until = await db.first('SELECT next_at FROM proxy_slot WHERE name = ?1', [`block:${upstream}`]);
@@ -188,51 +199,104 @@ async function breakerGate(env, upstream) {
     logEvent('upstream_blocked', { upstream, state: 'state_unavailable' }, 'warn');
     return { response: errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' }) };
   }
-  if (until === null) return { probe: false };
+  if (until === null) {
+    if (known > 0 && known <= now) {
+      memoryBlock.delete(upstream);
+      memoryWindow.delete(upstream);
+    }
+    return { probeUntil: null };
+  }
+
   until = Number(until);
   if (until > now) {
     memoryBlock.set(upstream, until);
     logEvent('upstream_blocked', { upstream, state: 'open' }, 'warn');
     return { response: blockedResponse(until, now) };
   }
-  // Window over: exactly one request claims the probe, the rest keep waiting.
+
+  // The conditional UPDATE is the shared atomic claim. Keep its exact value as a fencing token:
+  // a late response must not clear a newer block written by another request/isolate.
+  const probeUntil = now + BREAKER_PROBE_MS;
   let claimed;
   try {
-    claimed = await db.run('UPDATE proxy_slot SET next_at = ?1 WHERE name = ?2 AND next_at <= ?3', [now + BREAKER_PROBE_MS, `block:${upstream}`, now]);
+    claimed = await db.run(
+      'UPDATE proxy_slot SET next_at = ?1 WHERE name = ?2 AND next_at <= ?3',
+      [probeUntil, `block:${upstream}`, now],
+    );
   } catch {
     return { response: errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' }) };
   }
-  if (claimed > 0) return { probe: true };
+  if (claimed > 0) {
+    memoryBlock.set(upstream, probeUntil);
+    return { probeUntil };
+  }
   logEvent('upstream_blocked', { upstream, state: 'probe_taken' }, 'warn');
   return { response: blockedResponse(now + BREAKER_PROBE_MS, now) };
 }
 
 // Called with the upstream's HTTP status as soon as it answers.
-async function breakerReport(env, upstream, probe, status, retryAfter) {
+async function breakerReport(env, upstream, probeUntil, status, retryAfter) {
   const db = tursoDb(env);
   if (status === 403 || status === 429) {
     const now = Date.now();
     let previous = memoryWindow.get(upstream) ?? 0;
     if (db) {
-      previous = Math.max(previous, Number(await db.first('SELECT next_at FROM proxy_slot WHERE name = ?1', [`blockdur:${upstream}`]).catch(() => 0)) || 0);
+      try {
+        previous = Math.max(
+          previous,
+          Number(await db.first('SELECT next_at FROM proxy_slot WHERE name = ?1', [`blockdur:${upstream}`])) || 0,
+        );
+      } catch {
+        // The active block write below is the safety-critical operation; the duration is only
+        // needed for exponential backoff, so use the isolate's last known window as fallback.
+        logEvent('upstream_blocked', { upstream, state: 'state_unavailable' }, 'warn');
+      }
     }
     const asked = Math.max(BREAKER_MIN_MS, (Number(retryAfter) || 0) * 1000);
     const window = Math.min(BREAKER_MAX_MS, previous > 0 ? Math.max(asked, previous * 2) : asked);
-    memoryBlock.set(upstream, now + window);
+    const blockedUntil = now + window;
+    memoryBlock.set(upstream, blockedUntil);
     memoryWindow.set(upstream, window);
+
     if (db) {
-      await db.run('INSERT OR REPLACE INTO proxy_slot (name, next_at) VALUES (?1, ?2)', [`block:${upstream}`, now + window]).catch(() => {});
-      await db.run('INSERT OR REPLACE INTO proxy_slot (name, next_at) VALUES (?1, ?2)', [`blockdur:${upstream}`, window]).catch(() => {});
+      try {
+        // Persist the active block first. If this fails, report the breaker state as unavailable
+        // to the current request instead of silently pretending the cross-isolate block exists.
+        await db.run('INSERT OR REPLACE INTO proxy_slot (name, next_at) VALUES (?1, ?2)', [`block:${upstream}`, blockedUntil]);
+        await db.run('INSERT OR REPLACE INTO proxy_slot (name, next_at) VALUES (?1, ?2)', [`blockdur:${upstream}`, window]);
+      } catch {
+        logEvent('upstream_blocked', { upstream, state: 'state_unavailable' }, 'warn');
+        throw new Error('upstream breaker state unavailable');
+      }
     }
-    logEvent('upstream_breaker', { upstream, state: 'opened', status, window_s: Math.round(window / 1000), probe }, 'warn');
-  } else if (status < 500 && (probe || memoryBlock.has(upstream))) {
-    memoryBlock.delete(upstream);
-    memoryWindow.delete(upstream);
+    logEvent('upstream_breaker', { upstream, state: 'opened', status, window_s: Math.round(window / 1000), probe: probeUntil !== null }, 'warn');
+  } else if (probeUntil !== null && status < 500) {
+    // Only the actual recovery probe may close the breaker. A successful request that started
+    // before the block opened must never clear it just because it completed late.
+    let cleared = !db;
     if (db) {
-      await db.run('DELETE FROM proxy_slot WHERE name = ?1', [`block:${upstream}`]).catch(() => {});
-      await db.run('DELETE FROM proxy_slot WHERE name = ?1', [`blockdur:${upstream}`]).catch(() => {});
+      try {
+        cleared = (await db.run(
+          'DELETE FROM proxy_slot WHERE name = ?1 AND next_at = ?2',
+          [`block:${upstream}`, probeUntil],
+        )) > 0;
+        if (cleared) {
+          // Do not remove a newer failure's backoff metadata if it opened another block meanwhile.
+          await db.run(
+            'DELETE FROM proxy_slot WHERE name = ?1 AND NOT EXISTS (SELECT 1 FROM proxy_slot WHERE name = ?2)',
+            [`blockdur:${upstream}`, `block:${upstream}`],
+          );
+        }
+      } catch {
+        logEvent('upstream_blocked', { upstream, state: 'state_unavailable' }, 'warn');
+        return;
+      }
     }
-    logEvent('upstream_breaker', { upstream, state: 'closed' });
+    if (cleared && memoryBlock.get(upstream) === probeUntil) {
+      memoryBlock.delete(upstream);
+      memoryWindow.delete(upstream);
+    }
+    if (cleared) logEvent('upstream_breaker', { upstream, state: 'closed' });
   }
 }
 
@@ -246,7 +310,7 @@ async function callUpstream(env, url, isValid, beforeCall) {
     if (stop) return stop;
   }
   return upstreamJson(url, isValid, (status, retryAfter) =>
-    breakerReport(env, upstream, gate.probe, status, retryAfter).catch(() => {}),
+    breakerReport(env, upstream, gate.probeUntil ?? null, status, retryAfter),
   );
 }
 
@@ -257,7 +321,11 @@ async function upstreamJson(url, isValid, report) {
   } catch {
     return errorResponse('UPSTREAM_UNREACHABLE', 'upstream unreachable', 502);
   }
-  await report?.(r.status, r.headers?.get?.('retry-after'));
+  try {
+    await report?.(r.status, r.headers?.get?.('retry-after'));
+  } catch {
+    return errorResponse('BUSY', 'busy', 503, { 'retry-after': '2' });
+  }
   if (r.status >= 500) return errorResponse('UPSTREAM_ERROR', `upstream ${r.status}`, 502);
   if (r.status === 400 || r.status === 404) return errorResponse('UPSTREAM_NOT_FOUND', `upstream ${r.status}`, 404);
   if (!r.ok) {
