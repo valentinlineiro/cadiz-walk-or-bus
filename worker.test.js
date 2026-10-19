@@ -258,10 +258,13 @@ function withTurso(upstream, { slotBusy = false, writeDelayMs = 0 } = {}) {
     } else if (sql.startsWith('SELECT')) {
       const hit = cache.get(v[0]);
       result = { rows: hit && hit.expires_at > Number(v[1]) ? [[{ type: 'text', value: hit.body }]] : [] };
+    } else if (sql.startsWith('DELETE FROM proxy_slot') && sql.includes('NOT EXISTS')) {
+      const removed = !slots.has(v[1]) && slots.delete(v[0]);
+      result = { rows: [], affected_row_count: removed ? 1 : 0 };
     } else if (sql.startsWith('DELETE FROM proxy_slot')) {
-      // Owner-checked release: only delete when next_at still equals the caller's value.
-      if (v.length < 2 || slots.get(v[0]) === Number(v[1])) slots.delete(v[0]);
-      result = { rows: [], affected_row_count: 1 };
+      // Conditional deletes model compare-and-set for breaker probe ownership.
+      const removed = v.length < 2 ? slots.delete(v[0]) : slots.get(v[0]) === Number(v[1]) && slots.delete(v[0]);
+      result = { rows: [], affected_row_count: removed ? 1 : 0 };
     } else if (sql.startsWith('DELETE')) {
       result = { rows: [], affected_row_count: 0 };
     } else if (sql.includes('proxy_cache')) {
@@ -485,6 +488,78 @@ test('shouldLetExactlyOneProbeThroughWhenTheWindowEndsAndCloseOnSuccess', async 
     assert.deepEqual(results.map((r) => r.status).sort(), [200, 503, 503]);
     assert.equal(slots.size, 0, 'a successful probe clears the Turso state');
     assert.equal((await fetchRoute(FOOT)).status, 200, 'closed again');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldNotCloseTheBreakerWhenAnEarlierSuccessfulRequestCompletesAfterA429', async () => {
+  let releaseEarlier;
+  let signalEarlier;
+  const earlierPending = new Promise((resolve) => { releaseEarlier = resolve; });
+  const earlierEntered = new Promise((resolve) => { signalEarlier = resolve; });
+  let calls = 0;
+  withTurso(async (url) => {
+    calls++;
+    if (String(url).includes('-6.31000,36.50000')) {
+      signalEarlier();
+      return earlierPending;
+    }
+    return reply(429, 120);
+  });
+
+  const earlier = fetchRoute(FOOT2);
+  await earlierEntered; // this request reached the provider before the breaker opened
+  assert.equal((await fetchRoute(FOOT)).status, 503);
+  releaseEarlier(reply(200));
+  assert.equal((await earlier).status, 200);
+
+  const after = await fetchRoute(FOOT2);
+  await assertBlocked(after);
+  assert.equal(calls, 2, 'the late 200 cannot erase the active block');
+});
+
+test('shouldNotClearANewerBlockWhenARecoveryProbeCompletes', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 30_000_000 });
+  let releaseEarlier;
+  let signalEarlier;
+  let releaseProbe;
+  let signalProbe;
+  const earlierPending = new Promise((resolve) => { releaseEarlier = resolve; });
+  const earlierEntered = new Promise((resolve) => { signalEarlier = resolve; });
+  const probePending = new Promise((resolve) => { releaseProbe = resolve; });
+  const probeEntered = new Promise((resolve) => { signalProbe = resolve; });
+  let calls = 0;
+
+  try {
+    withTurso(async (url) => {
+      calls++;
+      if (calls === 1) {
+        signalEarlier();
+        return earlierPending; // a pre-block request which will return 429 late
+      }
+      if (calls === 2) return reply(429, 30); // opens the first block
+      if (calls === 3) {
+        signalProbe();
+        return probePending; // recovery probe
+      }
+      return reply(200);
+    });
+
+    const earlier = fetchRoute(FOOT2);
+    await earlierEntered;
+    assert.equal((await fetchRoute(FOOT)).status, 503);
+    mock.timers.tick(31_000);
+
+    const probe = fetchRoute(FOOT);
+    await probeEntered;
+    releaseEarlier(reply(429, 30)); // writes a newer block while the probe is in flight
+    assert.equal((await earlier).status, 503);
+    releaseProbe(reply(200));
+    assert.equal((await probe).status, 200);
+
+    await assertBlocked(await fetchRoute(FOOT2));
+    assert.equal(calls, 3, 'the probe cannot delete the newer shared block');
   } finally {
     mock.timers.reset();
   }
