@@ -29,6 +29,8 @@ Cache Storage holds only the application shell (`SHELL_URLS`).
 | Stop id | municipal panel | browser → Worker `/api` → panel |
 | Map tiles | `tile.openstreetmap.org` | **directly from the browser** (CSP `img-src`); OSM sees the IP and the viewed area |
 
+Upstream calls from the Worker carry a User-Agent that names the app and a `Referer` that is only the site's own origin (never a user URL or coordinates), as the FOSSGIS terms ask.
+
 The browser talks only to its own origin plus tiles (`connect-src 'self'`, `public/_headers`).
 No cookies, no analytics (no `document.cookie` / `Set-Cookie` in the code; checked by a test).
 
@@ -56,7 +58,7 @@ reaches OSRM, which has to compute the route, and appears in the request URL see
 - The controller's identity and a contact address (the notice has none yet).
 - Legal review (GDPR/LOPDGDD obligations, information duties, provider terms).
 
-## Planned (F-10), not yet implemented
+## Planned privacy work (historical F-10 items)
 
 1. ~~This inventory and the notice.~~ Done.
 2. ~~A control to clear recents and the journey log, and a 30-day automatic retention for both.~~ Done.
