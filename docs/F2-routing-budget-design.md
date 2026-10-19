@@ -1,8 +1,13 @@
-# F2 — Presupuesto por upstream y reducción de llamadas (diseño, v2)
+# F2 — Presupuesto por upstream y reducción de llamadas (diseño, v2.1)
 
-Estado: **v2, tras la primera revisión**. Diseño únicamente: sin código, sin configuración, sin datos y sin peticiones nuevas a los upstreams. **Implementación no autorizada.** Commit base: `3a51b52`. Fecha: 2026-10-19.
+Estado: **v2.1, tras la segunda revisión**. Diseño únicamente: sin código, sin configuración, sin datos y sin peticiones nuevas a los upstreams. **Implementación no autorizada.** Commit base: `3a51b52`. Fecha: 2026-10-19.
 
-## Cambios respecto a la v1 (revisión de la PR #86)
+## Cambios de la v2.1 (segunda revisión de la PR #86)
+A. §4.2: la invariante temporal estaba mal (4 + 4 < 8 es falso). Valores nuevos y desglose explícito del margen: `CALL_TIMEOUT_MS + 2×TURSO_TIMEOUT_MS + SAFETY_MS = 4000 + 3000 + 1000 = 8000 < LEASE_MS = 10000`, comprobada **en el código** (al cargar el módulo y antes de cada llamada) y en una prueba.
+B. §4.2/§8: dos garantías distintas: **local** (como máximo una petición saliente activa por upstream desde el punto de vista del Worker) y **límite de la remota** (no se puede garantizar que el proveedor deje de procesar al abortar la conexión). La prueba comprueba el comportamiento observable del Worker; ya no afirma nada sobre la ejecución interna del proveedor.
+C. §2: la deduplicación del origen se hace por identidad estable de parada, nunca por coordenadas redondeadas; el origen GPS conserva su coordenada original.
+
+## Cambios de la v2 (primera revisión)
 1. §4: protocolo completo del arrendamiento (creación segura de la fila, reserva atómica, `BUSY` si no se modifica ninguna fila, liberación solo del propietario).
 2. §4: tiempo límite efectivo de cada llamada al proveedor **menor** que el vencimiento del arrendamiento, con cancelación real y liberación en `finally`; la prueba debe demostrar que nunca hay dos llamadas activas.
 3. §4: interacción con el cortocircuito de la #84: el permiso de sonda solo se reclama **después** de tener el arrendamiento; si la sonda se pierde, el arrendamiento se libera en el acto; pruebas de esa secuencia.
@@ -30,7 +35,7 @@ Hasta 3 candidatos se evalúan a fondo (`FindBestJourneysUseCase.ts`, paso 3), e
 - Solo perfil `foot` (no se expone `drive`: no hay minutos que pedir).
 - `{coords}`: `lon,lat;lon,lat;…`, mismo patrón numérico que `ROUTE_PATH`, **2 a 8 coordenadas**; **matriz máxima 4×4** (|S| ≤ 4, |D| ≤ 4).
 - Query obligatoria `sources=i;j` y `destinations=k;l`: índices enteros en rango, **sin repetirse dentro de cada lista**, 1–4 por lista y listas **disjuntas entre sí** (ningún índice en ambas).
-- **Política de duplicados (inequívoca).** Una misma posición física puede aparecer **dos veces** en `{coords}`, una como fuente y otra como destino (p. ej. una parada que es de subida en un candidato y de bajada en otro). Son coordenadas independientes con índices distintos; **no** se pide que el proveedor admita índices solapados (no verificado, no se necesita). Construcción: `S = únicos(origen, paradas de bajada)`, `D = únicos(paradas de subida, destino)` (deduplicando por coordenada a 5 decimales **dentro** de cada lista); `{coords} = S ++ D`. La validación comprueba índices válidos, únicos por lista y listas disjuntas, no que las coordenadas sean únicas.
+- **Política de duplicados (inequívoca).** Una misma posición física puede aparecer **dos veces** en `{coords}`, una como fuente y otra como destino (p. ej. una parada que es de subida en un candidato y de bajada en otro). Son coordenadas independientes con índices distintos; **no** se pide que el proveedor admita índices solapados (no verificado, no se necesita). Construcción: `S = [origen] ++ únicos(paradas de bajada)` y `D = únicos(paradas de subida) ++ [destino]`, deduplicando **solo las paradas, por su identificador estable (`stop`)** y **nunca por coordenadas redondeadas**; `{coords} = S ++ D`. El origen (GPS o no) y el destino son entradas propias que **jamás se funden con una parada**, aunque sus coordenadas coincidan a 5 decimales: así la regla de deduplicación no modifica en silencio el origen de una búsqueda. El Worker no deduplica: valida y reenvía cada coordenada como llegó (con el mismo redondeo a 5 decimales que ya aplica a las rutas en la URL al proveedor). La validación comprueba índices válidos, únicos por lista y listas disjuntas, **no** que las coordenadas sean únicas.
 - Cada coordenada dentro de `ROUTE_BOX`; si no → `400 INVALID_ROUTE` / `OUTSIDE_SERVICE_AREA`.
 - Upstream: `routing.openstreetmap.de/routed-foot/table/v1/foot/{coords}?sources=…&destinations=…` (por defecto solo duraciones; evidencia del 2026-10-19T10:18:57Z, sets disjuntos).
 - Validación de la respuesta (`validTable`): `code:"Ok"`; `durations` con exactamente |S| filas × |D| columnas; cada celda número finito ≥ 0 o `null`; `sources`/`destinations` de la longitud correcta con `location` finito y `distance` (ajuste a la red) finita ≥ 0. Cualquier fallo → `502 UPSTREAM_INVALID_RESPONSE`; `NoTable` → `404 UPSTREAM_NOT_FOUND`.
@@ -60,10 +65,20 @@ Fila `lease:<upstream>`; `next_at` = instante hasta el que el upstream está res
 4. **Liberación solo del propietario**: `UPDATE proxy_slot SET next_at = ?1 WHERE name = 'lease:<u>' AND next_at = <mi valor>`, con `?1 = ahora + 1 s` si hubo llamada (la separación) o `= ahora` si no la hubo. Si otro ya reservó, no cambia nada.
 5. Si el Worker muere o la invocación se cancela antes del `finally`, el arrendamiento **caduca solo** a los `LEASE_MS`.
 
-### 4.2 Exclusión mutua real: tiempo límite efectivo menor que el arrendamiento
-- Cada llamada al proveedor usa `AbortSignal.timeout(CALL_TIMEOUT_MS)` (cancelación real; cubre también la lectura del cuerpo) con **`CALL_TIMEOUT_MS = 4 s`** (hoy 5 s) y **`LEASE_MS = 8 s`**: margen de 4 s para la latencia de Turso entre reservar y llamar y para liberar. Invariante de código: `CALL_TIMEOUT_MS + margen < LEASE_MS`, verificado por una prueba.
-- El plazo de 3,5 s desde el inicio de la búsqueda para **empezar** geometría **no sustituye** al límite de duración de cada petición: son dos controles distintos.
-- Una llamada abortada cuenta como terminada; la separación de 1 s se mide desde ese instante.
+### 4.2 Garantías temporales y sus límites
+**Constantes y desglose del margen.** El arrendamiento se cuenta desde el instante `ahora` tomado **antes** de enviar la reserva a Turso, así que su viaje de ida y vuelta ya consume arrendamiento.
+| Constante | Valor | Qué cubre |
+|---|---|---|
+| `CALL_TIMEOUT_MS` | 4000 | duración máxima de la llamada al proveedor (`AbortSignal.timeout`, incluye la lectura del cuerpo; hoy 5 s) |
+| `TURSO_TIMEOUT_MS` | 1500 | tope de cada operación de Turso (valor actual de `tursoDb`); entran **dos** antes de la llamada: la reserva y, en semiabierto, la reclamación de la sonda |
+| `SAFETY_MS` | 1000 | planificación del Worker y desfase de reloj entre instancias (el arrendamiento compara `Date.now()` de isolates distintos) |
+| `LEASE_MS` | **10000** | vencimiento del arrendamiento |
+**Invariante** (desigualdad estricta): `CALL_TIMEOUT_MS + 2 × TURSO_TIMEOUT_MS + SAFETY_MS = 4000 + 3000 + 1000 = 8000 < LEASE_MS = 10000` (2 s de holgura). Se comprueba **en el código**, no solo se documenta: (a) al cargar el módulo (si no se cumple, el Worker no arranca); (b) en ejecución, justo antes de enviar la petición al proveedor, **se descarta la llamada** (liberar y `BUSY`) si `ahora − instante_de_la_reserva > LEASE_MS − CALL_TIMEOUT_MS − SAFETY_MS`, es decir, si la latencia previa ya se comió la holgura; (c) en una prueba que verifica la desigualdad con los valores definitivos.
+El plazo de 3,5 s desde el inicio de la búsqueda para **empezar** geometría es otro control y **no sustituye** al límite de duración de cada petición. Una llamada abortada cuenta como terminada; la separación de 1 s se mide desde ese instante.
+
+**Dos garantías distintas.**
+- **Garantía local (la que da el diseño):** por upstream hay como máximo **una petición saliente activa desde el punto de vista del Worker**, es decir, entre que arranca el `fetch` y que se resuelve o se aborta, bajo el modelo de cancelación del Worker (`AbortSignal`). La invariante temporal asegura que esa petición termina antes de que el arrendamiento pueda adquirirse otra vez.
+- **Límite de la garantía remota (no se puede dar):** abortar cierra nuestra conexión, pero **no garantiza que el proveedor haya dejado de procesar** internamente. Puede haber trabajo residual del proveedor que se solape con la siguiente petición. Dos casos concretos: (i) tras un `abort`, la separación de 1 s mitiga pero no elimina el solapamiento; (ii) si una invocación del Worker muere sin ejecutar el `finally`, su llamada puede seguir viva hasta que el arrendamiento caduque a los 10 s. Un arrendamiento temporal **no puede** impedir cualquier solapamiento remoto; si el contrato exigiera eso, haría falta otro mecanismo (p. ej. un proveedor propio, F6). Se acepta como **riesgo residual R1** y se observa con los registros.
 
 ### 4.3 Orden por llamada y cortocircuito (#84)
 caché compartida → **lectura** del estado del cortocircuito (solo lectura) → **reserva del arrendamiento** → *si el cortocircuito estaba en semiabierto*, reclamar ahora el permiso de sonda (`UPDATE … WHERE next_at <= ahora`, atómico) → llamada → `finally` (liberar arrendamiento) → informar al cortocircuito.
@@ -108,9 +123,9 @@ Base teórica: ~0,2 s de latencia (2 muestras del 2026-10-19) + 1 s de separaci�
 - Los chips automáticos se cancelan en cuanto el usuario lanza una búsqueda.
 
 ## 8. Pruebas y despliegue
-- **Contrato**: coordenadas inválidas/fuera de área, >8 coordenadas, matriz >4×4, índices repetidos dentro de una lista / fuera de rango / listas solapadas; **parada que es de subida en un candidato y de bajada en otro** (aparece dos veces en `{coords}`); respuesta con filas o columnas de más o de menos, celdas `NaN`/texto, `null`, `NoTable`, 5xx, JSON mal formado; `Cache-Control: no-store` presente.
+- **Contrato**: coordenadas inválidas/fuera de área, >8 coordenadas, matriz >4×4, índices repetidos dentro de una lista / fuera de rango / listas solapadas; **parada que es de subida en un candidato y de bajada en otro** (aparece dos veces en `{coords}`); **origen GPS cuyas coordenadas coinciden a 5 decimales con una parada**: se conservan ambas entradas, el origen no se sustituye por la parada y las paradas repetidas se deduplican por identificador; respuesta con filas o columnas de más o de menos, celdas `NaN`/texto, `null`, `NoTable`, 5xx, JSON mal formado; `Cache-Control: no-store` presente.
 - **Arrendamiento**: reserva inicial crea la fila; 0 filas modificadas ⇒ `BUSY`; Turso caído ⇒ `BUSY`; liberación solo del propietario; caducidad si el propietario muere; separación ≥ 1 s medida desde el final.
-- **Exclusión mutua real**: un proveedor simulado con contador de llamadas **activas** demuestra que el máximo simultáneo es 1 aunque una llamada se retrase, se aborte por `CALL_TIMEOUT_MS` o se ignore la cancelación hasta el vencimiento; la invariante `CALL_TIMEOUT_MS + margen < LEASE_MS` se comprueba en una prueba.
+- **Exclusión mutua observable en el Worker** (garantía local, ver §4.2): un proveedor simulado cuyo contador de llamadas **activas** cuenta desde que arranca la petición hasta que se resuelve **o su señal se aborta**, con reloj simulado: (a) una llamada que tarda más que `CALL_TIMEOUT_MS` recibe el aborto en ese instante, el Worker libera en el `finally` y la siguiente petición solo puede arrancar tras la separación de 1 s; (b) el máximo simultáneo observado es 1 con retrasos y abortos; (c) con una reserva lenta (la latencia previa supera la holgura) el Worker **no llama** y responde `BUSY`. **No** se simula ni se afirma qué hace el proveedor tras el aborto: eso no es observable y queda como riesgo R1. La invariante `CALL_TIMEOUT_MS + 2×TURSO_TIMEOUT_MS + SAFETY_MS < LEASE_MS` se comprueba con los valores definitivos.
 - **Sonda y presupuesto (secuencia exacta)**: cortocircuito semiabierto + arrendamiento ocupado ⇒ `BUSY` sin reclamar la sonda y la sonda sigue disponible de inmediato; arrendamiento reservado + sonda perdida ⇒ arrendamiento liberado en el acto; una sonda reclamada y no usada se devuelve de forma condicional sin pisar un estado más reciente.
 - **Contención entre flujos** (chips, búsqueda, geometría, "dos instancias" con estado compartido): nunca 2 en vuelo, sin cola, el excedente recibe `BUSY`; los chips no se reintentan solos.
 - **Planificador**: pruebas unitarias con una `table` simulada que reproduce *por construcción* las mismas duraciones que las rutas simuladas; **demuestran la lógica, no la equivalencia real con el proveedor, que sigue pendiente** (§10). Geometría solo del elegido, degradaciones etiquetadas, chips ≤ 3 automáticos.
@@ -123,10 +138,11 @@ Base teórica: ~0,2 s de latencia (2 muestras del 2026-10-19) + 1 s de separaci�
 | D1 | Una sola `table` (a pie), sin `table` de coche | `routeBus` no usa minutos de OSRM | código, `OsrmRoutingAdapter.ts` | ninguna sobre el código | el planificador no llama a ninguna `table` de coche |
 | D2 | Matriz máxima 4×4, 8 coordenadas | cubre 3 candidatos; conservador | consulta 1×3 del 2026-10-19, sin barrido | tamaño máximo real **no medido** | rechazo de matrices mayores con `400`; ningún barrido |
 | D3 | Duración del proveedor redondeada a minutos como minutos de tramo, **sin reglas de descarte en v1** | evita 3–5 llamadas por búsqueda | 2 respuestas 200 con duraciones plausibles | **equivalencia con `route` sin verificar**; sin `distance` de la ruta | tras autorizar una comparación, diferencia documentada; hasta entonces no se afirma equivalencia |
+| D3c | Deduplicar solo paradas por identificador; origen y destino nunca se funden con una parada | no alterar en silencio el origen de una búsqueda | contrato de §2 | ninguna | prueba del origen GPS coincidente con una parada |
 | D3b | Heurística duración-vs-recta | — | — | no validada para este perfil | **pendiente**; no se implementa en v1 |
 | D4 | Geometría solo del héroe; promover actualiza todo a la vez | el ranking solo usa minutos | código, paso 4 | cambio de UI | nº de llamadas de geometría por búsqueda ≤ las del héroe; pruebas de UI del §8 |
 | D5 | 1 activa + ≥1 s por upstream, sin cola | FOSSGIS: "1 solicitud por segundo", "scripts, una conexión" | texto íntegro de las condiciones | cómo mide FOSSGIS 1/s (por IP o aplicación) | pruebas de exclusión mutua real del §8 |
-| D5b | `CALL_TIMEOUT_MS` 4 s < `LEASE_MS` 8 s, `finally` | evitar dos llamadas activas | razonamiento del protocolo | latencia de Turso | prueba de invariante + contador de activas |
+| D5b | `CALL_TIMEOUT_MS` 4 s, 2×`TURSO_TIMEOUT_MS` 1,5 s, `SAFETY_MS` 1 s, `LEASE_MS` 10 s (8000 < 10000), comprobado en código y en prueba; descarte de la llamada si la latencia previa se come la holgura | evitar dos llamadas activas **desde el Worker** | razonamiento del protocolo; `tursoDb` ya limita cada operación a 1,5 s | **solapamiento remoto tras abortar: no garantizable (R1)**; desfase de reloj supuesto ≤ `SAFETY_MS` | invariante en código y en prueba; máximo de activas observable = 1; sin llamada si no hay holgura |
 | D5c | Sonda tras el arrendamiento | evitar sondas retenidas | #84 | carreras entre instancias | pruebas de secuencia exacta |
 | D6 | Fallo cerrado ante fallo de Turso | coherente con #84 | pruebas de #84 | latencia añadida | Turso caído ⇒ 503 sin llamada |
 | D7 | Degradar a estimación marcada, nunca encolar; `Retry-After` solo informativo, sin reintento automático | objetivo de 5 s | decisión del propietario | calidad de las estimaciones | `dataQuality:'degraded'`; ningún reintento automático |
@@ -142,6 +158,7 @@ Base teórica: ~0,2 s de latencia (2 muestras del 2026-10-19) + 1 s de separaci�
 - Comportamiento del edge de producción con `Referer` (F10) y con llamadas reales bajo presupuesto (se observa tras desplegar, sin provocar errores).
 - Interpretación de FOSSGIS de "1 petición por segundo" (por aplicación o por IP): el diseño toma la lectura conservadora, global.
 - Regla de plausibilidad de duraciones (D3b).
+- **Riesgo residual R1**: el proveedor puede seguir procesando tras un aborto o tras la muerte de una invocación; no es observable ni garantizable desde el Worker.
 
 ## 11. Secuencia de implementación (una PR independiente, commits ordenados)
 1. Presupuesto genérico por upstream (§4.1–4.4) en el Worker, con pruebas de arrendamiento, exclusión mutua real y secuencia con el cortocircuito; aplicado a `route` foot/drive (cliente sin cambios).
