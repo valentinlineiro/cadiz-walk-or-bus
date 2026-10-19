@@ -452,23 +452,6 @@ test('shouldPersistAValidRecordAndSurviveCorruptStorageWhenAppending', () => {
   assert.equal(log[0].destination.label, 'Plaza Mina');
 });
 
-test('shouldPreserveStartedAtWhenPersistingAStartedJourney', () => {
-  const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
-  const record = {
-    id: '1002-started',
-    timestamp: 1700000000000,
-    startedAt: 1700000005000,
-    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
-    recommendation: { identity: 'walk:direct', kind: 'walk', walkMinutes: 15, totalMinutes: 15 },
-    choice: null,
-  };
-
-  adapter.append(record);
-
-  assert.equal(adapter.getLog()[0].startedAt, 1700000005000);
-});
-
 test('shouldDeduplicateEvaluationsWhenTheSameDestinationIsRecordedWithinFiveMinutes', () => {
   const storage = new MockStorage();
   const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);

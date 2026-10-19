@@ -199,27 +199,6 @@ test('shouldRecordImplicitAcceptanceWhenChoiceIsNull', () => {
   assert.strictEqual(fakeLog.records[0], record);
 });
 
-test('shouldPersistAnExplicitStartedAtWhenAJourneyIsStarted', () => {
-  const fakeLog = new FakeJourneyLog();
-  const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });
-  const record = useCase.start({
-    destination: { label: 'Plaza Mina', lat: 36.535, lon: -6.297 },
-    recommendation: {
-      identity: createWalkIdentity(),
-      mode: 'walk',
-      totalMinutes: 18,
-      dataQuality: 'live',
-      breakdown: { walkToStopMinutes: 0, waitMinutes: 0, rideMinutes: 0, lastMileMinutes: 18, lastMileDegraded: false },
-      routes: {},
-    },
-    choice: null,
-    timestamp: 1700000001000,
-  });
-
-  assert.equal(record.startedAt, 1700000001000);
-  assert.equal(fakeLog.records[0].startedAt, 1700000001000);
-});
-
 test('shouldPreserveAlternativeDetailsWhenThePromotionIsExplicit', () => {
   const fakeLog = new FakeJourneyLog();
   const useCase = new RecordUserChoiceUseCase({ journeyLog: fakeLog });

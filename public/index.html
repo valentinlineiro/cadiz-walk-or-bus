@@ -316,8 +316,6 @@
   }
   .decision-alt .icon { color: var(--muted); }
   .decision-explanation { margin: 10px 4px 0; color: var(--ink-soft); font-size: 14px; font-weight: 600; }
-  .start-journey { margin-top: 14px; width: 100%; min-height: 42px; border: 0; border-radius: var(--radius-sm); background: var(--ink); color: #fff; font-weight: 700; cursor: pointer; }
-  .start-journey:disabled { background: var(--muted); cursor: default; }
   .alt-source { margin-top: 3px; color: var(--ink-soft); font-size: 11px; }
 
   .alternatives-container {
@@ -326,14 +324,18 @@
     flex-direction: column;
     gap: 8px;
   }
-  .alternatives-heading {
-    font-size: 13px;
-    font-weight: 700;
+  .alternatives-details { margin-top: 12px; }
+  .alternatives-details > summary {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
     color: var(--ink-soft);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-bottom: 2px;
+    font-size: 14px;
+    font-weight: 700;
+    list-style-position: inside;
   }
+  .alternatives-details > summary:focus-visible { outline: 2px solid var(--walk); outline-offset: 2px; border-radius: var(--radius-sm); }
   .alternative-card {
     display: flex;
     align-items: center;
