@@ -78,7 +78,7 @@ const STOP_ORIGINS = new Set(stops.map((s) => `${Number(s.lon).toFixed(5)},${Num
 // Objects (not JSON strings): Workers Logs indexes object keys as queryable fields.
 const logEvent = (event, fields, level = 'log') => console[level]({ event, ...fields });
 const knownStop = (id) => (KNOWN_STOPS.has(id) ? id : 'other');
-const routeKind = (pathname) => (pathname === '/api' ? 'api' : pathname === '/geocode' ? 'geocode' : 'route');
+const routeKind = (pathname) => (pathname === '/api' ? 'api' : pathname === '/geocode' ? 'geocode' : pathname.startsWith('/table/') ? 'table' : 'route');
 
 // --- Upstream proxy: Nominatim + OSRM, cached/rate-limited via optional Turso. ---
 // Needs secrets TURSO_DATABASE_URL + TURSO_AUTH_TOKEN. Upstream calls FAIL CLOSED (503 + Retry-After)
@@ -97,6 +97,10 @@ const ROUTE_UPSTREAM = {
   foot: 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/',
   drive: 'https://router.project-osrm.org/route/v1/driving/',
 };
+const TABLE_UPSTREAM = 'https://routing.openstreetmap.de/routed-foot/table/v1/foot/';
+const TABLE_MAX_COORDS = 8;
+const TABLE_MAX_SIDE = 4;
+const TABLE_PATH = /^\/table\/foot\/(-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?(?:;-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?)+)$/;
 const ROUTE_PATH = /^\/route\/(foot|drive)\/(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?);(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/;
 
 const TURSO_TIMEOUT_MS = 1500; // cap of every Turso operation (also part of the budget lease invariant)
@@ -137,6 +141,20 @@ const validNominatim = (j) =>
   Array.isArray(j) &&
   j.length <= MAX_NOMINATIM_HITS &&
   j.every((h) => h && typeof h === 'object' && inRange(h.lat, 90) && inRange(h.lon, 180));
+const finiteLocations = (list, n) =>
+  Array.isArray(list) &&
+  list.length === n &&
+  list.every((w) => Array.isArray(w?.location) && w.location.length === 2 && w.location.every(Number.isFinite) && Number.isFinite(w.distance) && w.distance >= 0);
+// `n`/`m` = rows (sources) / columns (destinations) asked for; anything else is a provider fault.
+const validTable = (n, m) => (j) =>
+  !!j &&
+  (j.code === 'NoTable' ||
+    (j.code === 'Ok' &&
+      Array.isArray(j.durations) &&
+      j.durations.length === n &&
+      j.durations.every((row) => Array.isArray(row) && row.length === m && row.every((c) => c === null || (Number.isFinite(c) && c >= 0))) &&
+      finiteLocations(j.sources, n) &&
+      finiteLocations(j.destinations, m)));
 const validOsrm = (j) =>
   !!j &&
   (j.code === 'NoRoute' ||
@@ -561,6 +579,50 @@ function handleRoute(url, env) {
   return proxyCached(env, `route:${m[1]}:${coords}`, produce);
 }
 
+// Walking-time matrix for the planner: one provider call instead of one per leg. Never cached or coalesced
+// (the coordinates may be the user's GPS position), hence `no-store` on every answer. Off until TABLE_ENABLED.
+const tableIndexList = (raw) => {
+  if (!/^\d+(?:;\d+)*$/.test(raw ?? '')) return null;
+  const list = raw.split(';').map(Number);
+  return list.length <= TABLE_MAX_SIDE && new Set(list).size === list.length ? list : null;
+};
+
+async function handleTable(url, env) {
+  const started = Date.now();
+  const res = await tableResponse(url, env);
+  logEvent('proxy_request', { kind: 'table', status: res.status, cache_status: 'none', duration_ms: Date.now() - started }, res.status >= 500 ? 'warn' : 'log');
+  return res;
+}
+
+async function tableResponse(url, env) {
+  if (env.TABLE_ENABLED !== 'true') return errorResponse('TABLE_DISABLED', 'table disabled', 503);
+  const m = TABLE_PATH.exec(url.pathname);
+  const sources = tableIndexList(url.searchParams.get('sources'));
+  const destinations = tableIndexList(url.searchParams.get('destinations'));
+  if (!m || !sources || !destinations) return errorResponse('INVALID_ROUTE', 'invalid table', 400);
+  const points = m[1].split(';').map((pair) => pair.split(',').map(Number));
+  if (points.length < 2 || points.length > TABLE_MAX_COORDS) return errorResponse('INVALID_ROUTE', 'invalid table', 400);
+  const all = [...sources, ...destinations];
+  if (new Set(all).size !== all.length || all.some((i) => i >= points.length)) return errorResponse('INVALID_ROUTE', 'invalid table', 400);
+  if (!points.every(([lon, lat]) => lon >= ROUTE_BOX.lon[0] && lon <= ROUTE_BOX.lon[1] && lat >= ROUTE_BOX.lat[0] && lat <= ROUTE_BOX.lat[1])) {
+    return errorResponse('OUTSIDE_SERVICE_AREA', 'outside service area', 400);
+  }
+  const coords = points.map(([lon, lat]) => `${lon.toFixed(5)},${lat.toFixed(5)}`).join(';');
+  const out = await callUpstream(
+    env,
+    `${TABLE_UPSTREAM}${coords}?sources=${sources.join(';')}&destinations=${destinations.join(';')}`,
+    validTable(sources.length, destinations.length),
+  );
+  if (out instanceof Response) return out;
+  const j = JSON.parse(out);
+  if (j.code === 'NoTable') return errorResponse('UPSTREAM_NOT_FOUND', 'no table', 404);
+  return Response.json({
+    code: 'Ok',
+    durations: j.durations,
+    snap_m: { sources: j.sources.map((w) => w.distance), destinations: j.destinations.map((w) => w.distance) },
+  });
+}
+
 // --- Live arrivals: panel is a legacy server, so it is hit at most ~once per stop per TTL. ---
 // Layers: per-isolate memory + in-flight coalescing -> Turso (shared) -> panel. A Turso
 // row-lock (owned by its next_at value) makes one instance fetch per stop while the others
@@ -838,15 +900,25 @@ async function handleProxyHealth(env) {
   }
 }
 
+// Every answer under /table/ (429 and 405 included) is `no-store`: the URL may carry the user's position.
 async function handleFetch(request, env) {
+  const res = await routeFetch(request, env);
+  if (!new URL(request.url).pathname.startsWith('/table/')) return res;
+  const out = new Response(res.body, res);
+  out.headers.set('cache-control', 'no-store');
+  return out;
+}
+
+async function routeFetch(request, env) {
   const url = new URL(request.url);
-  const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname === '/proxy-health' || url.pathname.startsWith('/route/');
+  const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname === '/proxy-health' || url.pathname.startsWith('/route/') || url.pathname.startsWith('/table/');
   if (dynamic && request.method !== 'GET') {
     return new Response('method not allowed', { status: 405, headers: { allow: 'GET' } });
   }
   if (url.pathname === '/proxy-health') return handleProxyHealth(env);
-  if (url.pathname === '/geocode' || url.pathname.startsWith('/route/')) {
+  if (url.pathname === '/geocode' || url.pathname.startsWith('/route/') || url.pathname.startsWith('/table/')) {
     if (await rateLimited(request, env)) return rateLimitedResponse(url.pathname);
+    if (url.pathname.startsWith('/table/')) return handleTable(url, env);
     return url.pathname === '/geocode' ? handleGeocode(url, env) : handleRoute(url, env);
   }
   if (url.pathname === '/stops') return Response.json(stops);
