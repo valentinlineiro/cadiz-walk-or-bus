@@ -5,28 +5,22 @@ import { FindBestJourneysUseCase } from './application/use-cases/FindBestJourney
 import { GetQuickVerdictUseCase } from './application/use-cases/GetQuickVerdictUseCase.js';
 import { arrivalsResultOf } from './application/ports/TransitDataPort.js';
 import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTransitAdapter.js';
-import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
-import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
+import { TimeoutTransitAdapter } from './infrastructure/transit/TimeoutTransitAdapter.js';
 import { noTransitDataCardHTML, partialTransitDataNoteHTML } from './ui.js';
 
-// The contract: a missing source is never reported as "no buses". Only a source that actually
-// answered (live or scheduled) may produce an empty list, and only then may walking win by default.
+// The contract: a missing source is never reported as "no buses". Only the municipal source, when
+// it actually answered (even with an empty list), may produce an empty list, and only then may
+// walking win by default. There is no second source to fall back to.
 
-const snapshot = JSON.parse(readFileSync(new URL('../fixtures/gtfs-cadiz.snapshot.json', import.meta.url), 'utf8'));
 const municipalStops = JSON.parse(readFileSync(new URL('../../stops.json', import.meta.url), 'utf8'));
-const WEEKDAY_MORNING = { now: () => new Date('2026-10-14T06:30:00Z') }; // 08:30 Madrid, inside the feed
-const AFTER_FEED = { now: () => new Date('2027-02-03T08:00:00Z') }; // every service has ended
 
 const panelDown = async () => ({ ok: false, status: 502, json: async () => ({}) });
 const panelUp = (arrivals) => async (url) =>
   String(url).startsWith('/api') ? { ok: true, status: 200, json: async () => ({ arrivals }) } : panelDown();
 
-function resilient({ fetchImpl, clock = WEEKDAY_MORNING, timeoutMs = 500 }) {
-  const municipal = new MunicipalTransitAdapter(fetchImpl);
-  return new ResilientTransitAdapter(municipal, new GtfsTransitAdapter(snapshot, clock), timeoutMs);
+function resilient({ fetchImpl, timeoutMs = 500 }) {
+  return new TimeoutTransitAdapter(new MunicipalTransitAdapter(fetchImpl), timeoutMs);
 }
-
-const scheduledStop = snapshot.stops.find((s) => s.stop === '2_1').stop;
 
 // --- adapter-level contract -------------------------------------------------------------
 
@@ -38,33 +32,16 @@ test('shouldReportLiveAndKeepAnEmptyListAuthoritativeWhenPanelAnswers', async ()
   assert.deepEqual(await empty.getArrivalsResult('1515'), { status: 'live', arrivals: [] });
 });
 
-test('shouldReportScheduledWithCauseWhenPanelFailsAndScheduleCanAnswer', async () => {
+test('shouldReportUnavailableNotEmptyWhenPanelFailsForAMunicipalStop', async () => {
   const adapter = resilient({ fetchImpl: panelDown });
-  const result = await adapter.getArrivalsResult(scheduledStop);
-  assert.equal(result.status, 'scheduled');
-  assert.equal(result.cause, 'source_error');
-  assert.ok(result.arrivals.every((a) => a.source === 'scheduled'));
-});
-
-test('shouldReportUnavailableNotEmptyWhenPanelFailsAndScheduleDoesNotKnowTheStop', async () => {
-  const adapter = resilient({ fetchImpl: panelDown });
-  const result = await adapter.getArrivalsResult('1515');
-  assert.deepEqual(result, { status: 'unavailable', cause: 'source_error' });
+  assert.deepEqual(await adapter.getArrivalsResult('1515'), { status: 'unavailable', cause: 'source_error' });
 });
 
 test('shouldNeverReportNoBusesWhenPanelIsDown', async () => {
   const adapter = resilient({ fetchImpl: panelDown });
   const statuses = new Set();
   for (const stop of municipalStops) statuses.add((await adapter.getArrivalsResult(stop.stop)).status);
-  // Municipal ids are not GTFS ids today: they must surface as unavailable, not as empty arrivals.
   assert.deepEqual([...statuses], ['unavailable']);
-});
-
-test('shouldReportUnavailableWhenFeedHasNoServiceToday', async () => {
-  const gtfs = new GtfsTransitAdapter(snapshot, AFTER_FEED);
-  assert.deepEqual(await gtfs.getArrivalsResult(scheduledStop), { status: 'unavailable', cause: 'no_schedule' });
-  const adapter = resilient({ fetchImpl: panelDown, clock: AFTER_FEED });
-  assert.equal((await adapter.getArrivalsResult(scheduledStop)).status, 'unavailable');
 });
 
 test('shouldReportSourceErrorWhenPanelHangsPastTheTimeout', async () => {
@@ -127,10 +104,13 @@ test('shouldTreatConfirmedEmptyAnswerAsAvailableWalkWhenNoBusIsDue', async () =>
   assert.equal(decision.hero.mode, 'walk');
 });
 
-test('shouldCountScheduledDataAsDataWhenPanelIsDown', async () => {
-  const sched = { status: 'scheduled', arrivals: [], cause: 'source_error' };
-  const useCase = new FindBestJourneysUseCase({ routing, transit: transitWith({ S1: sched, S2: sched }) });
-  assert.equal((await useCase.execute({ origin, destination })).transitData, 'available');
+test('shouldKeepNoDataWhenLinesAreEmpty', async () => {
+  const transit = {
+    ...transitWith({ S1: live([]), S2: live([]) }),
+    getLines: async () => ({}),
+  };
+  const decision = await new FindBestJourneysUseCase({ routing, transit }).execute({ origin, destination });
+  assert.equal(decision.transitData, 'unavailable');
 });
 
 test('shouldGiveNoVerdictWhenNoStopAnsweredAndWalkWhenEmptyIsConfirmed', async () => {
@@ -142,13 +122,14 @@ test('shouldGiveNoVerdictWhenNoStopAnsweredAndWalkWhenEmptyIsConfirmed', async (
 
 // --- UI wording -------------------------------------------------------------------------
 
-test('shouldNotLabelTheNoDataCardAsARecommendationWhenTransitDataIsMissing', () => {
+test('shouldOfferWalkingAsAnOptionNotARecommendationWhenTransitDataIsMissing', () => {
   const html = noTransitDataCardHTML(11.4);
   assert.match(html, /SIN DATOS DE HORARIOS/);
-  assert.match(html, /Andando: 11′/);
-  assert.doesNotMatch(html, /decision-card walk|decision-card bus|ANDAR<|BUS</);
+  assert.match(html, /No podemos consultar los horarios del autobús ahora mismo/);
+  assert.match(html, /Puedes valorar ir andando; el tiempo estimado a pie es de 11 minutos/);
+  assert.doesNotMatch(html, /decision-card walk|decision-card bus|ANDAR<|BUS<|mejor|más rápido|te conviene/i);
   assert.match(noTransitDataCardHTML(null), /SIN DATOS DE HORARIOS/);
-  assert.doesNotMatch(noTransitDataCardHTML(null), /Andando/);
+  assert.doesNotMatch(noTransitDataCardHTML(null), /andando|a pie/);
   assert.match(partialTransitDataNoteHTML(), /Faltan datos/);
 });
 
@@ -192,4 +173,20 @@ test('shouldEscapeExternalNamesWhenRenderingMapMarkers', async () => {
     assert.ok(!h.includes('<img'), h);
     assert.match(h, /title="[^"]*&quot;&gt;&lt;img/);
   }
+});
+
+// --- no foreign service ------------------------------------------------------------------
+
+test('shouldNeverOfferAMetropolitanLineWhenThePanelIsDown', async () => {
+  const transit = resilient({ fetchImpl: async (url) => (String(url) === '/stops' ? { ok: true, json: async () => stops } : String(url) === '/lines' ? { ok: true, json: async () => ({ lines: { L0: { X: ['S1', 'S2'] } } }) } : panelDown()) });
+  const decision = await new FindBestJourneysUseCase({ routing, transit }).execute({ origin, destination });
+
+  assert.equal(decision.transitData, 'unavailable');
+  assert.equal(decision.hero.mode, 'walk');
+  assert.doesNotMatch(JSON.stringify(decision), /"M-\d+"|scheduled/);
+});
+
+test('shouldNotShipAnyScheduledSourceWhenComposingTheApp', () => {
+  const composition = readFileSync(new URL('./application/composition.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(composition, /gtfs|fixtures|scheduled/i);
 });

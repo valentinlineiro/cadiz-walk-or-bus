@@ -8,11 +8,7 @@ import {
   SearchDestinationsUseCase,
 } from './application/index.js';
 import { createWalkIdentity, createBusIdentity } from './domain/identity.js';
-import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
-import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
-import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
-import { findRegularScenario } from '../../scripts/gtfs-scenarios.mjs';
-import officialGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
+import { TimeoutTransitAdapter } from './infrastructure/transit/TimeoutTransitAdapter.js';
 
 test('shouldDelegateQueryAndLimitToGeocodingPortWhenSearchingDestinations', async () => {
   let capturedQuery = null;
@@ -87,54 +83,33 @@ test('shouldKeepTheWalkFallbackLightweightWhenGivingAQuickVerdict', async () => 
   assert.equal(routeBusCalls, 0);
 });
 
-test('shouldFallBackToScheduledGtfsAndStillProduceBusWhenMunicipalPanelIsDown', async () => {
-  const { trip: sourceTrip, now: scheduledNow } = findRegularScenario(officialGtfsSnapshot, 0);
-  const originStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes[0].stop);
-  assert.ok(originStop, 'scheduled trip must reference a known origin stop');
-  const destinationStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes.at(-1).stop);
-  assert.ok(destinationStop, 'scheduled trip must reference a known destination stop');
-  const scheduled = new GtfsTransitAdapter(officialGtfsSnapshot, {
-    now: () => scheduledNow,
-  });
-  const scheduledArrivals = await scheduled.getArrivals(originStop.stop);
-  const scheduledArrival = scheduledArrivals.find((arrival) => arrival.line === sourceTrip.line);
-  assert.ok(scheduledArrival, 'real GTFS stop must produce a scheduled arrival');
-  assert.equal(scheduledArrival.source, 'scheduled');
-  assert.ok(officialGtfsSnapshot.lines[sourceTrip.line], 'scheduled line must exist in topology');
-  assert.ok(
-    Object.values(officialGtfsSnapshot.lines[sourceTrip.line]).some((sequence) => sequence.includes(destinationStop.stop)),
-    'scheduled line topology must contain the destination stop',
-  );
-  let realtimeCalls = 0;
+test('shouldReportNoBusDataAndKeepTheWalkAsInformationWhenMunicipalPanelIsDown', async () => {
+  const stops = [
+    { stop: '1101', name: 'Origen', lat: 36.5271, lon: -6.2885 },
+    { stop: '1102', name: 'Destino', lat: 36.5345, lon: -6.2937 },
+  ];
   const realtime = {
-    getStops: async () => { realtimeCalls += 1; throw new Error('502'); },
-    getLines: async () => { realtimeCalls += 1; throw new Error('502'); },
-    getArrivals: async () => { realtimeCalls += 1; throw new Error('502'); },
+    getStops: async () => stops,
+    getLines: async () => ({ '1': { CENTRO: ['1101', '1102'] } }),
+    getArrivals: async () => { throw new Error('502'); },
   };
-  const transit = new ResilientTransitAdapter(realtime, scheduled, 50);
   const useCase = new FindBestJourneysUseCase({
-    transit,
+    transit: new TimeoutTransitAdapter(realtime, 50),
     routing: {
-      routeWalking: async (from, to) => ({
-        minutes: !from.stop && !to.stop ? 200 : (to.stop ? 2 : 1),
-        coordinates: [],
-      }),
+      routeWalking: async () => ({ minutes: 12, coordinates: [] }),
       routeBus: async () => ({ minutes: 8, coordinates: [] }),
     },
   });
 
   const result = await useCase.execute({
-    origin: { lat: originStop.lat, lon: originStop.lon },
-    destination: { lat: destinationStop.lat, lon: destinationStop.lon, label: destinationStop.name },
+    origin: { lat: stops[0].lat, lon: stops[0].lon },
+    destination: { lat: stops[1].lat, lon: stops[1].lon, label: 'Destino' },
   });
 
-  assert.equal(realtimeCalls > 0, true);
-  assert.equal(result.hero.mode, 'bus');
-  assert.match(result.hero.metadata?.line, /^M-/);
-  assert.equal(result.hero.metadata?.source, 'scheduled');
-  assert.notEqual(result.hero.dataQuality, 'live');
-  assert.equal(result.hero.dataQuality, 'estimated');
-  assert.equal(typeof result.walkMinutes, 'number');
+  assert.equal(result.transitData, 'unavailable', 'no source answered: the app knows it does not know');
+  assert.equal(result.hero.mode, 'walk');
+  assert.equal(result.walkMinutes, 12);
+  assert.equal(result.hero.metadata?.line ?? null, null, 'no bus line is invented');
 });
 
 test('shouldFilterArrivalsAndResolveAlightingWhenGettingEligibleArrivals', async () => {
@@ -690,39 +665,3 @@ test('shouldFlagDegradedLastMileWhenPedestrianRoutingFails', async () => {
   assert.equal(decision.hero.breakdown.lastMileDegraded, true);
   assert.ok(decision.hero.breakdown.lastMileMinutes > 0);
 });
-
-test('shouldNeverProduceLiveDataQualityWhenTheArrivalIsScheduled', async () => {
-  const origin = { lat: 36.520, lon: -6.280 };
-  const destination = { lat: 36.530, lon: -6.290 };
-  const fakeRouting = {
-    routeWalking: async (from, to) => {
-      if (from === origin && to === destination) return { minutes: 50, coordinates: [] };
-      return { minutes: 1, coordinates: [] };
-    },
-    routeBus: async () => ({ minutes: 10, coordinates: [] }),
-  };
-  const fakeTransit = {
-    getStops: async () => [
-      { stop: '101', lat: 36.520, lon: -6.280 },
-      { stop: '201', lat: 36.530, lon: -6.290 },
-    ],
-    getLines: async () => ({
-      '1': { 'Centro': ['101', '201'] },
-    }),
-    getArrivals: async () => [
-      { line: '1', destination: 'Centro', minutes: 5, source: 'scheduled' },
-    ],
-  };
-
-  const useCase = new FindBestJourneysUseCase({
-    routing: fakeRouting,
-    transit: fakeTransit,
-  });
-
-  const decision = await useCase.execute({ origin, destination });
-  assert.equal(decision.hero.mode, 'bus');
-  assert.equal(decision.hero.metadata?.source, 'scheduled');
-  assert.notEqual(decision.hero.dataQuality, 'live');
-  assert.equal(decision.hero.dataQuality, 'estimated');
-});
-

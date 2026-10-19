@@ -3,7 +3,6 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { findServiceWorkerShellProblems } from './architecture-gate.mjs';
-import { findGtfsExpiryProblems } from './gtfs-expiry.mjs';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const root = join(scriptPath, '..', '..');
@@ -14,7 +13,6 @@ const REQUIRED_FILES = [
   'public/sw.js',
   'public/web/ui.js',
   'public/web/application/composition.js',
-  'public/fixtures/gtfs-cadiz.snapshot.json',
   'public/icons/icon-192.png',
   'public/icons/icon-512.png',
   'public/icons/apple-touch-icon.png',
@@ -49,19 +47,13 @@ export function collectReleaseArtifactProblems() {
   return problems;
 }
 
-// Time-dependent, so it lives apart from collectReleaseArtifactProblems: the unit tests stay
-// deterministic and only a release (this script) fails when the fallback feed is about to expire.
-export function collectReleaseCalendarProblems(now = new Date(), snapshot = JSON.parse(readFileSync(join(root, 'public/fixtures/gtfs-cadiz.snapshot.json'), 'utf8'))) {
-  return findGtfsExpiryProblems(snapshot, now);
-}
-
 function run(command, args) {
   const executable = process.platform === 'win32' && command === 'npm' ? 'npm.cmd' : command;
   return spawnSync(executable, args, { cwd: root, stdio: 'inherit' }).status ?? 1;
 }
 
 if (process.argv[1] === scriptPath) {
-  const problems = [...collectReleaseArtifactProblems(), ...collectReleaseCalendarProblems()];
+  const problems = collectReleaseArtifactProblems();
   if (problems.length > 0) {
     console.error('Release artifact check failed:');
     for (const problem of problems) console.error(`- ${problem}`);

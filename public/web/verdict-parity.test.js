@@ -136,9 +136,9 @@ test('shouldNotRequestBusGeometryWhenOnlyAQuickVerdictIsNeeded', async () => {
 });
 
 test('shouldGiveNoVerdictWhenTopologyDoesNotKnowAnyNearbyStop', async () => {
-  // Fallback topology with foreign (GTFS-style) stop ids next to municipal stops with buses due.
-  const gtfsLines = { L1: { DEST: ['2_1', '2_2'] }, L2: { DEST: ['2_3', '2_4'] } };
-  const transit = { ...city(3, [busIn(1, 6), busIn(2, 6), busIn(3, 6)]), getLines: async () => gtfsLines };
+  // Fallback topology with foreign (not in the municipal catalogue) stop ids next to municipal stops with buses due.
+  const foreignLines = { L1: { DEST: ['2_1', '2_2'] }, L2: { DEST: ['2_3', '2_4'] } };
+  const transit = { ...city(3, [busIn(1, 6), busIn(2, 6), busIn(3, 6)]), getLines: async () => foreignLines };
   const { quick, full } = await both(transit);
 
   assert.equal(full.transitData, 'unavailable');

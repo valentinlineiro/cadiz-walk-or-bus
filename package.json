@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "architecture:check": "node scripts/architecture-gate.mjs",
-    "ingest:gtfs": "node scripts/ingest-gtfs.mjs",
     "shell:hash": "node scripts/shell-hash.mjs",
     "release:check": "node scripts/release-check.mjs",
     "test": "npm run architecture:check && node --test",

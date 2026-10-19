@@ -82,10 +82,10 @@ test('shouldDiscardNonActionableOrAmbiguousEntriesWhenParsingArrivals', () => {
 
 test('shouldListAllRequiredAssetsAndPassTheGateWhenTheServiceWorkerShellIsChecked', () => {
   const problems = findServiceWorkerShellProblems();
-  assert.deepEqual(problems, [], 'All SHELL_URLS in sw.js must exist on disk and GTFS_FEED_VERSION must match');
+  assert.deepEqual(problems, [], 'All SHELL_URLS in sw.js must exist on disk');
 });
 
-test('shouldKeepLiveEndpointsOutOfTheShellAndIncludeTheSnapshotWhenReadingTheServiceWorkerSource', () => {
+test('shouldKeepLiveEndpointsOutOfTheShellWhenReadingTheServiceWorkerSource', () => {
   const swSource = readFileSync(join(root, 'public/sw.js'), 'utf8');
 
   // Verify that live API endpoints are NOT in SHELL_URLS
@@ -94,9 +94,8 @@ test('shouldKeepLiveEndpointsOutOfTheShellAndIncludeTheSnapshotWhenReadingTheSer
     assert.equal(swSource.includes(`'${f}'`), false, `Shell URLs must not contain live endpoint ${f}`);
   }
 
-  // Verify that gtfs snapshot is included in shell
-  assert.ok(swSource.includes('/fixtures/gtfs-cadiz.snapshot.json'));
-  assert.ok(swSource.includes('GTFS_FEED_VERSION'));
+  // No GTFS snapshot ships with the shell: there is no scheduled fallback to serve.
+  assert.equal(/gtfs/i.test(swSource), false);
 });
 
 // ============================================================================

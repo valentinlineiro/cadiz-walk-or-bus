@@ -28,13 +28,16 @@ export class FindBestJourneysUseCase {
         const lines = rawLines
             ? (rawLines.lines ?? rawLines)
             : null;
+        // A successful but empty line catalogue is not evidence that no bus is due. It means
+        // there is no usable topology to evaluate, so keep the result in the honest no-data state.
+        const hasUsableLines = lines !== null && Object.keys(lines).length > 0;
         // Nearby stops pool prioritized and diversified by line
         const stopsLoaded = stops !== null;
         const pool = nearestStops(stops ?? [], origin.lat, origin.lon, 32);
-        const nearbyStops = lines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
+        const nearbyStops = hasUsableLines ? diversifyByLine(pool, lines, 8) : pool.slice(0, 8);
         // A stop the topology does not know cannot be matched to any line: it was not evaluated,
         // exactly like a stop that did not answer (e.g. fallback topology with foreign stop ids).
-        const knownToTopology = lines ? stopLineMap(lines) : new Map();
+        const knownToTopology = hasUsableLines ? stopLineMap(lines) : new Map();
         const busCandidates = [];
         let stopsWithData = 0;
         await Promise.all(nearbyStops.map(async (stop) => {
@@ -47,7 +50,7 @@ export class FindBestJourneysUseCase {
             const stopDist = haversineMeters(origin.lat, origin.lon, stop.lat, stop.lon);
             const walkToStopMinutes = walkMinutes(stopDist);
             const resolveAlight = (arr) => {
-                if (!lines)
+                if (!hasUsableLines || !lines)
                     return null;
                 return findAlightStop({
                     line: arr.line,
@@ -68,7 +71,7 @@ export class FindBestJourneysUseCase {
         }));
         // Without the line topology no bus can be matched to the destination: buses were not
         // evaluated, so "walk" would be a guess, not a conclusion.
-        const transitData = !stopsLoaded || !lines
+        const transitData = !stopsLoaded || !hasUsableLines
             ? 'unavailable'
             : nearbyStops.length === 0 || stopsWithData === nearbyStops.length
                 ? 'available'
