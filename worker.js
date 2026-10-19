@@ -86,6 +86,8 @@ const routeKind = (pathname) => (pathname === '/api' ? 'api' : pathname === '/ge
 // (below). Cache hits keep working.
 // Staleness contract: shared cache 24h; browsers may reuse a response for 1h.
 const PROXY_UA = 'cadiz-walk-or-bus/0.1 (+https://github.com/valentinlineiro/cadiz-walk-or-bus)';
+// FOSSGIS asks for a valid origin (Referer) when technically possible; only our site, never a user URL.
+const PROXY_REFERER = 'https://cadiz-walk-or-bus.valentinlineiro.workers.dev/';
 const PROXY_TTL_S = 24 * 60 * 60;
 const NOMINATIM_GAP_MS = 1100;
 const CADIZ_VIEWBOX = '-6.35,36.60,-6.20,36.40';
@@ -317,7 +319,7 @@ async function callUpstream(env, url, isValid, beforeCall) {
 async function upstreamJson(url, isValid, report) {
   let r;
   try {
-    r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA }, signal: AbortSignal.timeout(5000) });
+    r = await globalThis.fetch(url, { headers: { 'user-agent': PROXY_UA, referer: PROXY_REFERER }, signal: AbortSignal.timeout(5000) });
   } catch {
     return errorResponse('UPSTREAM_UNREACHABLE', 'upstream unreachable', 502);
   }

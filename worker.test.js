@@ -319,6 +319,23 @@ test('shouldReturn503WithRetryAfterWhenTheGlobalNominatimSlotStaysTaken', async 
   assert.equal(res.headers.get('retry-after'), '2');
 });
 
+test('shouldIdentifyTheAppWithUserAgentAndRefererOnEveryUpstreamWhenProxying', async () => {
+  const seen = [];
+  withTurso(async (url, init) => {
+    seen.push({ host: new URL(url).hostname, headers: init.headers });
+    return { ok: true, status: 200, text: async () => (String(url).includes('nominatim') ? NOMINATIM_HIT : BREAKER_OSRM_OK) };
+  });
+  await worker.fetch(new Request('http://x/geocode?q=plaza'), TURSO_ENV);
+  await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  await worker.fetch(new Request('http://x/route/drive/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+
+  assert.deepEqual(seen.map((s) => s.host), ['nominatim.openstreetmap.org', 'routing.openstreetmap.de', 'router.project-osrm.org']);
+  for (const { headers } of seen) {
+    assert.match(headers['user-agent'], /^cadiz-walk-or-bus\/\d.* \(\+https:\/\/github\.com\//);
+    assert.equal(headers.referer, 'https://cadiz-walk-or-bus.valentinlineiro.workers.dev/', 'only our own origin, never a user URL or coordinates');
+  }
+});
+
 test('shouldProxyFootAndDriveValidateCoordinatesAndMapUpstreamErrorsWhenRouting', async () => {
   const env = TURSO_ENV;
   const urls = [];

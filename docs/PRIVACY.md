@@ -29,6 +29,8 @@ Cache Storage holds only the application shell (`SHELL_URLS`).
 | Stop id | municipal panel | browser → Worker `/api` → panel |
 | Map tiles | `tile.openstreetmap.org` | **directly from the browser** (CSP `img-src`); OSM sees the IP and the viewed area |
 
+Upstream calls from the Worker carry a User-Agent that names the app and a `Referer` that is only the site's own origin (never a user URL or coordinates), as the FOSSGIS terms ask.
+
 The browser talks only to its own origin plus tiles (`connect-src 'self'`, `public/_headers`).
 No cookies, no analytics (no `document.cookie` / `Set-Cookie` in the code; checked by a test).
 
