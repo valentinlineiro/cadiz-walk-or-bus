@@ -54,6 +54,13 @@ test('shouldNameBothRoutersWhenListingWhatLeavesTheDevice', () => {
   assert.match(page, /servidor demo de OSRM para el trayecto en bus/);
 });
 
+test('shouldCreditBothRoutingProvidersAndLinkFixTheMapInThePrivacyNotice', () => {
+  assert.match(page, /Crédito de las rutas/);
+  assert.match(page, /href="https:\/\/project-osrm\.org\/"/);
+  assert.match(page, /href="https:\/\/www\.fossgis\.de\/"/);
+  assert.match(page, /href="https:\/\/www\.openstreetmap\.org\/fixthemap"/);
+});
+
 test('shouldRunNoScriptAndLinkBackWhenServedUnderTheStrictCsp', () => {
   assert.doesNotMatch(page, /<script/i);
   assert.match(page, /href="\/">← Volver a la aplicación/);
