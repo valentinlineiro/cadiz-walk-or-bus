@@ -1683,7 +1683,7 @@ test('shouldPrioritizeLineThenBoardingThenAlightingStopWhenWordingAnAlternativeD
   assert.equal(alternativeDiffText(describeAlternativeDiff(walkAlt, primary)), 'Ruta directa a pie');
 });
 
-test('shouldUseTheWalkToStopCacheFirstAndEstimateFromDistanceOnAMissWhenComputingCheapWalkToStop', () => {
+test('shouldUseCachedMinutesAndReturnPositiveEstimateOnCacheMissWhenComputingCheapWalkToStop', () => {
   const cache = new Map();
   cache.set('1106', { minutes: 5 });
 
