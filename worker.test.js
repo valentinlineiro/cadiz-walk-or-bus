@@ -1773,3 +1773,26 @@ test('shouldRejectNonGetTableRequestsWhenTheMethodIsNotGet', async () => {
   const res = await worker.fetch(new Request(tableUrl(), { method: 'POST' }), TABLE_ENV);
   assert.equal(res.status, 405);
 });
+
+test('shouldKeepNoStoreWhenAnyValidationErrorIsAnswered', async () => {
+  tableProvider(tableAnswer());
+  for (const url of [tableUrl(TC, 'sources=0;0&destinations=2;3'), tableUrl('-6.30,36.50'), tableUrl('-6.30,36.50;-6.29,36.51;-6.28,36.52;-3.70,40.41')]) {
+    const res = await fetchTable(url);
+    assert.equal(res.status, 400);
+    assert.equal(res.headers.get('cache-control'), 'no-store', url);
+  }
+});
+
+test('shouldShareTheCircuitBreakerWithFootRoutesWhenTheMatrixIsRateLimited', async () => {
+  const p = provider(() => reply(429, 120));
+  const cache = withTurso(p.upstream);
+  const first = await fetchTable();
+  assert.equal(first.status, 503);
+  assert.equal(first.headers.get('cache-control'), 'no-store');
+  skipGap(cache);
+  const second = await fetchTable();
+  await assertBlocked(second.clone());
+  assert.equal(second.headers.get('cache-control'), 'no-store');
+  await assertBlocked(await fetchRoute(FOOT2)); // the same upstream: the route is blocked too
+  assert.equal(p.calls, 1, 'only the first request reached the provider');
+});
