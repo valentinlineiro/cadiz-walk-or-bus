@@ -104,6 +104,15 @@ test('shouldTreatConfirmedEmptyAnswerAsAvailableWalkWhenNoBusIsDue', async () =>
   assert.equal(decision.hero.mode, 'walk');
 });
 
+test('shouldKeepAnEmptyLineCatalogueInNoDataStateRatherThanConcludingNoBusIsDue', async () => {
+  const transit = {
+    ...transitWith({ S1: live([]), S2: live([]) }),
+    getLines: async () => ({}),
+  };
+  const decision = await new FindBestJourneysUseCase({ routing, transit }).execute({ origin, destination });
+  assert.equal(decision.transitData, 'unavailable');
+});
+
 test('shouldGiveNoVerdictWhenNoStopAnsweredAndWalkWhenEmptyIsConfirmed', async () => {
   const none = new GetQuickVerdictUseCase({ routing, transit: transitWith({ S1: unavailable, S2: unavailable }) });
   assert.equal(await none.execute({ origin, destination }), null);
