@@ -40,8 +40,13 @@ test('shouldNotClaimCookiesOrAnalyticsWhenNoCodePathUsesThem', () => {
   assert.match(page, /no usa cookies ni herramientas de analítica/);
 });
 
-test('shouldBeOneTapFromTheMapAndAvailableOfflineWhenTheShellIsCached', () => {
-  assert.match(read('public/web/map.js'), /href="\/privacy\.html"/);
+test('shouldCreditTheMapTilesAndScheduledTransitSourcesWhenShowingMapAttribution', () => {
+  const map = read('public/web/map.js');
+
+  assert.match(map, /href="https:\/\/www\.openstreetmap\.org\/copyright"[^>]*>OpenStreetMap<\/a>/);
+  assert.match(map, /href="https:\/\/www\.transportes\.gob\.es\/"[^>]*>Powered by MITRAMS<\/a>/);
+  assert.match(map, /href="https:\/\/api\.ctan\.es\/avisolegal\.html"[^>]*>Datos GTFS: Red de Consorcios de Transporte de Andalucía<\/a>/);
+  assert.match(map, /href="\/privacy\.html"/);
   assert.match(read('public/sw.js'), /'\/privacy\.html'/);
 });
 
