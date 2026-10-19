@@ -25,7 +25,7 @@ Cache Storage holds only the application shell (`SHELL_URLS`).
 | Data | Recipient | Path |
 |---|---|---|
 | Search text | Nominatim | browser → Worker `/geocode` → Nominatim |
-| Route endpoints (including the user's GPS position as origin of walking routes) | OSRM | browser → Worker `/route/*` → OSRM |
+| Route endpoints (including the user's GPS position as origin of walking routes) | OSRM (`routing.openstreetmap.de`, FOSSGIS, for walking; `router.project-osrm.org` for bus legs) | browser → Worker `/route/*` → OSRM |
 | Stop id | municipal panel | browser → Worker `/api` → panel |
 | Map tiles | `tile.openstreetmap.org` | **directly from the browser** (CSP `img-src`); OSM sees the IP and the viewed area |
 

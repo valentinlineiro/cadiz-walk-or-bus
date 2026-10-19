@@ -49,6 +49,11 @@ test('shouldCreditTheMapTilesAndLinkThePrivacyNoticeWhenShowingMapAttribution', 
   assert.match(read('public/sw.js'), /'\/privacy\.html'/);
 });
 
+test('shouldNameBothRoutersWhenListingWhatLeavesTheDevice', () => {
+  assert.match(page, /servidor de FOSSGIS para los tramos a pie/);
+  assert.match(page, /servidor demo de OSRM para el trayecto en bus/);
+});
+
 test('shouldRunNoScriptAndLinkBackWhenServedUnderTheStrictCsp', () => {
   assert.doesNotMatch(page, /<script/i);
   assert.match(page, /href="\/">← Volver a la aplicación/);
