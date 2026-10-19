@@ -848,6 +848,27 @@ test('shouldNotCallAndShouldReleaseAtOnceWhenTheLatencyBeforeTheCallEatsTheMargi
   }
 });
 
+test('shouldCallAtTheLimitAndRefuseOneMillisecondLaterWhenTheLatencyBeforeTheCallGrows', async () => {
+  for (const [late, calls] of [[__budget.MAX_PRE_CALL_MS, 1], [__budget.MAX_PRE_CALL_MS + 1, 0]]) {
+    mock.timers.enable({ apis: ['Date'], now: 90_000_000 });
+    try {
+      const p = provider(() => reply(200));
+      withTurso(p.upstream);
+      onTurso((sql, args) => { if (isLeaseReserve(sql, args)) mock.timers.tick(late); });
+      await fetchRoute(FOOT);
+      assert.equal(p.calls, calls, `latency ${late} ms`);
+    } finally {
+      mock.timers.reset();
+    }
+  }
+});
+
+test('shouldEndTheCallBeforeTheLeaseExpiryByTheSafetyMarginWhenTheCallStartsAtTheLimit', () => {
+  const { MAX_PRE_CALL_MS, CALL_TIMEOUT_MS, SAFETY_MS, LEASE_MS } = __budget;
+  assert.ok(MAX_PRE_CALL_MS + CALL_TIMEOUT_MS + SAFETY_MS <= LEASE_MS, 'latest call end leaves the margin');
+  assert.equal(MAX_PRE_CALL_MS + CALL_TIMEOUT_MS, 7_000);
+});
+
 test('shouldKeepTheLeaseInvariantWhenUsingTheDefinitiveValues', () => {
   const { CALL_TIMEOUT_MS, TURSO_TIMEOUT_MS, SAFETY_MS, LEASE_MS } = __budget;
   assert.deepEqual([CALL_TIMEOUT_MS, TURSO_TIMEOUT_MS, SAFETY_MS, LEASE_MS], [4_000, 1_500, 1_000, 10_000]);

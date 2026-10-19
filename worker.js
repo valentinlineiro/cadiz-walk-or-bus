@@ -341,8 +341,10 @@ const CALL_TIMEOUT_MS = 4_000;
 const SAFETY_MS = 1_000; // Worker scheduling and clock skew between isolates
 const LEASE_MS = 10_000;
 const LEASE_GAP_MS = 1_000;
-const MAX_PRE_CALL_MS = LEASE_MS - CALL_TIMEOUT_MS - SAFETY_MS; // latency allowed before the request starts
-if (!(CALL_TIMEOUT_MS + 2 * TURSO_TIMEOUT_MS + SAFETY_MS < LEASE_MS)) throw new Error('budget lease invariant violated');
+// Latest start of the request: after the two Turso round trips (reserve + probe claim) nothing legitimate remains.
+// The call then ends at most MAX_PRE_CALL_MS + CALL_TIMEOUT_MS = 7 s after `at`, leaving >= SAFETY_MS before expiry.
+const MAX_PRE_CALL_MS = 2 * TURSO_TIMEOUT_MS;
+if (!(MAX_PRE_CALL_MS + CALL_TIMEOUT_MS + SAFETY_MS < LEASE_MS)) throw new Error('budget lease invariant violated');
 const memoryLease = new Map(); // upstream -> lease end (ms); the only state without Turso (local dev)
 export const __budget = Object.freeze({ CALL_TIMEOUT_MS, TURSO_TIMEOUT_MS, SAFETY_MS, LEASE_MS, LEASE_GAP_MS, MAX_PRE_CALL_MS }); // read by the invariant test
 
