@@ -11,6 +11,7 @@ import { createWalkIdentity, createBusIdentity } from './domain/identity.js';
 import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
 import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
 import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
+import { findRegularScenario } from '../../scripts/gtfs-scenarios.mjs';
 import officialGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
 test('shouldDelegateQueryAndLimitToGeocodingPortWhenSearchingDestinations', async () => {
@@ -87,14 +88,13 @@ test('shouldKeepTheWalkFallbackLightweightWhenGivingAQuickVerdict', async () => 
 });
 
 test('shouldFallBackToScheduledGtfsAndStillProduceBusWhenMunicipalPanelIsDown', async () => {
-  const sourceTrip = officialGtfsSnapshot.trips.find((trip) => trip.line === 'M-021');
-  assert.ok(sourceTrip, 'official snapshot must contain M-021');
+  const { trip: sourceTrip, now: scheduledNow } = findRegularScenario(officialGtfsSnapshot, 0);
   const originStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes[0].stop);
-  assert.ok(originStop, 'M-021 must reference a known origin stop');
+  assert.ok(originStop, 'scheduled trip must reference a known origin stop');
   const destinationStop = officialGtfsSnapshot.stops.find((stop) => stop.stop === sourceTrip.stopTimes.at(-1).stop);
-  assert.ok(destinationStop, 'M-021 must reference a known destination stop');
+  assert.ok(destinationStop, 'scheduled trip must reference a known destination stop');
   const scheduled = new GtfsTransitAdapter(officialGtfsSnapshot, {
-    now: () => new Date('2026-09-19T09:00:00+02:00'),
+    now: () => scheduledNow,
   });
   const scheduledArrivals = await scheduled.getArrivals(originStop.stop);
   const scheduledArrival = scheduledArrivals.find((arrival) => arrival.line === sourceTrip.line);
