@@ -1,7 +1,7 @@
 // SHELL_HASH fingerprints every file in SHELL_URLS plus this file. Never edit it by hand:
 // `npm run shell:hash` rewrites it, and the architecture gate fails while it is stale. A new
 // hash is what makes installed clients drop the previous cache-first shell.
-const SHELL_HASH = '1e848c32ab30';
+const SHELL_HASH = 'db809cd494ae';
 const CACHE_NAME = `andar-o-bus-shell-${SHELL_HASH}`;
 
 // Explicit allowlist, not a wildcard — only these exact paths are ever
