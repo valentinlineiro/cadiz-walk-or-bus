@@ -1796,3 +1796,22 @@ test('shouldShareTheCircuitBreakerWithFootRoutesWhenTheMatrixIsRateLimited', asy
   await assertBlocked(await fetchRoute(FOOT2)); // the same upstream: the route is blocked too
   assert.equal(p.calls, 1, 'only the first request reached the provider');
 });
+
+test('shouldKeepNoStoreWhenTheMatrixRequestIsRateLimitedOrUsesAnotherMethod', async () => {
+  const p = tableProvider(tableAnswer());
+  const limited = await fetchTable(tableUrl(), { ...TABLE_ENV, RATE_LIMITER: { limit: async () => ({ success: false }) } });
+  await assertError(limited, { status: 429, code: 'RATE_LIMITED', retryAfter: '10' });
+  assert.equal(limited.headers.get('cache-control'), 'no-store');
+  for (const method of ['POST', 'HEAD', 'PUT']) {
+    const res = await worker.fetch(new Request(tableUrl(), { method }), TABLE_ENV);
+    assert.equal(res.status, 405, method);
+    assert.equal(res.headers.get('cache-control'), 'no-store', method);
+  }
+  assert.equal(p.calls, 0);
+});
+
+test('shouldNotAddNoStoreToOtherRoutesWhenTheTableGuardIsPresent', async () => {
+  const res = await worker.fetch(new Request('http://x/geocode?q=a', { method: 'POST' }), TABLE_ENV);
+  assert.equal(res.status, 405);
+  assert.notEqual(res.headers.get('cache-control'), 'no-store');
+});

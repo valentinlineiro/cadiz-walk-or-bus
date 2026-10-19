@@ -591,9 +591,7 @@ async function handleTable(url, env) {
   const started = Date.now();
   const res = await tableResponse(url, env);
   logEvent('proxy_request', { kind: 'table', status: res.status, cache_status: 'none', duration_ms: Date.now() - started }, res.status >= 500 ? 'warn' : 'log');
-  const out = new Response(res.body, res);
-  out.headers.set('cache-control', 'no-store');
-  return out;
+  return res;
 }
 
 async function tableResponse(url, env) {
@@ -902,7 +900,16 @@ async function handleProxyHealth(env) {
   }
 }
 
+// Every answer under /table/ (429 and 405 included) is `no-store`: the URL may carry the user's position.
 async function handleFetch(request, env) {
+  const res = await routeFetch(request, env);
+  if (!new URL(request.url).pathname.startsWith('/table/')) return res;
+  const out = new Response(res.body, res);
+  out.headers.set('cache-control', 'no-store');
+  return out;
+}
+
+async function routeFetch(request, env) {
   const url = new URL(request.url);
   const dynamic = url.pathname === '/geocode' || url.pathname === '/api' || url.pathname === '/proxy-health' || url.pathname.startsWith('/route/') || url.pathname.startsWith('/table/');
   if (dynamic && request.method !== 'GET') {
