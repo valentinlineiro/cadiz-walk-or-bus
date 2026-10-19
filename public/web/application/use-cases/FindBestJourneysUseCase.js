@@ -28,8 +28,8 @@ export class FindBestJourneysUseCase {
         const lines = rawLines
             ? (rawLines.lines ?? rawLines)
             : null;
-        // An empty, successful catalogue is not evidence that no bus is due. Without usable
-        // topology the app cannot evaluate bus options, so it must retain the honest no-data state.
+        // A successful but empty line catalogue is not evidence that no bus is due. It means
+        // there is no usable topology to evaluate, so keep the result in the honest no-data state.
         const hasUsableLines = lines !== null && Object.keys(lines).length > 0;
         // Nearby stops pool prioritized and diversified by line
         const stopsLoaded = stops !== null;
