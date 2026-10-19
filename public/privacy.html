@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacidad — ¿Andar o bus? Cádiz</title>
+<style>
+  :root { --ink: #0f172a; --soft: #475569; --bg: #ffffff; --line: #e2e8f0; --link: #15803d; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e2e8f0; --soft: #94a3b8; --bg: #0f172a; --line: #334155; --link: #4ade80; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 42rem; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.05rem; margin-top: 1.6rem; }
+  a { color: var(--link); } .soft { color: var(--soft); }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: .92rem; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/">← Volver a la aplicación</a></p>
+  <h1>Privacidad</h1>
+  <p class="soft">Esto describe lo que hace la aplicación hoy, según su código. No hay cuentas ni registro de usuarios. No es asesoramiento legal.</p>
+
+  <h2>Tu ubicación</h2>
+  <p>Si lo permites, el navegador nos da tu posición una vez al abrir la aplicación. La posición no se guarda en tu dispositivo. Se usa para calcular rutas a pie: las coordenadas de salida y de llegada se envían a nuestro servidor, que las reenvía al servicio de rutas OSRM. Si la salida es tu posición, nuestro servidor no guarda la respuesta: la calcula y te la devuelve. Si la salida es una parada de autobús, guarda la respuesta durante 24 horas para reutilizarla, y la clave de esa copia incluye las coordenadas de la parada y las del destino. Una posición que coincida exactamente con una parada se trata como esa parada.</p>
+  <p>Si no das permiso, o estás fuera de Cádiz, la aplicación calcula desde el centro de Cádiz y lo indica en los resultados.</p>
+
+  <h2>Lo que guardamos en tu dispositivo</h2>
+  <table>
+    <tr><th>Qué</th><th>Cuánto</th><th>Contenido</th></tr>
+    <tr><td>Destinos habituales (los guardas tú)</td><td>hasta 8, hasta que los quites</td><td>nombre y coordenadas del destino</td></tr>
+    <tr><td>Destinos recientes</td><td>hasta 5, durante 30 días</td><td>nombre y coordenadas del destino</td></tr>
+    <tr><td>Registro de trayectos</td><td>hasta 200, durante 30 días</td><td>destino, fecha, modo recomendado, minutos, línea y paradas</td></tr>
+  </table>
+  <p>Los recientes y el registro se guardan automáticamente al consultar un destino y se eliminan solos a los 30 días. Puedes borrarlos antes con «Borrar historial», al pie de «Mis destinos»; eso no afecta a tus destinos habituales. Los recientes guardados antes de esta actualización cuentan sus 30 días desde tu primera visita posterior.</p>
+
+  <h2>Lo que sale de tu dispositivo</h2>
+  <table>
+    <tr><th>Qué</th><th>A quién</th><th>Cómo</th></tr>
+    <tr><td>Texto que buscas</td><td>Nominatim (OpenStreetMap), a través de nuestro servidor</td><td>Nuestro servidor guarda la respuesta 24 horas; la clave contiene el texto buscado.</td></tr>
+    <tr><td>Coordenadas de rutas</td><td>OSRM, a través de nuestro servidor</td><td>Ver «Tu ubicación».</td></tr>
+    <tr><td>Paradas cuyas llegadas consultas</td><td>Panel municipal de autobuses, a través de nuestro servidor</td><td>Se guarda unos 15 segundos.</td></tr>
+    <tr><td>Mosaicos del mapa</td><td>tile.openstreetmap.org, directamente desde tu navegador</td><td>OpenStreetMap ve tu dirección IP y la zona del mapa que miras.</td></tr>
+  </table>
+  <p>La aplicación no usa cookies ni herramientas de analítica. Los registros de nuestro servidor son eventos técnicos (estado, duración, parada conocida): no incluyen tu IP, tus búsquedas ni coordenadas, y se conservan entre 3 y 7 días según el plan de Cloudflare. Cloudflare, como proveedor de alojamiento, ve las peticiones a nivel de red; no hemos auditado sus registros ni los de Turso, Nominatim u OSRM.</p>
+
+  <h2>Pendiente</h2>
+  <p class="soft">Esta página no identifica aún al responsable ni da un contacto, y no ha sido revisada legalmente.</p>
+</main>
+</body>
+</html>

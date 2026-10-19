@@ -1,6 +1,7 @@
 import type { JourneyLogPort } from '../../application/ports/JourneyLogPort.js';
 import type { DecisionRecord, DivergenceType } from '../../domain/models.js';
 import { parseIdentity } from '../../domain/identity.js';
+import { isRetained } from '../../domain/constants.js';
 
 export const STORAGE_KEY = 'cadiz_journey_log';
 export const DEDUPE_WINDOW_MS = 300000; // 5 minutes
@@ -122,7 +123,33 @@ function normalizeEntry(item: any): DecisionRecord | null {
 export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
   constructor(
     private readonly storageImpl: Storage | null = typeof localStorage !== 'undefined' ? localStorage : null,
+    private readonly now: () => number = () => Date.now(),
   ) {}
+
+  /** Forget the whole log. Favourites live elsewhere and are not touched. */
+  clear(): void {
+    try {
+      this.storageImpl?.removeItem(STORAGE_KEY);
+    } catch {
+      // storage disabled: nothing to clear
+    }
+  }
+
+  /** Physically drop entries past the retention window (reads already ignore them). */
+  purgeExpired(): void {
+    if (!this.storageImpl) return;
+    try {
+      const raw = this.storageImpl.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const now = this.now();
+      const kept = parsed.filter((item: any) => item && isRetained(item.timestamp, now));
+      if (kept.length !== parsed.length) this.storageImpl.setItem(STORAGE_KEY, JSON.stringify(kept));
+    } catch {
+      // unreadable log: leave it, reads already treat it as empty
+    }
+  }
 
   getLog(): DecisionRecord[] {
     if (!this.storageImpl) return [];
@@ -139,6 +166,7 @@ export class LocalStorageJourneyLogAdapter implements JourneyLogPort {
             typeof item === 'object' &&
             typeof item.id === 'string' &&
             typeof item.timestamp === 'number' &&
+            isRetained(item.timestamp, this.now()) &&
             item.destination &&
             typeof item.destination.label === 'string' &&
             Number.isFinite(Number(item.destination.lat)) &&

@@ -5,15 +5,16 @@ import { MunicipalTransitAdapter } from './infrastructure/transit/MunicipalTrans
 import { NominatimGeocodingAdapter } from './infrastructure/geocoding/NominatimGeocodingAdapter.js';
 import { GeocodingUnavailableError } from './application/ports/GeocodingPort.js';
 import { LocalStorageJourneyLogAdapter, formatRecommendationSub } from './infrastructure/persistence/LocalStorageJourneyLogAdapter.js';
-import { GtfsTransitAdapter } from './infrastructure/transit/GtfsTransitAdapter.js';
-import { ResilientTransitAdapter } from './infrastructure/transit/ResilientTransitAdapter.js';
+import { TimeoutTransitAdapter } from './infrastructure/transit/TimeoutTransitAdapter.js';
 import { cachedTransitPort, setTransitAdapter as _setTransitAdapter, setCachedStops as _setStops, setCachedLines as _setLines } from './application/composition.js';
 
-import gtfsSnapshot from '../fixtures/gtfs-cadiz.test.snapshot.json' with { type: 'json' };
-import realGtfsSnapshot from '../fixtures/gtfs-cadiz.snapshot.json' with { type: 'json' };
 
+// The fixtures are dated around 2023-11-14; the clock keeps them inside the 30-day retention window.
+const FIXTURE_CLOCK = () => 1700000000000 + 24 * 60 * 60 * 1000;
+// Some fixtures use tiny timestamps (1000, 2000, …): a day after the epoch.
+const EPOCH_FIXTURE_CLOCK = () => 24 * 60 * 60 * 1000;
 const appendEntry = (entry, storage, max = 200) => {
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   adapter.append(entry, max);
   return adapter.getLog().slice(0, max);
 };
@@ -72,7 +73,7 @@ test('shouldPassAnAbortSignalAndReturnServiceFailureWhenTheRequestTimesOut', asy
   assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
 });
 
-test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLine', async () => {
+test('shouldReportServiceFailureWhenTheRouteIsShorterThanTheStraightLine', async () => {
   const fakeFetch = async () => ({
     ok: true,
     json: async () => ({
@@ -92,7 +93,7 @@ test('shouldRejectTheRouteWhenItIsShorterThanTheStraightLine', async () => {
     { lat: 36.525, lon: -6.285 },
   );
 
-  assert.equal(route, null);
+  assert.deepEqual(route, { status: 'service_failure', coordinates: [] });
 });
 
 test('shouldStitchHopCoordinatesWithoutDuplicateJunctionsWhenRoutingABus', async () => {
@@ -427,7 +428,7 @@ test('shouldPersistAValidRecordAndSurviveCorruptStorageWhenAppending', () => {
   const storage = new MockStorage();
   storage.setItem('cadiz_journey_log', 'invalid json {{{');
 
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   const record = {
     id: '1001-abc',
     timestamp: 1700000000000,
@@ -453,7 +454,7 @@ test('shouldPersistAValidRecordAndSurviveCorruptStorageWhenAppending', () => {
 
 test('shouldPreserveStartedAtWhenPersistingAStartedJourney', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
   const record = {
     id: '1002-started',
     timestamp: 1700000000000,
@@ -470,7 +471,7 @@ test('shouldPreserveStartedAtWhenPersistingAStartedJourney', () => {
 
 test('shouldDeduplicateEvaluationsWhenTheSameDestinationIsRecordedWithinFiveMinutes', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, FIXTURE_CLOCK);
 
   const baseRecord = {
     destination: { label: 'Hospital', lat: 36.505, lon: -6.275 },
@@ -494,7 +495,7 @@ test('shouldDeduplicateEvaluationsWhenTheSameDestinationIsRecordedWithinFiveMinu
 
 test('shouldGroupByCoordsAndOrderByRecencyWhenListingRecentDestinations', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   adapter.append({
     id: '1',
@@ -519,7 +520,7 @@ test('shouldGroupByCoordsAndOrderByRecencyWhenListingRecentDestinations', () => 
 
 test('shouldRankByCountWithRecencyTiebreakWhenListingTopDestinations', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   adapter.append({
     id: '1',
@@ -553,7 +554,7 @@ test('shouldRankByCountWithRecencyTiebreakWhenListingTopDestinations', () => {
 
 test('shouldMoveTheUpdatedEntryToTheHeadWhenDeduplicatingTheLog', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   const destA = { label: 'Dest A', lat: 36.50, lon: -6.28 };
   const destB = { label: 'Dest B', lat: 36.52, lon: -6.29 };
@@ -626,7 +627,7 @@ test('shouldDropInvalidEntriesWhenReadingTheLog', () => {
     JSON.stringify([validEntry, invalidNoId, invalidTimestamp, invalidCoords, invalidRecommendation]),
   );
 
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
   const log = adapter.getLog();
   assert.equal(log.length, 1);
   assert.equal(log[0].id, 'entry-1');
@@ -642,7 +643,7 @@ test('shouldKeepOnlyTheLatestTwoHundredEntriesWhenReadingTheLog', () => {
     recommendation: { identity: 'walk:direct', kind: 'walk', totalMinutes: 10 },
   }));
   storage.setItem('cadiz_journey_log', JSON.stringify(entries));
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
   const log = adapter.getLog();
 
   assert.equal(log.length, 200);
@@ -650,7 +651,7 @@ test('shouldKeepOnlyTheLatestTwoHundredEntriesWhenReadingTheLog', () => {
 
 test('shouldIncludeCountLastRecommendationAndSubWhenListingRecentOrTopDestinations', () => {
   const storage = new MockStorage();
-  const adapter = new LocalStorageJourneyLogAdapter(storage);
+  const adapter = new LocalStorageJourneyLogAdapter(storage, EPOCH_FIXTURE_CLOCK);
 
   adapter.append({
     timestamp: 1000,
@@ -848,91 +849,31 @@ test('shouldPopulateAndPreserveTheInMemoryCacheWhenCalledRepeatedly', async () =
   assert.equal(l2, l1);
 });
 
-test('shouldExposeNapMetadataStopsLinesAndScheduledSourceWhenBuiltFromASnapshot', async () => {
-  const adapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T09:15:00+02:00'),
-  });
+test('shouldReportUnavailableNotEmptyWhenTheMunicipalPanelAnswersWithA502', async () => {
+  const municipal = new MunicipalTransitAdapter(async () => ({ ok: false, status: 502, json: async () => ({}) }));
+  const adapter = new TimeoutTransitAdapter(municipal, 50);
 
-  assert.equal(adapter.getMetadata().feedVersion, 'nap-test-2026-09-17');
-  assert.equal(adapter.getMetadata().source, 'nap');
-  assert.equal((await adapter.getStops()).length, 3);
-  assert.deepEqual(await adapter.getLines(), gtfsSnapshot.lines);
-  assert.deepEqual(await adapter.getArrivals('A'), [{
-    line: '1',
-    destination: 'Centro',
-    minutes: 45,
-    source: 'scheduled',
-  }]);
+  assert.deepEqual(await adapter.getArrivalsResult('1106'), { status: 'unavailable', cause: 'source_error' });
+  await assert.rejects(adapter.getArrivals('1106'), /arrivals 502/, 'a failure is never turned into "no buses"');
 });
 
-test('shouldBoundTheLookaheadToSixtyMinutesWhenListingScheduledArrivals', async () => {
-  // At 07:55: departure at 10:00 is 125 min (> 3600s) -> excluded
-  const farAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T07:55:00+02:00'),
-  });
-  assert.deepEqual(await farAdapter.getArrivals('A'), []);
+test('shouldReportUnavailableWhenTheNetworkFailsOrTheResponseIsMalformed', async () => {
+  const down = new TimeoutTransitAdapter(new MunicipalTransitAdapter(async () => { throw new TypeError('network down'); }), 50);
+  const malformed = new TimeoutTransitAdapter(new MunicipalTransitAdapter(async () => ({ ok: true, json: async () => ({ html: '<b>oops</b>' }) })), 50);
 
-  // At 09:15: departure at 10:00 is 45 min (<= 3600s) -> included
-  const nearAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T09:15:00+02:00'),
-  });
-  assert.deepEqual(await nearAdapter.getArrivals('A'), [{
-    line: '1',
-    destination: 'Centro',
-    minutes: 45,
-    source: 'scheduled',
-  }]);
+  assert.deepEqual(await down.getArrivalsResult('1106'), { status: 'unavailable', cause: 'source_error' });
+  assert.deepEqual(await malformed.getArrivalsResult('1106'), { status: 'unavailable', cause: 'source_error' });
 });
 
-test('shouldApplyCalendarExceptionsAndKeepPostMidnightTimesWithinLookaheadWhenListingArrivals', async () => {
-  // At 23:30 on 2026-09-17: next departure is at 25:10 (100 min away, > 3600s) -> excluded
-  const beforeMidnightFar = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-17T23:30:00+02:00'),
-  });
-  assert.deepEqual(await beforeMidnightFar.getArrivals('A'), []);
+test('shouldReportLiveWithNoArrivalsWhenTheMunicipalAnswerIsAnAuthoritativeEmptyList', async () => {
+  const municipal = new MunicipalTransitAdapter(async () => ({ ok: true, json: async () => ({ arrivals: [] }) }));
+  const adapter = new TimeoutTransitAdapter(municipal, 50);
 
-  // At 00:30 on 2026-09-18: departure at 25:10 is 40 min away (<= 3600s) -> included
-  const afterMidnight = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T00:30:00+02:00'),
-  });
-  assert.equal((await afterMidnight.getArrivals('A'))[0].minutes, 40);
+  assert.deepEqual(await adapter.getArrivalsResult('1106'), { status: 'live', arrivals: [] });
+  assert.deepEqual(await adapter.getArrivals('1106'), []);
 });
 
-test('shouldFallBackOnRealtimeErrorsButTreatAnEmptyArrayAsAuthoritativeWhenFetchingArrivals', async () => {
-  let scheduledCalls = 0;
-  const scheduled = {
-    getStops: async () => [{ stop: 'A', lat: 36.52, lon: -6.28 }],
-    getLines: async () => ({ '1': { Centro: ['A'] } }),
-    getArrivals: async () => { scheduledCalls += 1; return [{ line: '1', destination: 'Centro', minutes: 9, source: 'scheduled' }]; },
-  };
-  const realtime = {
-    getStops: async () => { throw new Error('502'); },
-    getLines: async () => { throw new Error('502'); },
-    getArrivals: async () => { throw new Error('502'); },
-  };
-  const adapter = new ResilientTransitAdapter(realtime, scheduled, 50);
-
-  assert.equal((await adapter.getArrivals('A'))[0].source, 'scheduled');
-  assert.equal(scheduledCalls, 1);
-
-  // Issue #21 (Policy A): When realtime returns empty array [], it is authoritative; do not fallback to scheduled
-  const emptyRealtime = { ...realtime, getArrivals: async () => [] };
-  const emptyAdapter = new ResilientTransitAdapter(emptyRealtime, scheduled, 50);
-  scheduledCalls = 0;
-  const fallbackArrivals = await emptyAdapter.getArrivals('A');
-  assert.deepEqual(fallbackArrivals, []);
-  assert.equal(scheduledCalls, 0, 'scheduled source must not be queried when realtime returns empty array');
-
-  // When both realtime and scheduled fail, returns empty array
-  const failingScheduled = {
-    ...scheduled,
-    getArrivals: async () => { throw new Error('scheduled failed'); },
-  };
-  const bothFailingAdapter = new ResilientTransitAdapter(realtime, failingScheduled, 50);
-  assert.deepEqual(await bothFailingAdapter.getArrivals('A'), []);
-});
-
-test('shouldFallBackCleanlyWithoutLeakingSideEffectsWhenRealtimeResolvesAfterTheTimeout', async () => {
+test('shouldReportUnavailableWithoutLeakingSideEffectsWhenRealtimeResolvesAfterTheTimeout', async () => {
   let realtimeResolved = false;
   const slowRealtime = {
     getStops: async () => [],
@@ -943,186 +884,30 @@ test('shouldFallBackCleanlyWithoutLeakingSideEffectsWhenRealtimeResolvesAfterThe
       return [{ line: '1', destination: 'Late Bus', minutes: 1, source: 'realtime' }];
     },
   };
-  const scheduled = {
-    getStops: async () => [],
-    getLines: async () => ({}),
-    getArrivals: async () => [
-      { line: '1', destination: 'Scheduled Bus', minutes: 10, source: 'scheduled' },
-    ],
-  };
+  const adapter = new TimeoutTransitAdapter(slowRealtime, 15);
 
-  const adapter = new ResilientTransitAdapter(slowRealtime, scheduled, 15); // 15ms timeout
-  const arrivals = await adapter.getArrivals('A');
+  assert.deepEqual(await adapter.getArrivalsResult('1106'), { status: 'unavailable', cause: 'source_error' });
+  assert.equal(realtimeResolved, false, 'the answer must not wait for the slow source');
 
-  // Must immediately receive scheduled arrivals due to timeout
-  assert.equal(arrivals.length, 1);
-  assert.equal(arrivals[0].source, 'scheduled');
-  assert.equal(arrivals[0].destination, 'Scheduled Bus');
-  assert.equal(realtimeResolved, false, 'realtime call should still be pending when fallback returned');
-
-  // Wait for the delayed realtime promise to settle in the background
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(realtimeResolved, true);
-
-  // Subsequent reads of the returned result are unchanged
-  assert.equal(arrivals[0].source, 'scheduled');
-  assert.equal(arrivals[0].destination, 'Scheduled Bus');
+  assert.deepEqual(await new TimeoutTransitAdapter(slowRealtime, 15).getArrivalsResult('1106'), { status: 'unavailable', cause: 'source_error' });
 });
 
-test('shouldEnforceActiveWindowsInactiveWeekdaysAndExceptionDatesWhenListingArrivals', async () => {
-  // 1. Before startDate (2020-09-25) -> no service active -> []
-  const pastAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2020-09-25T07:30:00+02:00'),
-  });
-  assert.deepEqual(await pastAdapter.getArrivals('A'), []);
+test('shouldRejectTheCatalogueWhenTheMunicipalCatalogueFailsInsteadOfInventingOne', async () => {
+  const failing = new TimeoutTransitAdapter(new MunicipalTransitAdapter(async () => ({ ok: false, status: 500 })), 50);
+  const hanging = new TimeoutTransitAdapter({ getStops: () => new Promise(() => {}), getLines: () => new Promise(() => {}) }, 15);
 
-  // 2. After endDate (2035-09-25) -> no service active -> []
-  const futureAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2035-09-25T07:30:00+02:00'),
-  });
-  assert.deepEqual(await futureAdapter.getArrivals('A'), []);
-
-  // 3. Normal active Friday (2026-09-25): WEEKDAY is active, next departure at 08:10 (40 min)
-  const activeFriday = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-25T07:30:00+02:00'),
-  });
-  assert.deepEqual(await activeFriday.getArrivals('A'), [{
-    line: '1',
-    destination: 'Centro',
-    minutes: 40,
-    source: 'scheduled',
-  }]);
-
-  // 4. Inactive weekday (Sunday 2026-09-27 at 07:30): WEEKDAY does not run on Sundays
-  const sundayAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-27T07:30:00+02:00'),
-  });
-  assert.deepEqual(await sundayAdapter.getArrivals('A'), []);
-
-  // 5. Exception removedDate (2026-09-18): WEEKDAY removed, so weekday-1 (at 08:10) is excluded
-  const removedExceptionAdapter = new GtfsTransitAdapter(gtfsSnapshot, {
-    now: () => new Date('2026-09-18T07:30:00+02:00'),
-  });
-  assert.deepEqual(await removedExceptionAdapter.getArrivals('A'), []);
+  await assert.rejects(failing.getStops(), /stops 500/);
+  await assert.rejects(failing.getLines(), /lines 500/);
+  await assert.rejects(hanging.getStops(), /timeout/);
+  await assert.rejects(hanging.getLines(), /timeout/);
 });
 
-test('shouldHaveAValidFeedWindowCalendarServicesAndActiveDatesWhenReadingTheProductionSnapshot', () => {
-  assert.ok(realGtfsSnapshot.feedVersion, 'snapshot must have feedVersion');
-  assert.match(realGtfsSnapshot.feedVersion, /^nap-\d{4}-\d{2}-\d{2}$/);
-  assert.ok(realGtfsSnapshot.services.length > 0, 'snapshot must contain services');
-  assert.ok(Object.keys(realGtfsSnapshot.stops).length > 0, 'snapshot must contain stops');
-  assert.ok(Object.keys(realGtfsSnapshot.lines).length > 0, 'snapshot must contain lines');
+test('shouldReturnAValidEmptyCatalogueUntouchedWhenTheMunicipalCatalogueIsEmpty', async () => {
+  const municipal = new MunicipalTransitAdapter(async (url) => ({ ok: true, json: async () => (url === '/stops' ? [] : { lines: {} }) }));
+  const adapter = new TimeoutTransitAdapter(municipal, 50);
 
-  // Verify service calendar bounds
-  const endDates = realGtfsSnapshot.services.map((s) => s.endDate);
-  const maxEndDate = endDates.reduce((max, d) => (d > max ? d : max), '0');
-  assert.ok(maxEndDate >= '20261231', `feed must be valid through 2026-12-31 (found ${maxEndDate})`);
-
-  // Verify that services exist for weekdays (L-V) and weekends (S-D)
-  const hasWeekdayService = realGtfsSnapshot.services.some((s) => s.weekdays.slice(0, 5).some(Boolean));
-  const hasWeekendService = realGtfsSnapshot.services.some((s) => s.weekdays[5] || s.weekdays[6]);
-  assert.ok(hasWeekdayService, 'feed must contain active weekday service definitions');
-  assert.ok(hasWeekendService, 'feed must contain active weekend service definitions');
-
-  // Verify Cádiz local exception dates exist (Carnaval, festivos)
-  const allAddedDates = new Set(realGtfsSnapshot.services.flatMap((s) => s.addedDates));
-  assert.ok(allAddedDates.has('20260211'), 'feed must include Cádiz Carnaval local holiday (2026-02-11)');
-  assert.ok(allAddedDates.has('20261012'), 'feed must include Fiesta Nacional (2026-10-12)');
-  assert.ok(allAddedDates.has('20261225'), 'feed must include Navidad (2026-12-25)');
+  assert.deepEqual(await adapter.getStops(), []);
+  assert.deepEqual(await adapter.getLines(), {});
 });
-
-test('shouldReturnScheduledArrivalsOnWeekdaysWeekendsAndHolidaysWhenRunningTheProductionSnapshot', async () => {
-  const stopId = realGtfsSnapshot.stops[0].stop; // '2_1' (Avda. Del Puerto)
-
-  // 1. Regular Monday (2026-10-19 10:00 Madrid time): evaluates active Monday service calendar
-  const mondayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-10-19T10:00:00+02:00'),
-  });
-  const mondayArrivals = await mondayAdapter.getArrivals(stopId);
-  assert.ok(mondayArrivals.length > 0, 'Monday must return active scheduled arrivals');
-  assert.equal(mondayArrivals[0].source, 'scheduled');
-  assert.ok(mondayArrivals[0].minutes >= 0 && mondayArrivals[0].minutes <= 60);
-
-  // 2. Regular Sunday (2026-10-18 10:00 Madrid time): evaluates Sunday service schedule
-  const sundayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-10-18T10:00:00+02:00'),
-  });
-  const sundayArrivals = await sundayAdapter.getArrivals(stopId);
-  assert.ok(sundayArrivals.length > 0, 'Sunday must return active scheduled arrivals');
-  assert.equal(sundayArrivals[0].source, 'scheduled');
-
-  // 3. Local holiday exception: Carnaval de Cádiz (Wednesday 2026-02-11 10:00 Madrid time):
-  // 20260211 is defined in addedDates for holiday services (e.g. M-021, which only runs on weekends and added holiday dates)
-  const carnavalAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-02-11T10:00:00+01:00'),
-  });
-  const carnavalArrivals = await carnavalAdapter.getArrivals(stopId);
-  assert.ok(carnavalArrivals.length > 0, 'Carnaval holiday must return active scheduled arrivals');
-  assert.equal(carnavalArrivals[0].source, 'scheduled');
-
-  // Prove that Carnaval arrivals strictly originate from addedDates exception services:
-  // Contrast against a regular non-holiday Wednesday (2026-02-18 10:00)
-  const normalWednesdayAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2026-02-18T10:00:00+01:00'),
-  });
-  const normalWednesdayArrivals = await normalWednesdayAdapter.getArrivals(stopId);
-  const hasCarnavalExceptionLine = carnavalArrivals.some((a) => a.line === 'M-021');
-  const normalWednesdayHasLine = normalWednesdayArrivals.some((a) => a.line === 'M-021');
-  assert.ok(hasCarnavalExceptionLine, 'Carnaval Wednesday must activate holiday exception service line M-021 via addedDates');
-  assert.equal(normalWednesdayHasLine, false, 'Weekend-only line M-021 must NOT run on a normal Wednesday');
-
-  // 4. Past or future date outside feed validity window (e.g. 2035-01-01): returns empty []
-  const expiredAdapter = new GtfsTransitAdapter(realGtfsSnapshot, {
-    now: () => new Date('2035-01-01T10:00:00+01:00'),
-  });
-  const expiredArrivals = await expiredAdapter.getArrivals(stopId);
-  assert.deepEqual(expiredArrivals, [], 'Date outside feed bounds must return empty arrivals');
-});
-
-test('shouldFallBackToScheduledWhenTheMunicipalResponseIsMalformed', async () => {
-  const fakeFetchMalformed = async () => ({
-    ok: false,
-    status: 502,
-    json: async () => ({ error: 'malformed upstream response' }),
-  });
-  const municipal = new MunicipalTransitAdapter(fakeFetchMalformed);
-  const scheduled = {
-    getStops: async () => [],
-    getLines: async () => ({}),
-    getArrivals: async () => [
-      { line: '1', destination: 'Plaza España', minutes: 12, source: 'scheduled' },
-    ],
-  };
-
-  const resilient = new ResilientTransitAdapter(municipal, scheduled);
-  const arrivals = await resilient.getArrivals('1106');
-
-  assert.equal(arrivals.length, 1);
-  assert.equal(arrivals[0].source, 'scheduled');
-  assert.equal(arrivals[0].minutes, 12);
-});
-
-test('shouldNotFallBackToScheduledWhenTheMunicipalAnswerIsAnAuthoritativeEmptyList', async () => {
-  let scheduledCalled = false;
-  const fakeFetchEmpty = async () => ({
-    ok: true,
-    json: async () => ({ arrivals: [] }),
-  });
-  const municipal = new MunicipalTransitAdapter(fakeFetchEmpty);
-  const scheduled = {
-    getStops: async () => [],
-    getLines: async () => ({}),
-    getArrivals: async () => {
-      scheduledCalled = true;
-      return [{ line: '1', destination: 'Plaza España', minutes: 12, source: 'scheduled' }];
-    },
-  };
-
-  const resilient = new ResilientTransitAdapter(municipal, scheduled);
-  const arrivals = await resilient.getArrivals('1106');
-
-  assert.deepEqual(arrivals, []);
-  assert.equal(scheduledCalled, false, 'Authoritative empty 200 [] must not invoke scheduled fallback');
-});
-
-

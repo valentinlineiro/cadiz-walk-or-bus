@@ -40,7 +40,7 @@ A release candidate is eligible for deployment when:
 - [ ] Cádiz is the declared supported territory.
 - [ ] Walking and urban bus are the only supported modes/operators.
 - [ ] Realtime arrivals are used when available.
-- [ ] Scheduled GTFS fallback is clearly identified as scheduled data.
+- [ ] When realtime fails, the app says there is no bus data and offers walking as an option, never as a conclusion; it never shows another service's lines.
 - [ ] Destination search and GPS-assisted origin selection work.
 - [ ] The result shows one hero recommendation and no more than three exact
   candidates in total.
@@ -49,26 +49,21 @@ A release candidate is eligible for deployment when:
 ### Production
 
 - [ ] The application shell loads from the public URL.
-- [ ] Static modules, fixtures, service worker, and stop data load.
+- [ ] Static modules, service worker, and stop data load.
 - [ ] Realtime arrivals return valid data for a known stop.
 - [ ] A controlled realtime failure returns a controlled `502` from the proxy.
-- [ ] The full application continues with scheduled arrivals after realtime
-  failure.
-- [ ] A valid empty realtime response remains authoritative and does not invoke
-  the scheduled fallback.
+- [ ] After a realtime failure the app shows `SIN DATOS DE HORARIOS` with no bus
+  line and no recommendation.
+- [ ] A valid empty realtime response (`200 []`) remains authoritative: no buses
+  for that query, and no other source is asked.
 
-The fallback test must run against a controlled environment or test seam. Do
+The failure test must run against a controlled environment or test seam. Do
 not deliberately disrupt the public production service.
 
 ### Data dependencies
 
 - [ ] The municipal realtime endpoint is reachable.
 - [ ] Realtime proxy distinguishes between valid empty boards (HTTP 200 `[]`) and malformed upstream HTML (HTTP 502).
-- [ ] The GTFS snapshot (`public/fixtures/gtfs-cadiz.snapshot.json`) is present and valid:
-  - `feedVersion` is current (e.g. `nap-YYYY-MM-DD`).
-  - Active calendar service bounds verified: service windows cover current dates through `2026-12-31`.
-  - Service coverage verified across weekdays (L-V), weekends (S-D), and local Cádiz exception dates (Carnaval, Semana Santa, festivos locales y nacionales).
-  - Snapshot `feedVersion` matches `GTFS_FEED_VERSION` in `public/sw.js` ensuring cache invalidation.
 - [ ] Required stop and route data is available (`stops.json`, `lines.json`).
 - [ ] The geocoding provider (Nominatim) is reachable:
   - Queries are dispatched on explicit form submission only (no keystroke bombardment).
@@ -92,7 +87,7 @@ not deliberately disrupt the public production service.
 - [ ] A first-time user understands the product promise quickly.
 - [ ] A first-time user can find and select a destination without assistance.
 - [ ] The recommendation, alternatives, and explanation are understandable.
-- [ ] Walking, realtime, and scheduled states are distinguishable.
+- [ ] Walking, realtime, and no-data states are distinguishable.
 - [ ] GPS denial and recoverable service errors have clear next actions.
 
 ### Mobile
@@ -118,7 +113,7 @@ not deliberately disrupt the public production service.
   false precision.
 - [ ] Routing failure has a controlled fallback or error state.
 - [ ] Geocoding failure has a controlled, recoverable error state.
-- [ ] GTFS unavailability has a controlled, recoverable error state.
+- [ ] A failed stops or lines catalogue shows a recoverable error with a retry; nothing stands in for it.
 - [ ] JavaScript runtime and service-worker failures are diagnosable.
 
 ### Accessibility
@@ -134,9 +129,10 @@ not deliberately disrupt the public production service.
 
 - [ ] HTTPS, CORS, public endpoints, secrets, and rate limiting are reviewed.
 - [ ] Logs do not contain unnecessary personal or location data.
-- [ ] GPS/location use is disclosed.
+- [ ] GPS/location use is disclosed. (Notice in `public/privacy.html`, inventory in
+  `docs/PRIVACY.md`; still open: controller and contact, clearing the history, legal review.)
 - [ ] Privacy policy and data-retention behavior are documented.
-- [ ] OSM, map, geocoding, routing, GTFS, and municipal-source attributions
+- [ ] OSM, map, geocoding, routing, and municipal-source attributions
   are present and accurate.
 
 ### Beta
@@ -160,7 +156,7 @@ not deliberately disrupt the public production service.
 3. Review this checklist and link any exceptions or failed checks.
 4. Complete required review and merge to `main`.
 5. Deploy through the configured deployment pipeline.
-6. Run the production smoke checks, including realtime and scheduled fallback.
+6. Run the production smoke checks, including realtime and the no-data state.
 7. Record deployment, verification, and follow-up issues in GitHub.
 
 ## Rollback
@@ -186,7 +182,7 @@ A release cannot proceed with any of the following unresolved:
 
 - Broken core journey.
 - Incorrect walk/bus recommendation.
-- Incorrect realtime/scheduled state.
+- Incorrect realtime/no-data state.
 - Unrecoverable external-service failure.
 - Privacy or security issue.
 - Broken production deployment.
@@ -211,3 +207,11 @@ Tests are named `shouldXWhenY`. The architecture gate (`scripts/test-names.mjs`)
 whose name does not follow it, except those listed in `scripts/test-names.baseline.json` (tests that
 predate the rule). The baseline only shrinks: rename a test and remove its entry, which the gate
 also demands (`node scripts/test-names.mjs --write-baseline` regenerates it after renames).
+
+## Service worker E2E
+
+`npm run test:e2e` drives real Chromium (Playwright) against a local server that serves `public/`
+with `Cache-Control: max-age=0, must-revalidate`: the shell is served Cache-First even when the
+network answer changes, and `/api` reaches the server and is never stored by the shell cache. No
+wrangler, secrets or external network. First run: `npx playwright install chromium`. It runs in its
+own CI job («Service worker E2E») and is not part of `release:check`.

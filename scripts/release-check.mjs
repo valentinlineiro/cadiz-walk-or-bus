@@ -13,7 +13,6 @@ const REQUIRED_FILES = [
   'public/sw.js',
   'public/web/ui.js',
   'public/web/application/composition.js',
-  'public/fixtures/gtfs-cadiz.snapshot.json',
   'public/icons/icon-192.png',
   'public/icons/icon-512.png',
   'public/icons/apple-touch-icon.png',

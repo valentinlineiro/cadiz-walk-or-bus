@@ -5,8 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeShellHash, findShellHashProblems, writeShellHash } from './shell-hash.mjs';
 
-const SW = (hash) => `const GTFS_FEED_VERSION = 'nap-1';
-const SHELL_HASH = '${hash}';
+const SW = (hash) => `const SHELL_HASH = '${hash}';
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -66,7 +65,7 @@ test('shouldChangeHashWhenServiceWorkerSourceChanges', (t) => {
   const root = project(t);
   const before = computeShellHash(root);
 
-  writeFileSync(join(root, 'public/sw.js'), SW('0').replace('nap-1', 'nap-2'));
+  writeFileSync(join(root, 'public/sw.js'), `${SW('0')}// changed\n`);
 
   assert.notEqual(computeShellHash(root), before);
 });

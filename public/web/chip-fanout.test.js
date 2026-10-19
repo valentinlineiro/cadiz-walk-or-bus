@@ -93,6 +93,6 @@ test('shouldAskAFailingCatalogueOnceWhenAllFavoriteChipsRender', async () => {
   const verdicts = await renderChips();
   net.failCatalog = false;
 
-  assert.equal(verdicts.length, FAVORITES, 'chips still settle on the scheduled fallback');
+  assert.equal(verdicts.length, FAVORITES, 'chips still settle (with no verdict) while the catalogue is down');
   assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
 });

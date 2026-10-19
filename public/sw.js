@@ -1,11 +1,8 @@
-// GTFS_FEED_VERSION is synchronized with /fixtures/gtfs-cadiz.snapshot.json by `npm run ingest:gtfs`.
-const GTFS_FEED_VERSION = 'nap-2026-09-18';
 // SHELL_HASH fingerprints every file in SHELL_URLS plus this file. Never edit it by hand:
 // `npm run shell:hash` rewrites it, and the architecture gate fails while it is stale. A new
 // hash is what makes installed clients drop the previous cache-first shell.
-const SHELL_HASH = '59d4ab2b84c7';
-const CACHE_VERSION = `${SHELL_HASH}-${GTFS_FEED_VERSION}`;
-const CACHE_NAME = `andar-o-bus-shell-${CACHE_VERSION}`;
+const SHELL_HASH = 'e29a8f57ac3a';
+const CACHE_NAME = `andar-o-bus-shell-${SHELL_HASH}`;
 
 // Explicit allowlist, not a wildcard — only these exact paths are ever
 // served cache-first. Live data (/stops, /lines, /api, OSRM, Nominatim,
@@ -14,10 +11,12 @@ const SHELL_URLS = [
   '/',
   '/index.html',
   '/manifest.json',
+  '/privacy.html',
   '/vendor/leaflet/leaflet.js',
   '/vendor/leaflet/leaflet.css',
   '/web/ui.js',
   '/web/favorites.js',
+  '/web/history.js',
   '/web/map.js',
   '/web/recent.js',
   '/web/scenario.js',
@@ -44,10 +43,8 @@ const SHELL_URLS = [
   '/web/infrastructure/geocoding/NominatimGeocodingAdapter.js',
   '/web/infrastructure/persistence/LocalStorageJourneyLogAdapter.js',
   '/web/infrastructure/routing/OsrmRoutingAdapter.js',
-  '/web/infrastructure/transit/GtfsTransitAdapter.js',
   '/web/infrastructure/transit/MunicipalTransitAdapter.js',
-  '/web/infrastructure/transit/ResilientTransitAdapter.js',
-  '/fixtures/gtfs-cadiz.snapshot.json',
+  '/web/infrastructure/transit/TimeoutTransitAdapter.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/apple-touch-icon.png',

@@ -1,10 +1,10 @@
-import test, { mock } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { haversineMeters } from './domain/topology.js';
 
-// A catalogue (stops / lines) that came from the scheduled snapshot is a stand-in, not a final
-// answer: once the municipal one answers again the app must use it, without a page reload.
-// Real composition and use cases; the only fake is the network (fetch) and the clock.
+// A catalogue (stops / lines) that fails to load is an error, never replaced by other data, and it
+// is not remembered: the next call asks again, so the app recovers without a page reload.
+// Real composition and use cases; the only fake is the network (fetch).
 
 const origin = { lat: 36.5271, lon: -6.2885 };
 const destination = { lat: 36.50, lon: -6.27, label: 'Playa' };
@@ -33,7 +33,7 @@ globalThis.fetch = async (url) => {
 };
 globalThis.window = { localStorage: { getItem: () => null, setItem() {} } };
 
-const { getQuickVerdictUseCase, setCachedStops, setCachedLines } = await import('./application/composition.js');
+const { getQuickVerdictUseCase, cachedTransitPort, setCachedStops, setCachedLines } = await import('./application/composition.js');
 const verdict = () => getQuickVerdictUseCase.execute({ origin, destination });
 const municipalStopsAsked = () => [...net.apiStops].some((id) => id.startsWith('S'));
 const outage = (which) => {
@@ -42,96 +42,62 @@ const outage = (which) => {
   Object.assign(net, { stops: 0, lines: 0, failStops: false, failLines: false, emptyStops: false, apiStops: new Set(), ...which });
 };
 
-test('shouldUseMunicipalStopsAgainWhenStopsCatalogueRecoversAfterTheRetryWindow', async () => {
-  mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
-  try {
-    outage({ failStops: true });
-    await verdict();
-    assert.equal(municipalStopsAsked(), false, 'fallback must not look like the municipal catalogue');
+test('shouldAskTheStopsCatalogueAgainOnTheNextCallWhenItFailedAndThenRecovers', async () => {
+  outage({ failStops: true });
+  assert.equal(await verdict(), null, 'no catalogue, no verdict');
+  assert.equal(municipalStopsAsked(), false, 'nothing stands in for the missing catalogue');
 
-    net.failStops = false;
-    mock.timers.tick(31_000);
-    const recovered = await verdict();
+  net.failStops = false;
+  const recovered = await verdict();
 
-    assert.equal(net.stops, 2);
-    assert.equal(municipalStopsAsked(), true);
-    assert.equal(recovered?.kind, 'bus');
-  } finally {
-    mock.timers.reset();
-  }
+  assert.equal(net.stops, 2, 'a failure is not remembered');
+  assert.equal(municipalStopsAsked(), true);
+  assert.equal(recovered?.kind, 'bus');
 });
 
-test('shouldUseMunicipalLinesAgainWhenLinesCatalogueRecoversAfterTheRetryWindow', async () => {
-  mock.timers.enable({ apis: ['Date'], now: 2_000_000 });
-  try {
-    outage({ failLines: true });
-    await verdict();
-    assert.equal(net.lines, 1);
+test('shouldAskTheLinesCatalogueAgainOnTheNextCallWhenItFailedAndThenRecovers', async () => {
+  outage({ failLines: true });
+  assert.equal(await verdict(), null);
+  assert.equal(net.lines, 1);
 
-    net.failLines = false;
-    mock.timers.tick(31_000);
-    const recovered = await verdict();
+  net.failLines = false;
+  const recovered = await verdict();
 
-    assert.equal(net.lines, 2);
-    assert.equal(recovered?.kind, 'bus');
-  } finally {
-    mock.timers.reset();
-  }
+  assert.equal(net.lines, 2);
+  assert.equal(recovered?.kind, 'bus');
 });
 
-test('shouldNotAskTheCatalogueAgainWhenFallbackIsStillWithinTheRetryWindow', async () => {
-  mock.timers.enable({ apis: ['Date'], now: 3_000_000 });
-  try {
-    outage({ failStops: true, failLines: true });
-    await Promise.all([verdict(), verdict(), verdict()]);
-    mock.timers.tick(5_000);
-    await Promise.all([verdict(), verdict()]);
+test('shouldShareOneRequestWhenSeveralCallsAskTheFailingCatalogueAtOnce', async () => {
+  outage({ failStops: true, failLines: true });
+  await Promise.all([verdict(), verdict(), verdict()]);
 
-    assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
-  } finally {
-    mock.timers.reset();
-  }
+  assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
 });
 
-test('shouldKeepRetryingWhenCatalogueIsStillDownAfterTheRetryWindow', async () => {
-  mock.timers.enable({ apis: ['Date'], now: 4_000_000 });
-  try {
-    outage({ failStops: true });
-    await verdict();
-    mock.timers.tick(31_000);
-    await verdict();
-    mock.timers.tick(31_000);
-    await verdict();
+test('shouldRejectWithoutCachingWhenTheCataloguePortIsAskedWhileItIsDown', async () => {
+  outage({ failStops: true, failLines: true });
 
-    assert.equal(net.stops, 3, 'one retry per window while the source stays down');
-  } finally {
-    mock.timers.reset();
-  }
+  await assert.rejects(cachedTransitPort.getStops(), /stops 503/);
+  await assert.rejects(cachedTransitPort.getLines(), /lines 503/);
+  net.failStops = false;
+  net.failLines = false;
+  assert.deepEqual((await cachedTransitPort.getStops()).map((stop) => stop.stop), stops.map((stop) => stop.stop));
+  assert.deepEqual(await cachedTransitPort.getLines(), lines);
 });
 
 test('shouldNotAskTheCatalogueAgainWhenMunicipalOneIsLive', async () => {
-  mock.timers.enable({ apis: ['Date'], now: 5_000_000 });
-  try {
-    outage({});
-    await verdict();
-    mock.timers.tick(10 * 60_000);
-    await verdict();
+  outage({});
+  await verdict();
+  await verdict();
 
-    assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
-  } finally {
-    mock.timers.reset();
-  }
+  assert.deepEqual({ stops: net.stops, lines: net.lines }, { stops: 1, lines: 1 });
 });
 
 test('shouldNotAskTheCatalogueAgainWhenMunicipalOneLegitimatelyAnswersEmpty', async () => {
-  mock.timers.enable({ apis: ['Date'], now: 6_000_000 });
-  try {
-    outage({ emptyStops: true });
-    await Promise.all([verdict(), verdict()]);
-    await verdict();
+  outage({ emptyStops: true });
+  await Promise.all([verdict(), verdict()]);
+  await verdict();
 
-    assert.equal(net.stops, 1, 'an empty live catalogue is loaded, not missing');
-  } finally {
-    mock.timers.reset();
-  }
+  assert.equal(net.stops, 1, 'an empty live catalogue is loaded, not missing');
+  assert.deepEqual(await cachedTransitPort.getStops(), []);
 });

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker, { __resetArrivalsCache } from './worker.js';
+import stopsJson from './stops.json' with { type: 'json' };
 
 const originalFetch = globalThis.fetch;
 const originalConsole = { log: console.log, warn: console.warn };
@@ -58,7 +59,7 @@ test('shouldReturn502WhenTheUpstreamIsSlowAndTimesOut', async () => {
   globalThis.fetch = async () => new Promise((_, reject) => setTimeout(() => reject(new DOMException('Timeout', 'TimeoutError')), 20));
   const res = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(res.status, 502);
-  assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
+  assert.deepEqual(await res.json(), { code: 'UPSTREAM_UNREACHABLE', error: 'upstream unreachable' });
 });
 
 test('shouldReturn502WhenTheUpstreamFails', async () => {
@@ -71,7 +72,7 @@ test('shouldReturn502WhenTheUpstreamThrows', async () => {
   globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
   const res = await worker.fetch(new Request('http://x/api?stop=1225&route=2'));
   assert.equal(res.status, 502);
-  assert.deepEqual(await res.json(), { error: 'upstream unreachable' });
+  assert.deepEqual(await res.json(), { code: 'UPSTREAM_UNREACHABLE', error: 'upstream unreachable' });
 });
 
 test('shouldReturn502WhenTheUpstreamHtmlIsMalformedOrUnrecognizable', async () => {
@@ -79,37 +80,37 @@ test('shouldReturn502WhenTheUpstreamHtmlIsMalformedOrUnrecognizable', async () =
   globalThis.fetch = async () => ({ ok: true, text: async () => '<html><body>Internal Server Error</body></html>' });
   const noTableRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(noTableRes.status, 502);
-  assert.deepEqual(await noTableRes.json(), { error: 'malformed upstream response' });
+  assert.deepEqual(await noTableRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
   // Upstream returns an ASP.NET error page with a table that has no transit columns
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Server Error in / Application</td></tr></table>' });
   const errorTableRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(errorTableRes.status, 502);
-  assert.deepEqual(await errorTableRes.json(), { error: 'malformed upstream response' });
+  assert.deepEqual(await errorTableRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
   // Upstream returns a 3-column error table (e.g. Error / Details / Code 500) which must NOT be treated as a candidate transit row
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>Error</td><td>Database connection failed</td><td>Code 500</td></tr></table>' });
   const threeColErrorRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(threeColErrorRes.status, 502);
-  assert.deepEqual(await threeColErrorRes.json(), { error: 'malformed upstream response' });
+  assert.deepEqual(await threeColErrorRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
   // Upstream returns a table where arrival cell is empty/blank without recognized status -> treated as malformed (502)
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td></td></tr></table>' });
   const emptyArrivalRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(emptyArrivalRes.status, 502);
-  assert.deepEqual(await emptyArrivalRes.json(), { error: 'malformed upstream response' });
+  assert.deepEqual(await emptyArrivalRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
-  // Upstream returns a table containing ONLY timetable clock times (e.g. 15:30) and no live relative arrivals -> 502 to trigger scheduled GTFS fallback
+  // Upstream returns a table containing ONLY timetable clock times (e.g. 15:30) and no live relative arrivals -> 502 (the app reports no bus data)
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>15:30</td></tr></table>' });
   const clockOnlyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(clockOnlyRes.status, 502);
-  assert.deepEqual(await clockOnlyRes.json(), { error: 'malformed upstream response' });
+  assert.deepEqual(await clockOnlyRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 
-  // Upstream returns a table containing ONLY bounds (e.g. > 45 min) without live arrivals or out-of-service indicator -> 502 to trigger scheduled GTFS fallback
+  // Upstream returns a table containing ONLY bounds (e.g. > 45 min) without live arrivals or out-of-service indicator -> 502 (the app reports no bus data)
   globalThis.fetch = async () => ({ ok: true, text: async () => '<table><tr><td>1</td><td>CORTADURA</td><td>> 45 min</td></tr></table>' });
   const boundsOnlyRes = await worker.fetch(new Request('http://x/api?stop=1213'));
   assert.equal(boundsOnlyRes.status, 502);
-  assert.deepEqual(await boundsOnlyRes.json(), { error: 'malformed upstream response' });
+  assert.deepEqual(await boundsOnlyRes.json(), { code: 'UPSTREAM_INVALID_RESPONSE', error: 'malformed upstream response' });
 });
 
 test('shouldParseTablesWhenRowsCarryAttributesLikeClassOrStyle', async () => {
@@ -150,7 +151,7 @@ test('shouldRejectTheStopWhenItIsMalformedOrAnInjectionAttempt', async () => {
   for (const q of ['stop=1308%26admin=1', 'stop=1308;drop', 'stop=12345678901234567', 'stop=', '']) {
     const res = await worker.fetch(new Request(`http://x/api?${q}`));
     assert.equal(res.status, 400, q);
-    assert.deepEqual(await res.json(), { error: 'missing or invalid stop' });
+    assert.deepEqual(await res.json(), { code: 'INVALID_STOP', error: 'missing or invalid stop' });
   }
 });
 
@@ -165,7 +166,7 @@ test('shouldReturn404BeforeAnyCacheLockOrPanelAccessWhenTheStopIsUnknown', async
   for (const id of ['987654', 'zzz-not-a-stop', '0', 'A1', '1515x']) {
     const res = await worker.fetch(new Request(`http://x/api?stop=${id}`), TURSO_ENV);
     assert.equal(res.status, 404, id);
-    assert.deepEqual(await res.json(), { error: 'unknown stop' });
+    assert.deepEqual(await res.json(), { code: 'UNKNOWN_STOP', error: 'unknown stop' });
   }
   assert.equal(panel, 0, 'no panel calls for rejected ids');
   assert.equal(turso, 0, 'no Turso lookups or locks for rejected ids');
@@ -727,7 +728,8 @@ test('shouldReportKindStatusAndCacheStatusWhenRecordingGeocodeAndRouteRequests',
   }));
   await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
   await worker.fetch(new Request('http://x/geocode?q=catedral'), TURSO_ENV);
-  await worker.fetch(new Request('http://x/route/foot/-6.30,36.50;-6.29,36.51'), TURSO_ENV);
+  // A route from a known stop is cacheable; one from any other origin is reported as `none` (see F-10).
+  await worker.fetch(new Request(`http://x/route/foot/${at(stopA)};-6.29,36.51`), TURSO_ENV);
   const got = ev('proxy_request').map((e) => `${e.kind}:${e.status}:${e.cache_status}`);
   assert.deepEqual(got, ['geocode:200:miss', 'geocode:200:hit', 'foot:200:miss']);
   const raw = lines.join('\n');
@@ -856,4 +858,206 @@ test('shouldRejectOtherMethodsWhenRequestingProxyHealth', async () => {
     assert.equal(res.status, 405, method);
     assert.equal(res.headers.get('allow'), 'GET');
   }
+});
+
+// --- stable error codes (F-05): clients compare `code`, never the descriptive `error` text ---
+const FOOT = 'http://x/route/foot/-6.30,36.50;-6.29,36.51';
+const fetchRoute = (url = FOOT) => worker.fetch(new Request(url), TURSO_ENV);
+async function assertError(res, { status, code, retryAfter = null }) {
+  assert.equal(res.status, status);
+  const body = await res.json();
+  assert.equal(body.code, code);
+  assert.equal(typeof body.error, 'string');
+  assert.equal(res.headers.get('retry-after'), retryAfter);
+}
+
+test('shouldAnswerInvalidStopWhenTheStopIsMalformed', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach the panel');
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1308;drop')), { status: 400, code: 'INVALID_STOP' });
+  await assertError(await worker.fetch(new Request('http://x/api')), { status: 400, code: 'INVALID_STOP' });
+});
+
+test('shouldAnswerUnknownStopWhenTheStopIsNotInTheAllowlist', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach the panel');
+  await assertError(await worker.fetch(new Request('http://x/api?stop=987654')), { status: 404, code: 'UNKNOWN_STOP' });
+});
+
+test('shouldAnswerInvalidQueryWhenTheGeocodeQueryIsOutOfBounds', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach upstream');
+  await assertError(await worker.fetch(new Request('http://x/geocode?q=a')), { status: 400, code: 'INVALID_QUERY' });
+  await assertError(await worker.fetch(new Request(`http://x/geocode?q=${'a'.repeat(101)}`)), { status: 400, code: 'INVALID_QUERY' });
+});
+
+test('shouldAnswerInvalidRouteWhenTheRouteCannotBeParsed', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach upstream');
+  await assertError(await worker.fetch(new Request('http://x/route/foot/abc')), { status: 400, code: 'INVALID_ROUTE' });
+});
+
+test('shouldAnswerOutsideServiceAreaWhenCoordinatesAreOutsideCadiz', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach upstream');
+  await assertError(await worker.fetch(new Request('http://x/route/foot/2.35,48.85;2.36,48.86')), { status: 400, code: 'OUTSIDE_SERVICE_AREA' });
+});
+
+test('shouldAnswerRateLimitedWithRetryAfterWhenTheClientIsLimited', async () => {
+  globalThis.fetch = async () => assert.fail('must not reach any upstream when limited');
+  const env = { RATE_LIMITER: { limit: async () => ({ success: false }) } };
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1225'), env), { status: 429, code: 'RATE_LIMITED', retryAfter: '10' });
+});
+
+test('shouldAnswerBusyWithRetryAfterWhenTheGeocodeSlotIsTaken', async () => {
+  withTurso(async () => assert.fail('must not reach upstream without a slot'), { slotBusy: true });
+  await assertError(await worker.fetch(new Request('http://x/geocode?q=cadiz'), TURSO_ENV), { status: 503, code: 'BUSY', retryAfter: '2' });
+});
+
+test('shouldAnswerBusyWithRetryAfterWhenAnotherInstanceHoldsTheArrivalsLock', async () => {
+  withTurso(panelOk({ n: 0 }), { slotBusy: true });
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1708'), TURSO_ENV), { status: 503, code: 'BUSY', retryAfter: '2' });
+});
+
+test('shouldAnswerUpstreamUnreachableWhenTheProviderOrThePanelThrows', async () => {
+  withTurso(async () => { throw new Error('network down'); });
+  await assertError(await fetchRoute(), { status: 502, code: 'UPSTREAM_UNREACHABLE' });
+  withTurso(async () => { throw new Error('network down'); });
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1215'), TURSO_ENV), { status: 502, code: 'UPSTREAM_UNREACHABLE' });
+});
+
+test('shouldAnswerUpstreamErrorWhenTheProviderOrThePanelAnswersWith5xx', async () => {
+  withTurso(async () => ({ ok: false, status: 500, text: async () => '' }));
+  await assertError(await fetchRoute(), { status: 502, code: 'UPSTREAM_ERROR' });
+  withTurso(async () => ({ ok: false, status: 503, text: async () => '' }));
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1215'), TURSO_ENV), { status: 502, code: 'UPSTREAM_ERROR' });
+});
+
+test('shouldAnswerUpstreamErrorWhenThePanelAnswersWithAnyNonOkStatus', async () => {
+  withTurso(async () => ({ ok: false, status: 404, text: async () => '' }));
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1215'), TURSO_ENV), { status: 502, code: 'UPSTREAM_ERROR' });
+});
+
+test('shouldAnswerUpstreamInvalidResponseWhenTheBodyIsMalformedOrHasTheWrongShape', async () => {
+  withTurso(async () => ({ ok: true, status: 200, text: async () => 'not json' }));
+  await assertError(await fetchRoute(), { status: 502, code: 'UPSTREAM_INVALID_RESPONSE' });
+  withTurso(async () => ({ ok: true, status: 200, text: async () => '{"unexpected":true}' }));
+  await assertError(await fetchRoute(), { status: 502, code: 'UPSTREAM_INVALID_RESPONSE' });
+  withTurso(async () => ({ ok: true, status: 200, text: async () => '<html>error page</html>' }));
+  await assertError(await worker.fetch(new Request('http://x/api?stop=1215'), TURSO_ENV), { status: 502, code: 'UPSTREAM_INVALID_RESPONSE' });
+});
+
+test('shouldAnswerUpstreamNotFoundWhenTheProviderAnswers400Or404', async () => {
+  for (const status of [400, 404]) {
+    withTurso(async () => ({ ok: false, status, text: async () => '' }));
+    await assertError(await fetchRoute(), { status: 404, code: 'UPSTREAM_NOT_FOUND' });
+  }
+});
+
+test('shouldAnswerUpstreamRejectedWithTheProviderRetryAfterWhenItAnswersNon5xxNon404', async () => {
+  withTurso(async () => ({ ok: false, status: 403, headers: new Headers(), text: async () => '' }));
+  await assertError(await fetchRoute(), { status: 503, code: 'UPSTREAM_REJECTED', retryAfter: '5' });
+  withTurso(async () => ({ ok: false, status: 429, headers: new Headers({ 'retry-after': '30' }), text: async () => '' }));
+  await assertError(await fetchRoute(), { status: 503, code: 'UPSTREAM_REJECTED', retryAfter: '30' });
+});
+
+test('shouldKeepTheSameCodeWhenOnlyTheDescriptiveTextVaries', async () => {
+  const seen = [];
+  for (const status of [500, 502, 504]) {
+    withTurso(async () => ({ ok: false, status, text: async () => '' }));
+    const body = await (await fetchRoute()).json();
+    seen.push([body.code, body.error]);
+  }
+  assert.deepEqual(new Set(seen.map(([code]) => code)), new Set(['UPSTREAM_ERROR']));
+  assert.equal(new Set(seen.map(([, error]) => error)).size, 3, 'the text differs per status; the code does not');
+});
+
+// --- F-10: routes that start at the user's GPS position are never stored in the shared cache ---
+
+const stopA = stopsJson.find((s) => s.stop === '1215') ?? stopsJson[0];
+const stopB = stopsJson.find((s) => s.stop === '1308') ?? stopsJson[1];
+const at = (s) => `${s.lon},${s.lat}`;
+const GPS_FIX = '-6.29512,36.53318'; // a position that is not a stop
+const OSRM_OK = JSON.stringify({ code: 'Ok', routes: [{ distance: 500, duration: 360, geometry: { coordinates: [[-6.29, 36.53], [-6.28, 36.54]] } }] });
+
+function recordSql(upstream) {
+  const cache = withTurso(upstream);
+  const turso = globalThis.fetch;
+  const statements = [];
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) statements.push(JSON.parse(init.body).requests[0].stmt.sql);
+    return turso(url, init);
+  };
+  return { cache, statements };
+}
+const route = (kind, from, to) => worker.fetch(new Request(`http://x/route/${kind}/${from};${to}`), TURSO_ENV);
+const countingOsrm = (counter) => async () => { counter.n += 1; return { ok: true, status: 200, text: async () => OSRM_OK }; };
+
+test('shouldNotReadOrWriteTheSharedCacheWhenTheRouteStartsAtAGpsPosition', async () => {
+  const counter = { n: 0 };
+  const { cache, statements } = recordSql(countingOsrm(counter));
+
+  const first = await route('foot', GPS_FIX, at(stopB));
+  const second = await route('foot', GPS_FIX, at(stopB));
+
+  assert.deepEqual([first.status, second.status], [200, 200]);
+  assert.equal(counter.n, 2, 'each request goes to the router: nothing was cached');
+  assert.deepEqual(statements.filter((sql) => sql.includes('proxy_cache')), [], 'no read, write or sweep of proxy_cache');
+  assert.equal(cache.size, 0);
+  assert.equal(first.headers.get('x-proxy-cache'), null);
+  assert.match(first.headers.get('cache-control'), /private/, 'shared caches must not keep a URL that contains the position');
+  assert.doesNotMatch(first.headers.get('cache-control'), /public/);
+});
+
+test('shouldStillUseTheSharedCacheWhenTheRouteStartsAtAKnownStop', async () => {
+  const counter = { n: 0 };
+  const { cache } = recordSql(countingOsrm(counter));
+
+  const first = await route('foot', at(stopA), at(stopB));
+  const second = await route('foot', at(stopA), at(stopB));
+
+  assert.equal(counter.n, 1, 'the second request is answered from the cache');
+  assert.deepEqual([first.headers.get('x-proxy-cache'), second.headers.get('x-proxy-cache')], ['miss', 'hit']);
+  assert.equal(cache.size, 1);
+  assert.match(first.headers.get('cache-control'), /public/);
+});
+
+test('shouldCacheBusHopsBetweenStopsAndSkipThemWhenTheOriginIsNotAStop', async () => {
+  const counter = { n: 0 };
+  const { cache } = recordSql(countingOsrm(counter));
+
+  await route('drive', at(stopA), at(stopB));
+  await route('drive', at(stopA), at(stopB));
+  assert.equal(counter.n, 1);
+  assert.equal(cache.size, 1);
+
+  await route('drive', GPS_FIX, at(stopB));
+  await route('drive', GPS_FIX, at(stopB));
+  assert.equal(counter.n, 3, 'two more router calls, nothing stored');
+  assert.equal(cache.size, 1);
+});
+
+test('shouldKeepTheUpstreamErrorContractWhenTheRouterFailsFromANonStopOrigin', async () => {
+  const { cache, statements } = recordSql(async () => ({ ok: false, status: 500, text: async () => '' }));
+
+  const res = await route('foot', GPS_FIX, at(stopB));
+
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).code, 'UPSTREAM_ERROR');
+  assert.deepEqual(statements.filter((sql) => sql.includes('proxy_cache')), []);
+  assert.equal(cache.size, 0);
+});
+
+test('shouldRejectCoordinatesOutsideTheServiceAreaBeforeAnyRouterCallWhenTheOriginIsNotAStop', async () => {
+  const { statements } = recordSql(async () => assert.fail('must not reach the router'));
+
+  const res = await route('foot', '2.35000,48.85000', at(stopB));
+
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).code, 'OUTSIDE_SERVICE_AREA');
+  assert.deepEqual(statements, []);
+});
+
+test('shouldReportNoCacheStatusWhenARouteFromANonStopOriginIsAnswered', async () => {
+  recordSql(countingOsrm({ n: 0 }));
+
+  await route('foot', GPS_FIX, at(stopB));
+
+  const event = ev('proxy_request').at(-1);
+  assert.deepEqual([event.kind, event.status, event.cache_status], ['foot', 200, 'none']);
 });

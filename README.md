@@ -8,7 +8,7 @@ La aplicación compara el tiempo de caminar con las próximas llegadas de bus y
 presenta una recomendación principal, alternativas y una explicación breve.
 
 - Usa llegadas realtime cuando el servicio municipal está disponible.
-- Usa horarios GTFS programados cuando realtime no está disponible.
+- Si el servicio municipal no responde, lo dice: no inventa horarios ni usa otra fuente. Ofrece el tiempo andando como información, no como recomendación.
 - Permite buscar un destino y usar el GPS como origen.
 - Está pensada para móvil y puede instalarse como PWA.
 
@@ -40,7 +40,6 @@ The public beta supports:
 - Walking.
 - Urban bus.
 - Realtime arrivals.
-- Scheduled GTFS fallback.
 - Destination search.
 - GPS-assisted origin selection.
 - PWA use on supported mobile browsers.
@@ -54,20 +53,19 @@ The beta does not support:
 - Multiple cities.
 - Other transport modes or operators.
 
-Scheduled arrivals are not realtime predictions and may be less precise.
+There is no scheduled fallback: when the municipal service does not answer, the app says it
+has no bus data and offers walking only as an option to weigh, never as a conclusion.
 
 ## Limitaciones
 
-- Arrival data depends on the municipal service and the checked-in GTFS
-  snapshot.
+- Arrival data depends on the municipal service alone; there is no second source.
 - Walking and routing estimates depend on the available geocoding and routing
   services.
 - The application does not require or provide user accounts.
 
 ## Datos y atribuciones
 
-Transit data comes from Cádiz's municipal realtime panel and the official NAP
-GTFS feed used to build the scheduled snapshot. Map, geocoding, and routing
+Transit data comes from Cádiz's municipal realtime panel. Map, geocoding, and routing
 providers must be credited in the deployed application according to their
 respective terms and licenses.
 

@@ -5,16 +5,17 @@
   "type": "module",
   "scripts": {
     "architecture:check": "node scripts/architecture-gate.mjs",
-    "ingest:gtfs": "node scripts/ingest-gtfs.mjs",
     "shell:hash": "node scripts/shell-hash.mjs",
     "release:check": "node scripts/release-check.mjs",
     "test": "npm run architecture:check && node --test",
+    "test:e2e": "node --test e2e/*.e2e.mjs",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
     "dev": "wrangler dev"
   },
   "license": "MIT",
   "devDependencies": {
+    "playwright": "^1.64.1",
     "typescript": "^7.0.2"
   }
 }
