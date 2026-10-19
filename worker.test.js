@@ -1,6 +1,6 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { __resetArrivalsCache } from './worker.js';
+import worker, { __resetArrivalsCache, __budget } from './worker.js';
 import stopsJson from './stops.json' with { type: 'json' };
 
 const originalFetch = globalThis.fetch;
@@ -248,8 +248,9 @@ function withTurso(upstream, { slotBusy = false, writeDelayMs = 0 } = {}) {
       // Circuit-breaker state: block:<upstream> = reopen time, blockdur:<upstream> = last window.
       result = { rows: slots.has(v[0]) ? [[{ type: 'integer', value: String(slots.get(v[0])) }]] : [] };
     } else if (sql.startsWith('UPDATE proxy_slot')) {
-      const [nextAt, name, now] = [Number(v[0]), v[1], Number(v[2])];
-      const claimed = slots.has(name) && slots.get(name) <= now;
+      const [nextAt, name, third] = [Number(v[0]), v[1], Number(v[2])];
+      // `next_at <= ?3` = atomic claim; `next_at = ?3` = owner-checked update; no condition = unconditional.
+      const claimed = slots.has(name) && (sql.includes('next_at <=') ? slots.get(name) <= third : sql.includes('next_at =') && sql.includes('AND') ? slots.get(name) === third : true);
       if (claimed) slots.set(name, nextAt);
       result = { rows: [], affected_row_count: claimed ? 1 : 0 };
     } else if (sql.startsWith('INSERT OR REPLACE INTO proxy_slot')) {
@@ -503,7 +504,8 @@ test('shouldLetExactlyOneProbeThroughWhenTheWindowEndsAndCloseOnSuccess', async 
 
     assert.equal(p.calls, 2, 'one original call plus one probe');
     assert.deepEqual(results.map((r) => r.status).sort(), [200, 503, 503]);
-    assert.equal(slots.size, 0, 'a successful probe clears the Turso state');
+    assert.deepEqual([...slots.keys()].filter((k) => !k.startsWith('lease:')), [], 'a successful probe clears the breaker state');
+    mock.timers.tick(1_100); // the 1 s separation after the probe
     assert.equal((await fetchRoute(FOOT)).status, 200, 'closed again');
   } finally {
     mock.timers.reset();
@@ -511,6 +513,9 @@ test('shouldLetExactlyOneProbeThroughWhenTheWindowEndsAndCloseOnSuccess', async 
 });
 
 test('shouldNotCloseTheBreakerWhenAnEarlierSuccessfulRequestCompletesAfterA429', async () => {
+  // The earlier request holds the lease, so a second call can only start once that lease expired
+  // (its Worker is gone or stuck): advance the clock past LEASE_MS before the 429 request.
+  mock.timers.enable({ apis: ['Date'], now: 40_000_000 });
   let releaseEarlier;
   let signalEarlier;
   const earlierPending = new Promise((resolve) => { releaseEarlier = resolve; });
@@ -525,15 +530,20 @@ test('shouldNotCloseTheBreakerWhenAnEarlierSuccessfulRequestCompletesAfterA429',
     return reply(429, 120);
   });
 
-  const earlier = fetchRoute(FOOT2);
-  await earlierEntered; // this request reached the provider before the breaker opened
-  assert.equal((await fetchRoute(FOOT)).status, 503);
-  releaseEarlier(reply(200));
-  assert.equal((await earlier).status, 200);
+  try {
+    const earlier = fetchRoute(FOOT2);
+    await earlierEntered; // this request reached the provider before the breaker opened
+    mock.timers.tick(11_000);
+    assert.equal((await fetchRoute(FOOT)).status, 503);
+    releaseEarlier(reply(200));
+    assert.equal((await earlier).status, 200);
 
-  const after = await fetchRoute(FOOT2);
-  await assertBlocked(after);
-  assert.equal(calls, 2, 'the late 200 cannot erase the active block');
+    const after = await fetchRoute(FOOT2);
+    await assertBlocked(after);
+    assert.equal(calls, 2, 'the late 200 cannot erase the active block');
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('shouldNotClearANewerBlockWhenARecoveryProbeCompletes', async () => {
@@ -565,6 +575,7 @@ test('shouldNotClearANewerBlockWhenARecoveryProbeCompletes', async () => {
 
     const earlier = fetchRoute(FOOT2);
     await earlierEntered;
+    mock.timers.tick(11_000); // the earlier request's lease expired (see the test above)
     assert.equal((await fetchRoute(FOOT)).status, 503);
     mock.timers.tick(31_000);
 
@@ -601,9 +612,10 @@ test('shouldNotOpenTheBreakerWhenTheUpstreamFailsWith5xxOrTimesOut', async () =>
   const p = provider(() => reply(503));
   const { slots } = { slots: withTurso(p.upstream).slots };
   assert.equal((await fetchRoute(FOOT)).status, 502);
+  for (const k of [...slots.keys()]) slots.delete(k); // end the 1 s separation
   assert.equal((await fetchRoute(FOOT2)).status, 502);
   assert.equal(p.calls, 2, 'a 5xx is not a block');
-  assert.equal(slots.size, 0);
+  assert.deepEqual([...slots.keys()].filter((k) => !k.startsWith('lease:')), []);
 });
 
 test('shouldFailClosedWhenTursoIsConfiguredButDownOnAnOsrmCall', async () => {
@@ -669,6 +681,282 @@ test('shouldLogOnlyTheUpstreamAndTheStateWhenTheBreakerOpensAndBlocks', async ()
   assert.deepEqual(Object.keys(opened).sort(), ['event', 'level', 'probe', 'state', 'status', 'upstream', 'window_s']);
   assert.deepEqual(Object.keys(blocked).sort(), ['event', 'level', 'state', 'upstream']);
   assert.doesNotMatch(lines.join('\n'), /-6\.3|36\.5|route\/foot/);
+});
+
+// --- Budget per upstream: one request in flight, >= 1 s between requests, no queue ---
+const leaseHeld = (slots, upstream, until = Date.now() + 60_000) => slots.set(`lease:${upstream}`, until);
+// Fetch wrapper that runs `hook(sql, args)` on every Turso statement before it is answered.
+function onTurso(hook) {
+  const inner = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith(TURSO_ENV.TURSO_DATABASE_URL)) {
+      const { sql, args } = JSON.parse(init.body).requests[0].stmt;
+      await hook(sql, args.map((a) => a.value));
+    }
+    return inner(url, init);
+  };
+}
+const isLeaseReserve = (sql, args) => sql.startsWith('INSERT INTO proxy_slot') && String(args[0]).startsWith('lease:');
+
+test('shouldCreateTheLeaseOnFirstUseAndReleaseItWithTheSeparationWhenCallingAnUpstream', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 50_000_000 });
+  try {
+    const p = provider(() => reply(200));
+    const { slots } = { slots: withTurso(p.upstream).slots };
+    assert.equal(slots.has('lease:osrm-foot'), false, 'no row before the first use');
+
+    assert.equal((await fetchRoute(FOOT)).status, 200);
+
+    assert.equal(slots.get('lease:osrm-foot'), 50_000_000 + 1_000, 'released with the 1 s separation');
+    assert.equal(slots.has('lease:osrm-drive'), false, 'budgets are independent per upstream');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldAnswerBusyWithoutCallingTheUpstreamWhenTheLeaseIsHeld', async () => {
+  const p = provider(() => reply(200));
+  const { slots } = { slots: withTurso(p.upstream).slots };
+  leaseHeld(slots, 'osrm-foot');
+
+  const res = await fetchRoute(FOOT);
+
+  await assertError(res, { status: 503, code: 'BUSY', retryAfter: '2' });
+  assert.equal(p.calls, 0);
+  assert.ok(ev('upstream_budget').some((e) => e.state === 'busy'));
+});
+
+test('shouldNeverHaveTwoActiveCallsAndAnswerBusyToTheRestWhenCallsAreConcurrent', async () => {
+  let active = 0;
+  let peak = 0;
+  let calls = 0;
+  let release;
+  const gateOpen = new Promise((resolve) => { release = resolve; });
+  withTurso(async () => {
+    calls++;
+    active++;
+    peak = Math.max(peak, active);
+    await gateOpen;
+    active--;
+    return reply(200);
+  });
+  const urls = [FOOT, FOOT2, 'http://x/route/foot/-6.32,36.50;-6.29,36.53', 'http://x/route/foot/-6.33,36.50;-6.29,36.54'];
+
+  const all = Promise.all(urls.map((u) => fetchRoute(u)));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  release();
+  const statuses = (await all).map((r) => r.status).sort();
+
+  assert.equal(peak, 1);
+  assert.equal(calls, 1);
+  assert.deepEqual(statuses, [200, 503, 503, 503]);
+});
+
+test('shouldKeepSeparateBudgetsWhenOneUpstreamIsBusyAndTheOtherIsFree', async () => {
+  const p = provider(() => reply(200));
+  const { slots } = { slots: withTurso(p.upstream).slots };
+  leaseHeld(slots, 'osrm-foot');
+
+  assert.equal((await fetchRoute(FOOT)).status, 503);
+  assert.equal((await fetchRoute(DRIVE)).status, 200);
+  assert.equal(p.calls, 1);
+});
+
+test('shouldWaitOneSecondFromTheEndOfTheCallWhenTheNextOneArrives', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 60_000_000 });
+  try {
+    const p = provider(() => reply(200));
+    withTurso(p.upstream);
+    assert.equal((await fetchRoute(FOOT)).status, 200);
+
+    assert.equal((await fetchRoute(FOOT2)).status, 503, 'inside the separation');
+    mock.timers.tick(999);
+    assert.equal((await fetchRoute(FOOT2)).status, 503, 'still inside');
+    mock.timers.tick(2);
+    assert.equal((await fetchRoute(FOOT2)).status, 200, 'separation over');
+    assert.equal(p.calls, 2);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldFailClosedWhenTheLeaseCannotBeReservedBecauseTursoFailsOnThatStatement', async () => {
+  const p = provider(() => reply(200));
+  withTurso(p.upstream);
+  onTurso((sql, args) => { if (isLeaseReserve(sql, args)) throw new TypeError('turso unreachable'); });
+
+  await assertError(await fetchRoute(FOOT), { status: 503, code: 'BUSY', retryAfter: '2' });
+  assert.equal(p.calls, 0);
+  assert.ok(ev('upstream_budget').some((e) => e.state === 'state_unavailable'));
+});
+
+test('shouldReleaseOnlyItsOwnLeaseWhenAnotherRequestReservedItAfterTheFirstExpired', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 70_000_000 });
+  try {
+    let release;
+    const gateOpen = new Promise((resolve) => { release = resolve; });
+    const p = provider(async () => { await gateOpen; return reply(200); });
+    const { slots } = { slots: withTurso(p.upstream).slots };
+
+    const first = fetchRoute(FOOT);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const another = 70_000_000 + 99_000;
+    slots.set('lease:osrm-foot', another); // expired and re-reserved by another instance
+    release();
+    await first;
+
+    assert.equal(slots.get('lease:osrm-foot'), another, 'a stale owner must not overwrite the new lease');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldAbortTheProviderCallAtTheCallTimeoutAndReleaseTheLeaseWhenItNeverAnswers', async () => {
+  let signal;
+  // Like a real fetch: it never answers, but it rejects as soon as its signal is aborted.
+  const hang = (url, init) => new Promise((_, reject) => {
+    signal = init.signal;
+    init.signal.addEventListener('abort', () => reject(init.signal.reason));
+  });
+  const { slots } = { slots: withTurso(hang).slots };
+
+  const started = performance.now(); // monotonic: the wall clock can drift against timers on some hosts
+  const res = await fetchRoute(FOOT);
+
+  assert.ok(signal instanceof AbortSignal);
+  assert.equal(signal.aborted, true, 'the outgoing request was really cancelled');
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed >= __budget.CALL_TIMEOUT_MS - 50 && elapsed < __budget.CALL_TIMEOUT_MS + 1_500, `at CALL_TIMEOUT_MS, not at 5 s (elapsed ${elapsed} ms)`);
+  await assertError(res, { status: 502, code: 'UPSTREAM_UNREACHABLE' });
+  assert.ok(slots.get('lease:osrm-foot') > Date.now() && slots.get('lease:osrm-foot') <= Date.now() + __budget.LEASE_GAP_MS, 'released in finally with the separation');
+});
+
+test('shouldNotCallAndShouldReleaseAtOnceWhenTheLatencyBeforeTheCallEatsTheMargin', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 80_000_000 });
+  try {
+    const p = provider(() => reply(200));
+    const { slots } = { slots: withTurso(p.upstream).slots };
+    onTurso((sql, args) => { if (isLeaseReserve(sql, args)) mock.timers.tick(__budget.MAX_PRE_CALL_MS + 500); }); // a very slow reserve
+
+    await assertError(await fetchRoute(FOOT), { status: 503, code: 'BUSY', retryAfter: '2' });
+
+    assert.equal(p.calls, 0);
+    assert.ok(slots.get('lease:osrm-foot') <= Date.now(), 'no call went out, so no separation is added');
+    assert.ok(ev('upstream_budget').some((e) => e.state === 'late'));
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldKeepTheLeaseInvariantWhenUsingTheDefinitiveValues', () => {
+  const { CALL_TIMEOUT_MS, TURSO_TIMEOUT_MS, SAFETY_MS, LEASE_MS } = __budget;
+  assert.deepEqual([CALL_TIMEOUT_MS, TURSO_TIMEOUT_MS, SAFETY_MS, LEASE_MS], [4_000, 1_500, 1_000, 10_000]);
+  assert.ok(CALL_TIMEOUT_MS + 2 * TURSO_TIMEOUT_MS + SAFETY_MS < LEASE_MS, `${CALL_TIMEOUT_MS + 2 * TURSO_TIMEOUT_MS + SAFETY_MS} must be < ${LEASE_MS}`);
+});
+
+test('shouldKeepOneActiveCallAndAnswerBusyWhenTursoIsNotConfiguredAndCallsAreConcurrent', async () => {
+  let active = 0;
+  let peak = 0;
+  let release;
+  const gateOpen = new Promise((resolve) => { release = resolve; });
+  globalThis.fetch = async () => {
+    active++;
+    peak = Math.max(peak, active);
+    await gateOpen;
+    active--;
+    return reply(200);
+  };
+  const all = Promise.all([FOOT, FOOT2].map((u) => worker.fetch(new Request(u))));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  release();
+
+  assert.deepEqual((await all).map((r) => r.status).sort(), [200, 503]);
+  assert.equal(peak, 1, 'local development is protected too');
+});
+
+// --- Budget and breaker together: the probe is claimed only once the lease is ours ---
+test('shouldNotClaimTheProbeAndShouldKeepItAvailableWhenTheBudgetIsBusyAtHalfOpen', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 90_000_000 });
+  try {
+    const { p, slots } = await trip(60);
+    const expired = slots.get('block:osrm-foot');
+    mock.timers.tick(61_000); // window over: half-open
+    p.answer = () => reply(200);
+    leaseHeld(slots, 'osrm-foot'); // another flow holds the budget
+
+    await assertError(await fetchRoute(FOOT2), { status: 503, code: 'BUSY', retryAfter: '2' });
+    assert.equal(slots.get('block:osrm-foot'), expired, 'the probe was not claimed, so it is not held for 10 s');
+    assert.equal(p.calls, 1);
+
+    slots.delete('lease:osrm-foot');
+    assert.equal((await fetchRoute(FOOT2)).status, 200, 'the very next request is the probe');
+    assert.equal(p.calls, 2);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldReleaseTheLeaseAtOnceWhenTheProbeIsLostAfterReservingTheBudget', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 100_000_000 });
+  try {
+    const { p, slots } = await trip(60);
+    mock.timers.tick(61_000);
+    onTurso((sql, args) => {
+      // another instance claims the probe between our read and our claim
+      if (isLeaseReserve(sql, args)) slots.set('block:osrm-foot', Date.now() + 10_000);
+    });
+
+    const res = await fetchRoute(FOOT2);
+
+    await assertBlocked(res);
+    assert.equal(p.calls, 1, 'the provider was not called');
+    assert.ok(slots.get('lease:osrm-foot') <= Date.now(), 'released at once, without the separation');
+    assert.equal(ev('upstream_blocked').at(-1).state, 'probe_taken');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldReturnAClaimedProbeConditionallyWhenItNeverReachesTheProvider', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 110_000_000 });
+  try {
+    const { p, slots } = await trip(60);
+    const expired = slots.get('block:osrm-foot');
+    mock.timers.tick(61_000);
+    let probeClaimed = false;
+    onTurso((sql, args) => {
+      if (isLeaseReserve(sql, args)) mock.timers.tick(__budget.MAX_PRE_CALL_MS + 500); // the guard will refuse the call
+      if (sql.startsWith('UPDATE proxy_slot') && sql.includes('next_at <=') && String(args[1]) === 'block:osrm-foot') probeClaimed = true;
+    });
+
+    await assertError(await fetchRoute(FOOT2), { status: 503, code: 'BUSY', retryAfter: '2' });
+
+    assert.equal(probeClaimed, true, 'the probe had been claimed before the guard refused');
+    assert.equal(p.calls, 1);
+    assert.equal(slots.get('block:osrm-foot'), expired, 'the unused probe went back to its previous value');
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('shouldNotTouchANewerBlockWhenAnUnusedProbeIsReturned', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 120_000_000 });
+  try {
+    const { slots } = await trip(60);
+    mock.timers.tick(61_000);
+    const newer = 120_000_000 + 500_000;
+    onTurso((sql, args) => {
+      if (isLeaseReserve(sql, args)) mock.timers.tick(__budget.MAX_PRE_CALL_MS + 500);
+      // a newer block written by another instance after our probe claim
+      if (sql.startsWith('UPDATE proxy_slot') && sql.includes('next_at <=') && String(args[1]) === 'block:osrm-foot') slots.set('block:osrm-foot', newer);
+    });
+
+    await fetchRoute(FOOT2);
+
+    assert.equal(slots.get('block:osrm-foot'), newer, 'the conditional return does not overwrite it');
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('shouldReport503WhenUnconfiguredAnd200WhenTursoAnswersOnProxyHealth', async () => {
@@ -1261,6 +1549,8 @@ function recordSql(upstream) {
   return { cache, statements };
 }
 const route = (kind, from, to) => worker.fetch(new Request(`http://x/route/${kind}/${from};${to}`), TURSO_ENV);
+// These tests are about caching, not the budget: end the 1 s separation between two calls to one upstream.
+const skipGap = (cache) => { for (const k of [...cache.slots.keys()]) if (k.startsWith('lease:')) cache.slots.delete(k); };
 const countingOsrm = (counter) => async () => { counter.n += 1; return { ok: true, status: 200, text: async () => OSRM_OK }; };
 
 test('shouldNotReadOrWriteTheSharedCacheWhenTheRouteStartsAtAGpsPosition', async () => {
@@ -1268,6 +1558,7 @@ test('shouldNotReadOrWriteTheSharedCacheWhenTheRouteStartsAtAGpsPosition', async
   const { cache, statements } = recordSql(countingOsrm(counter));
 
   const first = await route('foot', GPS_FIX, at(stopB));
+  skipGap(cache);
   const second = await route('foot', GPS_FIX, at(stopB));
 
   assert.deepEqual([first.status, second.status], [200, 200]);
@@ -1284,6 +1575,7 @@ test('shouldStillUseTheSharedCacheWhenTheRouteStartsAtAKnownStop', async () => {
   const { cache } = recordSql(countingOsrm(counter));
 
   const first = await route('foot', at(stopA), at(stopB));
+  skipGap(cache);
   const second = await route('foot', at(stopA), at(stopB));
 
   assert.equal(counter.n, 1, 'the second request is answered from the cache');
@@ -1297,11 +1589,14 @@ test('shouldCacheBusHopsBetweenStopsAndSkipThemWhenTheOriginIsNotAStop', async (
   const { cache } = recordSql(countingOsrm(counter));
 
   await route('drive', at(stopA), at(stopB));
+  skipGap(cache);
   await route('drive', at(stopA), at(stopB));
   assert.equal(counter.n, 1);
   assert.equal(cache.size, 1);
 
+  skipGap(cache);
   await route('drive', GPS_FIX, at(stopB));
+  skipGap(cache);
   await route('drive', GPS_FIX, at(stopB));
   assert.equal(counter.n, 3, 'two more router calls, nothing stored');
   assert.equal(cache.size, 1);

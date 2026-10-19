@@ -15,6 +15,7 @@ Retention is 7 days on Workers Paid (3 on Free), so a 7-day baseline needs Paid.
 | `proxy_request` | `kind` (`geocode`/`foot`/`drive`), `status`, `cache_status`, `duration_ms` | One geocode/route answer; `cache_status` is `none` for a route whose origin is not a known stop (answered without the shared cache) |
 | `arrivals_rejected` | `reason` (`unknown_stop`) | A well-formed stop id that is not in `stops.json` (404, no cache/lock/panel access). The rejected id is never logged |
 | `upstream_breaker` | `upstream` (`nominatim`/`osrm-foot`/`osrm-drive`), `state` (`opened`/`closed`), `status` (403/429 on `opened`), `window_s`, `probe` | A circuit breaker changed state after a 403/429 or a recovery probe |
+| `upstream_budget` | `upstream` (`osrm-foot`/`osrm-drive`), `state` (`busy`/`state_unavailable`/`late`) | A call was refused because the upstream's budget (one request in flight, ≥ 1 s apart) is taken, its state could not be read, or the latency before the call used up the lease margin. Always answered `503 BUSY` at once |
 | `upstream_blocked` | `upstream`, `state` (`open`/`probe_taken`/`state_unavailable`) | A call was refused without reaching the provider (blocked window, another request holds the probe, or Turso could not say) |
 | `rate_limited` | `kind` (`api`/`geocode`/`route`) | A 429 |
 | `arrivals_degraded` | `op` (`lock`), `reason`, `stop_id` | Turso unavailable at lock time; no shared cache/lock |
@@ -33,7 +34,8 @@ Absent fields mean *unknown* (e.g. `status` is missing on timeouts), never 0 or 
 5. **Failures** — `Count` of each: `arrivals_degraded`, `turso_error` (group by `op`),
    `panel_request` with `ok = false`, `arrivals_request` with `status >= 500` or `= 503`, `rate_limited`.
 6. **Proxy** — `event = proxy_request`, group by `kind` and `cache_status`, `Count` and `P50/P95` of `duration_ms`.
-7. **Provider blocks** — `Count` of `upstream_breaker` with `state = opened` and of `upstream_blocked`, grouped by `upstream`. Any `opened` means a provider limited us: check the request rate (`proxy_request` with `cache_status` `miss`/`none`).
+7. **Budget** — `Count` of `upstream_budget` by `upstream` and `state`: `busy` is contention (the client degrades), `state_unavailable` is Turso trouble, `late` should be ~0.
+8. **Provider blocks** — `Count` of `upstream_breaker` with `state = opened` and of `upstream_blocked`, grouped by `upstream`. Any `opened` means a provider limited us: check the request rate (`proxy_request` with `cache_status` `miss`/`none`).
 
 Zero results in a window means "none observed", not "cannot happen".
 
